@@ -20,7 +20,10 @@ dotenv.config();
 connectDB();
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.ALLOW_ORIGIN,
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -34,7 +37,6 @@ app.use("/api/message", messageRoutes);
 app.use("/api/job", jobRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
-
 
 
 app.post("/api/link-preview", async (req, res) => {
@@ -61,6 +63,7 @@ const server = app.listen(
   PORT,
   console.log(`Server running on PORT ${PORT}...`.yellow.bold)
 );
+console.log({ server })
 initializeSocket(server);
 
 const io = getIo()
