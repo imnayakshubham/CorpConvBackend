@@ -4,7 +4,7 @@ function initializeSocket(server) {
     io = require("socket.io")(server, {
         pingTimeout: 60000,
         cors: {
-            origin: "http://localhost:3001",
+            origin: process.env.ALLOW_ORIGIN,
             // credentials: true,
         },
     });

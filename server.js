@@ -39,9 +39,6 @@ app.use("/api/comment", commentRoutes);
 
 app.post("/api/link-preview", async (req, res) => {
   try {
-
-
-
     //Send object as response
     res.status(200).json({ preview });
   } catch (error) {
