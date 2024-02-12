@@ -22,6 +22,8 @@ const app = express();
 
 app.use(cors({
   origin: process.env.ALLOW_ORIGIN,
+  methods: ["GET", "POST"],
+  credentials: true
 }));
 
 app.use(express.json());

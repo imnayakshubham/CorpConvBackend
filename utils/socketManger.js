@@ -5,7 +5,8 @@ function initializeSocket(server) {
         pingTimeout: 60000,
         cors: {
             origin: process.env.ALLOW_ORIGIN,
-            // credentials: true,
+            methods: ["GET", "POST"],
+            credentials: true,
         },
     });
 
