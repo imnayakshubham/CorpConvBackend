@@ -38,7 +38,6 @@ const createJob = asyncHandler(async (req, res) => {
     try {
 
         const jobPostAlreadyExists = await Job.findOne({ "job_data.job_post_link": req.body.job_post_link });
-        console.log(jobPostAlreadyExists)
 
         if (jobPostAlreadyExists) {
             return res.status(400).json({
@@ -211,7 +210,6 @@ const likeDislikeJob = asyncHandler(async (req, res) => {
 
             } else {
                 const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $set: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
-                console.log(jobData)
                 io.emit('listen_job_like', jobData)
                 if (jobData) {
                     return res.status(200).json({

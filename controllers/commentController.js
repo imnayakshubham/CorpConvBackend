@@ -125,8 +125,6 @@ const likeComment = async (req, res) => {
                         })
                     }
                 }
-
-                console.log("something here", commentData)
             } else {
                 const commentData = await Comment.findById(comment_id)
                 let updatedData = null
@@ -197,10 +195,7 @@ const deleteComment = async (req, res) => {
                 message: "Comment deleted successfully"
             })
         }
-
-
-        console.log({ updatedComment })
-        res.json({ message: 'Comment deleted successfully' });
+        return res.json({ message: 'Comment deleted successfully' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });

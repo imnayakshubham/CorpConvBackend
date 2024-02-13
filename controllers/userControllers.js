@@ -317,9 +317,6 @@ const sendFollowRequest = async (req, res) => {
       }
     }
 
-    console.log(senderId, receiverId,)
-
-
     // const result = await User.findById(senderId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: [] });
