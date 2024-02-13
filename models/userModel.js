@@ -57,7 +57,7 @@ const userSchema = mongoose.Schema({
   },
   user_phone_number: {
     type: Number,
-    required: true,
+    required: false,
     default: null
   },
   is_anonymous: {

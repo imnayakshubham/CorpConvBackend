@@ -106,7 +106,7 @@ const authUser = async (req, res) => {
         is_email_verified: domain !== "gmail" ? true : false,
         is_anonymous: true,
         user_current_company_name,
-        user_phone_number: keepOnlyNumbers(req.body.user_phone_number),
+        user_phone_number: req.body.user_phone_number ? keepOnlyNumbers(req.body.user_phone_number) : null,
         user_company_id: companyId,
         user_past_company_history: [companyId],
       }
