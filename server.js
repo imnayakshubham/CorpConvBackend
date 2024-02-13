@@ -29,10 +29,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// app.get("/", (req, res) => {
-//   res.send("API Running!");
-// });
-
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -40,19 +36,8 @@ app.use("/api/job", jobRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
 
-
-app.post("/api/link-preview", async (req, res) => {
-  try {
-    //Send object as response
-    res.status(200).json({ preview });
-  } catch (error) {
-    console.log(error)
-    res
-      .status(500)
-      .json(
-        "Something went wrong, please check your internet connection and also the url you provided"
-      );
-  }
+app.get("/", (req, res) => {
+  res.send(`Hello World!`);
 });
 
 
