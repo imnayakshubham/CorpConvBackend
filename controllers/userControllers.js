@@ -218,13 +218,13 @@ const fetchUsers = async (req, res) => {
     }, {});
 
     if (payload.type === "all_users") {
-      const currentUser = await User.findOne({ _id: payload?._id })
-        .select("followings pending_followings followers");
+      const currentUser = await User.findOne({ _id: payload?._id }).select("followings pending_followings followers");
+
       const ignoredIds = [
         ...(currentUser?.followings ?? []),
         ...(currentUser?.pending_followings ?? []),
         ...(currentUser?.followers ?? []),
-        payload?._id
+        ...([payload?._id] ?? []),
       ];
 
       const usersList = await User.find(
@@ -238,7 +238,7 @@ const fetchUsers = async (req, res) => {
         message: "Users  Fetched SuccessFully", status: "Success", result: fetchUsersPayloadFormatter(payload.type, usersList)
       })
     } else if (payload.type === "followers") {
-      const followers = await User.findOne({ _id: payload._id })
+      const followers = await User.findOne({ _id: payload?._id })
         .select({ [payload.type]: 1, _id: 0 })
         .populate({
           path: payload.type,
@@ -248,7 +248,7 @@ const fetchUsers = async (req, res) => {
 
     } else if (payload.type === "pending_followings") {
 
-      const pendingFollowers = await User.findOne({ _id: payload._id })
+      const pendingFollowers = await User.findOne({ _id: payload?._id })
         .select({ [payload.type]: 1, _id: 0 })
         .populate({
           path: payload.type,
@@ -257,7 +257,7 @@ const fetchUsers = async (req, res) => {
 
       return res.status(200).json({ message: "Invitations Fetched SuccessFully", status: "Success", result: fetchUsersPayloadFormatter(payload.type, pendingFollowers?.[payload.type]) })
     } else if (payload.type === "followings") {
-      const followings = await User.findOne({ _id: payload._id })
+      const followings = await User.findOne({ _id: payload?._id })
         .select({ [payload.type]: 1, _id: 0 })
         .populate({
           path: payload.type,
@@ -267,9 +267,6 @@ const fetchUsers = async (req, res) => {
     } else {
       return res.status(200).json({ message: "Invalid Operations", status: "Failed", result: fetchUsersPayloadFormatter(payload.type, []) })
     }
-
-
-
 
   } catch (error) {
     console.log({ error })
