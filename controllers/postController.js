@@ -217,4 +217,33 @@ const deletePost = async (req, res) => {
     }
 }
 
-module.exports = { createPost, fetchPosts, upVotePost, updatePost, deletePost };
+const getPost = async (req, res) => {
+    try {
+        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified").populate({
+            path: 'comments',
+            match: { access: { $ne: false } },
+        });
+        if (post) {
+            await populateChildComments(post.comments)
+            return res.status(200).json({
+                status: 'Success',
+                data: post,
+                message: "Post fetched successfully"
+            })
+        } else {
+            return res.status(400).json({
+                status: 'Failed',
+                message: "Post not found",
+                data: null
+            })
+        }
+    } catch (error) {
+        return res.status(500).json({
+            data: null,
+            status: 'Failed',
+            message: "Something went wrong while fetching post"
+        })
+    }
+}
+
+module.exports = { createPost, fetchPosts, upVotePost, updatePost, deletePost, getPost };

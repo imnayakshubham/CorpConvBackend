@@ -100,10 +100,10 @@ const authUser = async (req, res) => {
         })
         await company.save()
       }
-      const user_current_company_name = toTitleCase(domain)
+      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Unknown"
       const data = {
         ...req.body,
-        is_email_verified: domain !== "gmail" ? true : false,
+        is_email_verified: !["example", "gmail", "outlook"].includes(domain) ? true : false,
         is_anonymous: true,
         user_current_company_name,
         user_phone_number: req.body.user_phone_number ? keepOnlyNumbers(req.body.user_phone_number) : null,
