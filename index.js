@@ -23,7 +23,8 @@ const app = express();
 app.use(cors({
   origin: process.env.ALLOW_ORIGIN,
   methods: ["GET", "POST"],
-  credentials: true
+  credentials: true,
+  transports: ['websocket']
 }));
 
 app.use(express.json());
