@@ -67,7 +67,12 @@ const responseFormatterForAuth = (result) => {
     token: result?.token,
     user_current_company_name: result.user_current_company_name,
     user_email_id: result.user_email_id,
-    _id: result._id
+    _id: result._id,
+    secondary_email_id: result.secondary_email_id,
+    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
+    public_user_name: result.public_user_name,
+    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
+    user_public_profile_pic: result.user_public_profile_pic,
   }
 }
 
@@ -78,15 +83,21 @@ const authUser = async (req, res) => {
     if (!user_email_id) {
       return res.status(200).json({ message: "Please Fill all the details", status: "Failed" });
     }
+    const userData = await User.findOne({
+      $or: [
+        { user_email_id },
+        { secondary_email_id: user_email_id }
+      ]
+    });
 
-    const emailexists = await User.findOne({ user_email_id });
-
-    if (emailexists) {
+    if (userData) {
       const result = {
-        ...emailexists._doc,
-        token: generateToken(emailexists._id)
+        ...userData._doc,
+        token: generateToken(userData._id)
       }
+
       return res.status(200).json({ message: "email already exists!", status: "Success", result: responseFormatterForAuth(result) });
+
     } else {
       const emailSplit = user_email_id.split("@")
       const domain = emailSplit[1].split(".")[0]
@@ -100,7 +111,7 @@ const authUser = async (req, res) => {
         })
         await company.save()
       }
-      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Unknown"
+      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Somewhere"
       const data = {
         ...req.body,
         is_email_verified: !["example", "gmail", "outlook"].includes(domain) ? true : false,
@@ -109,6 +120,7 @@ const authUser = async (req, res) => {
         user_phone_number: req.body.user_phone_number ? keepOnlyNumbers(req.body.user_phone_number) : null,
         user_company_id: companyId,
         user_past_company_history: [companyId],
+        primary_email_domain: emailSplit[1],
       }
       const user = await new User(data);
       const result = await user.save();
@@ -191,7 +203,7 @@ const getUserInfo = async (req, res) => {
         console.log(user)
         return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
       } else {
-        return res.status(200).json({ message: "No User Exist.", status: "Failed", result: null })
+        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
       }
     }
   } catch (error) {
