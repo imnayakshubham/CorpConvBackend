@@ -8,13 +8,16 @@ const protect = asyncHandler(async (req, res, next) => {
   if (!!token) {
     try {
 
-      //decodes token id
       const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
       req.user = await User.findOne({ _id: decoded.id })
       next();
     } catch (error) {
-      res.status(401);
-      throw new Error("Not authorized, token failed");
+
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
+      }
+
+      res.status(400).send({ error: 'Invalid token' });
     }
   }
 

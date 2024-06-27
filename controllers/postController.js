@@ -93,16 +93,20 @@ const fetchPosts = async (req, res) => {
             query = { posted_by: user_id };
         }
 
-        const posts = await Post.find(query).sort({ createdAt: -1 }).populate("posted_by", "public_user_name is_email_verified").populate({
-            path: 'comments comments.commented_by',
-            match: { access: { $ne: false } },
-        });
+        const posts = await Post.find(query)
+            .sort({ createdAt: -1 })
+            .populate("posted_by", "public_user_name is_email_verified")
+            .populate({
+                path: 'comments',
+                match: { access: { $ne: false } },
+                populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
+            }).maxTimeMS(15000).lean()
 
 
-        for (const post of posts) {
-            await populateChildComments(post.comments);
-        }
-        if (posts) {
+        // for (const post of posts) {
+        //     await populateChildComments(post.comments);
+        // }
+        if (!!posts.length) {
             return res.status(200).json({
                 status: 'Success',
                 data: posts,

@@ -203,4 +203,40 @@ const deleteComment = async (req, res) => {
 }
 
 
-module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment };
+const getCommentReplies = async (req, res) => {
+    try {
+        const payload = req.params
+
+        const comment = await Comment.find({ post_id: payload.post_id, _id: payload.comment_id })
+        console.log("before", comment)
+
+        await populateChildComments(comment)
+
+
+
+        if (comment[0]) {
+            return res.status(200).json({
+                status: 'Success',
+                message: 'Comment fetched successfully',
+                data: comment[0],
+            });
+        } else {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'Comment fetched Failed',
+                data: null,
+            });
+        }
+
+
+
+    } catch (error) {
+
+        console.error(error);
+        return res.status(500).json({ message: 'Internal Server Error' });
+
+    }
+}
+
+
+module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies };
