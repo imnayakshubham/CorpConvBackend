@@ -9,12 +9,15 @@ const messageRoutes = require("./routes/messageRoutes");
 const postRoutes = require("./routes/postRoutes");
 const commentRoutes = require("./routes/commentRoutes");
 
+const questionRoutes = require("./routes/questionRoutes");
+
 
 const cors = require("cors");
 
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const path = require("path");
 const { initializeSocket, getIo } = require("./utils/socketManger");
+const questionModel = require("./models/questionModel");
 
 dotenv.config();
 connectDB();
@@ -22,7 +25,7 @@ const app = express();
 
 app.use(cors({
   origin: process.env.ALLOW_ORIGIN,
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "DELETE"],
   credentials: true,
   transports: ['websocket']
 }));
@@ -36,6 +39,7 @@ app.use("/api/message", messageRoutes);
 app.use("/api/job", jobRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
+app.use("/api/question", questionRoutes);
 
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
@@ -64,6 +68,36 @@ io.on("connection", (socket) => {
       socket.emit("connected");
     }
   });
+
+  socket.on("get_question", async (question_id) => {
+    let question = null
+    try {
+      question = await questionModel.findOne({ _id: question_id, access: true });
+      if (question) {
+        question = {
+          status: 'Success',
+          data: question,
+          message: "Question Fetched successfully"
+        }
+      } else {
+        question = {
+          status: 'Failed',
+          message: "Question does not exist.",
+          data: null
+        }
+      }
+    } catch (error) {
+      question = {
+        data: null,
+        status: 'Failed',
+        message: "Failed to Fetch Question"
+      }
+    }
+
+    socket.emit("send_question", question)
+
+
+  })
 
   socket.on("current_chat", (chatId) => {
     currentActiveChat = chatId
