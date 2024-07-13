@@ -1,20 +1,20 @@
 const mongoose = require('mongoose');
 
 const answerSchema = new mongoose.Schema({
-    answers: {
+    answer: {
         type: String,
         required: true,
     },
     answered_by: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
+        default: null
     },
     answered_at: {
         type: Date,
-        default: Date.now,
+        default: Date.now(),
     },
-    answer_id: {
+    question_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Question',
         required: true,
@@ -31,4 +31,4 @@ const answerSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Answer', answerSchema);
+module.exports = mongoose.model('AnswerToQuestion', answerSchema);

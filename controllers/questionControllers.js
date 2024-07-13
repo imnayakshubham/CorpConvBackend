@@ -33,12 +33,10 @@ const createquestion = async (req, res) => {
 const getquestions = async (req, res) => {
     try {
         const payload = req.body
-        console.log({ payload })
         const updatedPayload = payload.type === "your-questions" ? {
             question_posted_by: payload.user_id
         } : {}
         const allQuestions = await QuestionModel.find({ ...updatedPayload, access: true }).populate("question_posted_by", "public_user_name user_public_profile_pic")
-        console.log(allQuestions)
         if (!!allQuestions.length) {
             return res.status(201).json({
                 status: 'Success',
@@ -66,9 +64,7 @@ const getquestions = async (req, res) => {
 const deletequestion = async (req, res) => {
     try {
         const _id = req.params.id
-        console.log({ _id })
         const updatedQuestion = await QuestionModel.findByIdAndUpdate(_id, { access: false }, { new: true })
-        console.log(updatedQuestion)
         if (updatedQuestion) {
             return res.status(201).json({
                 status: 'Success',
@@ -84,7 +80,6 @@ const deletequestion = async (req, res) => {
         }
     } catch (error) {
 
-        console.log({ error })
         return res.status(500).json({
             data: null,
             status: 'Failed',

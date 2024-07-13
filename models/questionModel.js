@@ -16,10 +16,10 @@ const questionSchema = new mongoose.Schema({
         required: true,
         default: "What do you think about ...?"
     },
-    answers: {
+    answers: [{
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-    },
+        ref: 'AnswerToQuestion',
+    }],
     access: {
         type: Boolean,
         default: true

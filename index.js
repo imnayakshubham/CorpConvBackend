@@ -18,6 +18,8 @@ const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const path = require("path");
 const { initializeSocket, getIo } = require("./utils/socketManger");
 const questionModel = require("./models/questionModel");
+const questionAnswerModel = require("./models/questionAnswerModel");
+const { default: mongoose } = require("mongoose");
 
 dotenv.config();
 connectDB();
@@ -45,6 +47,10 @@ app.get("/", (req, res) => {
   res.send(`Hello World!`);
 });
 
+function generateRandomUserId() {
+  return new mongoose.Types.ObjectId();
+}
+
 
 // Error Handling middlewares
 app.use(notFound);
@@ -70,9 +76,20 @@ io.on("connection", (socket) => {
   });
 
   socket.on("get_question", async (question_id) => {
+    socket.join(question_id)
     let question = null
     try {
       question = await questionModel.findOne({ _id: question_id, access: true });
+      question = await question.populate({
+        path: 'answers',
+        match: { access: true },
+        populate: {
+          path: 'answered_by',
+          model: 'User',
+          select: "public_user_name user_public_profile_pic"
+        }
+      });
+
       if (question) {
         question = {
           status: 'Success',
@@ -87,6 +104,7 @@ io.on("connection", (socket) => {
         }
       }
     } catch (error) {
+      console.log(error)
       question = {
         data: null,
         status: 'Failed',
@@ -95,9 +113,33 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("send_question", question)
-
-
   })
+
+  socket.on("delete_answer", async (payload) => {
+    try {
+      let updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
+      if (updatedAnswer) {
+        updatedAnswer = {
+          status: 'Success',
+          data: null,
+          message: "Answers Deleted successfully"
+        }
+      } else {
+        updatedAnswer = {
+          status: 'Failed',
+          message: "Failed to Delete a Answers",
+          data: null
+        }
+      }
+    } catch (error) {
+      updatedAnswer = {
+        data: null,
+        status: 'Failed',
+        message: "Something went Wrong"
+      }
+      io.to(payload.question_id).emit("delete_answer_response", updatedAnswer)
+    }
+  });
 
   socket.on("current_chat", (chatId) => {
     currentActiveChat = chatId
@@ -141,6 +183,137 @@ io.on("connection", (socket) => {
       socket.in(user._id).emit("message recieved", { ...newMessageRecieved, readBy });
     });
   });
+
+  socket.on("send_answer_for_question", async (payload) => {
+    if (payload.question_id) {
+      let answer = null
+      const answerData = {
+        answered_by: payload.user_id,
+        answer: payload.answer?.trim(),
+        question_id: payload.question_id
+      }
+
+      try {
+        let answerToAquestion = await questionAnswerModel.create(answerData);
+        if (answerToAquestion) {
+          if (!!answerToAquestion.answered_by) {
+            const data = await answerToAquestion.populate({
+              path: "answered_by",
+              select: "public_user_name user_public_profile_pic"
+            })
+          } else {
+            answerToAquestion = answerToAquestion.toObject();
+
+            answerToAquestion = {
+              ...answerToAquestion,
+              answered_by: {
+                public_user_name: "Anonymous User",
+                user_public_profile_pic: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+              }
+            }
+          }
+          await questionModel.findByIdAndUpdate(payload.question_id, {
+            $addToSet: { answers: answerToAquestion._id }
+          });
+
+          answer = {
+            status: 'Success',
+            data: answerToAquestion,
+            message: "Question Saved successfully"
+          }
+        } else {
+          answer = {
+            status: 'Failed',
+            message: "Failed to save the answer.",
+            data: null
+          }
+        }
+      } catch (error) {
+        console.log({ error })
+        answer = {
+          data: null,
+          status: 'Failed',
+          message: "Something Went Wrong"
+        }
+      }
+      io.to(payload.question_id).emit('get_answer_for_question', answer);
+    }
+
+  })
+
+  socket.on("update_question_title", async (payload) => {
+    let updatedQuestion = null
+    try {
+      updatedQuestion = await questionModel.findByIdAndUpdate(payload.question_id, { question: payload.question }, { new: true })
+
+      if (updatedQuestion) {
+        updatedQuestion = {
+          status: 'Success',
+          data: updatedQuestion,
+          message: "Question Updated successfully"
+        }
+      } else {
+        updatedQuestion = {
+          status: 'Failed',
+          message: "Failed to Updated a Question",
+          data: null
+        }
+      }
+    } catch (error) {
+      console.log(error)
+      updatedQuestion = {
+        data: null,
+        status: 'Failed',
+        message: "Something went Wrong"
+      }
+    }
+    io.to(payload.question_id).emit("update_title_response", updatedQuestion)
+  });
+
+
+  socket.on("update_question_likes", async (payload) => {
+    let updatedQuestion = null
+    try {
+      const question = await questionModel.findById(payload.question_id);
+      if (!question) {
+        updatedQuestion = {
+          status: 'Failed',
+          data: null,
+          message: "Question Like Update Failed"
+        }
+      }
+      const userId = payload.user_id ?? generateRandomUserId()
+
+      // Check if user has already liked the answer
+      const userIndex = question.liked_by.indexOf(userId);
+      if (userIndex === -1) {
+        // User hasn't liked the question, add like
+        question.liked_by.push(userId);
+      } else {
+        // User has already liked the question, remove like
+        question.liked_by.splice(userIndex, 1);
+      }
+
+      // Save the updated question
+      updatedQuestion = await question.save();
+
+      updatedQuestion = {
+        status: 'Success',
+        data: updatedQuestion,
+        message: "Question Like Updated successfully"
+      }
+
+    } catch (error) {
+      console.error("Error liking/unliking answer:", error);
+      updatedQuestion = {
+        status: 'Failed',
+        data: null,
+        message: "Error liking/unliking answer"
+      }
+    }
+    io.to(payload.question_id).emit("update_likes_response", updatedQuestion)
+
+  })
 
   socket.off("setup", () => {
     console.log("USER DISCONNECTED");
