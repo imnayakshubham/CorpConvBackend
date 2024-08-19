@@ -37,22 +37,13 @@ const getquestions = async (req, res) => {
             question_posted_by: payload.user_id
         } : {}
         const allQuestions = await QuestionModel.find({ ...updatedPayload, access: true }).populate("question_posted_by", "public_user_name user_public_profile_pic")
-        if (!!allQuestions.length) {
-            return res.status(201).json({
-                status: 'Success',
-                data: { [payload.type]: allQuestions },
-                message: "Questions Fetched successfully"
-            })
-        } else {
-            return res.status(400).json({
-                status: 'Failed',
-                message: "Failed to Fetch a Questions",
-                data: { [payload.type]: allQuestions }
-            })
-        }
+        return res.status(201).json({
+            status: 'Success',
+            data: { [payload.type]: allQuestions },
+            message: "Questions Fetched successfully"
+        })
     } catch (error) {
 
-        console.log({ error })
         return res.status(500).json({
             data: null,
             status: 'Failed',

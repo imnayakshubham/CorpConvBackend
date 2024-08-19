@@ -117,9 +117,7 @@ const userSchema = mongoose.Schema({
     type: String,
     trim: true,
     lowercase: true,
-    unique: true,
     default: null,
-    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please fill a valid email address']
   },
   is_secondary_email_id_verified: {
     default: false,
@@ -132,7 +130,6 @@ const userSchema = mongoose.Schema({
   },
   secondary_email_domain: {
     type: String,
-    required: true,
     trim: true,
   }
 }, { timestaps: true });
