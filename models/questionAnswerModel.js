@@ -12,7 +12,7 @@ const answerSchema = new mongoose.Schema({
     },
     answered_at: {
         type: Date,
-        default: Date.now(),
+        default: Date.now,
     },
     question_id: {
         type: mongoose.Schema.Types.ObjectId,
@@ -25,6 +25,10 @@ const answerSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    answer_updated_at: {
+        type: Date,
+        default: null,
+    },
     access: {
         type: Boolean,
         default: true

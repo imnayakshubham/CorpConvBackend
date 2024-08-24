@@ -116,12 +116,13 @@ io.on("connection", (socket) => {
   })
 
   socket.on("delete_answer", async (payload) => {
+    let updatedAnswer = null
     try {
-      let updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
+      updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
       if (updatedAnswer) {
         updatedAnswer = {
           status: 'Success',
-          data: null,
+          data: updatedAnswer,
           message: "Answers Deleted successfully"
         }
       } else {
@@ -137,8 +138,8 @@ io.on("connection", (socket) => {
         status: 'Failed',
         message: "Something went Wrong"
       }
-      io.to(payload.question_id).emit("delete_answer_response", updatedAnswer)
     }
+    io.to(payload.question_id).emit("delete_answer_response", updatedAnswer)
   });
 
   socket.on("current_chat", (chatId) => {
