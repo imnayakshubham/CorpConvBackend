@@ -86,7 +86,7 @@ const updatePost = async (req, res) => {
 
 const fetchPosts = async (req, res) => {
     try {
-        const user_id = req.query.user_id;
+        const user_id = req.query?.user_id ?? null;
         let query = {};
 
         if (user_id) {
