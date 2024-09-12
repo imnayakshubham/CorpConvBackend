@@ -5,6 +5,8 @@ const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require(
 const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
+const getRedisInstance = require("../redisClient/redisClient.js");
+
 
 
 const allUsers = asyncHandler(async (req, res) => {
@@ -166,6 +168,7 @@ const updateUserProfile = async (req, res) => {
       return res.status(200).json({ message: "No User Exist", status: "Failed", })
     }
 
+
     const updateOperation = {
       $set: {
         ...req.body,
@@ -173,6 +176,9 @@ const updateUserProfile = async (req, res) => {
       },
     };
 
+    const redis = getRedisInstance()
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
+    const result = await redis.del(userInfoRedisKey);
     const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
     if (updatedData) {
       return res.status(200).json({
@@ -198,12 +204,21 @@ const getUserInfo = async (req, res) => {
         return acc;
       }, {});
       const id = userId?.id
-      const user = await User.findOne({ _id: id, access: true }, { ...projection })
-      if (user) {
-        console.log(user)
-        return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
-      } else {
-        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${id}`
+      const redis = getRedisInstance()
+      const cachedData = await redis.get(userInfoRedisKey)
+      const parsedCachedData = JSON.parse(cachedData)
+
+      if (parsedCachedData) {
+        return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
+      } else if (parsedCachedData === null) {
+        const user = await User.findOne({ _id: id, access: true }, { ...projection })
+        await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600); //Cached for 6 hours
+        if (user) {
+          return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
+        } else {
+          return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
+        }
       }
     }
   } catch (error) {
@@ -318,7 +333,6 @@ const sendFollowRequest = async (req, res) => {
         const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
         if (notification) {
           const io = getIo()
-          console.log(notification)
           io.to(receiverId).emit('follow_request_send_notication', notification);
 
         }

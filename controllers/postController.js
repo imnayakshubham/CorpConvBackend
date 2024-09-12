@@ -1,4 +1,5 @@
 const Post = require("../models/postModel");
+const getRedisInstance = require("../redisClient/redisClient");
 const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
 
@@ -81,7 +82,6 @@ const updatePost = async (req, res) => {
         })
 
     }
-
 }
 
 const fetchPosts = async (req, res) => {
@@ -93,25 +93,37 @@ const fetchPosts = async (req, res) => {
             query = { posted_by: user_id };
         }
 
-        const posts = await Post.find(query)
-            .sort({ createdAt: -1 })
-            .populate("posted_by", "public_user_name is_email_verified")
-            .populate({
-                path: 'comments',
-                match: { access: { $ne: false } },
-                populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
-            }).maxTimeMS(15000).lean()
+        const redis = getRedisInstance()
+        const postedByRedisKey = user_id ? `${process.env.APP_ENV}_posted_by_${user_id}` : `${process.env.APP_ENV}_posts`
+        const cachedData = await redis.get(postedByRedisKey)
+        const parsedCachedData = JSON.parse(cachedData)
 
+        if (parsedCachedData) {
+            return res.status(200).json({
+                status: 'Success',
+                data: parsedCachedData,
+                message: "Posts fetched successfully (Cached)"
+            })
+        } else if (parsedCachedData === null) {
+            const posts = await Post.find(query)
+                .sort({ createdAt: -1 })
+                .populate("posted_by", "public_user_name is_email_verified")
+                .populate({
+                    path: 'comments',
+                    match: { access: { $ne: false } },
+                    populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
+                }).maxTimeMS(15000).lean()
+            await redis.set(postedByRedisKey, JSON.stringify(posts), 'EX', 21600); //Cached for 6 hours
 
+            return res.status(200).json({
+                status: 'Success',
+                data: posts,
+                message: "Posts fetched successfully"
+            })
+        }
         // for (const post of posts) {
         //     await populateChildComments(post.comments);
         // }
-        return res.status(200).json({
-            status: 'Success',
-            data: posts,
-            message: "Posts fetched successfully"
-        })
-
     } catch (error) {
         console.log({ error })
         return res.status(500).json({
@@ -124,7 +136,6 @@ const fetchPosts = async (req, res) => {
 
 const upVotePost = async (req, res) => {
     try {
-        console.log(req.body.post_id, req.user._id)
         const post = await Post.findById(req.body.post_id);
         if (post) {
             const io = getIo()

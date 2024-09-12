@@ -5,6 +5,8 @@ const { getIo } = require('../utils/socketManger');
 const axios = require("axios");
 const { load } = require("cheerio");
 const { isJobVerified } = require('../utils/utils');
+const getRedisInstance = require('../redisClient/redisClient');
+const { deleteCachedDataInRedis } = require('../redisClient/redisUtils');
 
 const jobMetaData = async (link) => {
     /*request url html document*/
@@ -52,6 +54,10 @@ const createJob = asyncHandler(async (req, res) => {
             is_job_verified: isJobVerified(req.body.job_post_link)
         }
 
+
+        const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
+        await deleteCachedDataInRedis(jobsPostedByRedisKey)
+
         const job = await Job.create(jobPayload)
         const jobData = await job.populate("job_posted_by", "public_user_name is_email_verified")
         if (jobData) {
@@ -90,19 +96,33 @@ const fetchJobs = asyncHandler(async (req, res) => {
         if (user_id) {
             query = { job_posted_by: user_id };
         }
-        const jobs = await Job.find(query).sort({ updatedAt: -1 }).populate('job_posted_by', 'public_user_name is_email_verified')
-        if (jobs) {
+        const redis = getRedisInstance()
+        const jobsPostedByRedisKey = user_id ? `${process.env.APP_ENV}_job_posted_by_${user_id}` : `${process.env.APP_ENV}_jobs`
+        const cachedData = await redis.get(jobsPostedByRedisKey)
+        const parsedCachedData = JSON.parse(cachedData)
+
+        if (parsedCachedData) {
             return res.status(200).json({
                 status: 'Success',
-                data: jobs,
-                message: "Jobs fetched successfully"
+                data: parsedCachedData,
+                message: "Jobs fetched successfully (Cached)"
             })
-        } else {
-            return res.status(400).json({
-                status: 'Failed',
-                message: "Jobs not fetched",
-                data: null
-            })
+        } else if (parsedCachedData === null) {
+            const jobs = await Job.find(query).sort({ updatedAt: -1 }).populate('job_posted_by', 'public_user_name is_email_verified')
+            await redis.set(jobsPostedByRedisKey, JSON.stringify(jobs), 'EX', 21600); //Cached for 6 hours
+            if (jobs) {
+                return res.status(200).json({
+                    status: 'Success',
+                    data: jobs,
+                    message: "Jobs fetched successfully"
+                })
+            } else {
+                return res.status(400).json({
+                    status: 'Failed',
+                    message: "Jobs not fetched",
+                    data: null
+                })
+            }
         }
     } catch (error) {
         return res.status(500).json({
@@ -127,6 +147,8 @@ const updateJob = asyncHandler(async (req, res) => {
         }
         const job = await Job.findByIdAndUpdate(req.body.job_id, { $set: { job_data: await jobMetaData(req.body.job_post_link) } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
 
+        const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
+        await deleteCachedDataInRedis(jobsPostedByRedisKey)
         if (job) {
             const io = getIo()
             io.emit('listen_job_edition', job)
@@ -164,6 +186,8 @@ const deleteJob = asyncHandler(async (req, res) => {
                 data: null
             })
         }
+        const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
+        await deleteCachedDataInRedis(jobsPostedByRedisKey)
         const job = await Job.findByIdAndDelete({ _id: req.body.job_id })
         if (job) {
             return res.status(200).json({
@@ -193,8 +217,12 @@ const deleteJob = asyncHandler(async (req, res) => {
 const likeDislikeJob = asyncHandler(async (req, res) => {
     try {
         const job = await Job.findById(req.body.job_id);
+        const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
+        await deleteCachedDataInRedis(jobsPostedByRedisKey)
         if (job) {
             const io = getIo()
+
+
 
             if (job.liked_by.includes(req.user._id)) {
                 const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $pull: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
@@ -247,6 +275,8 @@ const likeDislikeJob = asyncHandler(async (req, res) => {
 const bookMarkJob = asyncHandler(async (req, res) => {
     try {
         const job = await Job.findById(req.body.job_id);
+        const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
+        await deleteCachedDataInRedis(jobsPostedByRedisKey)
         if (job) {
             const io = getIo()
             if (job.bookmarked_by.includes(req.user._id)) {
