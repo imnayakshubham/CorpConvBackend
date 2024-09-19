@@ -84,9 +84,6 @@ const fetchChats = asyncHandler(async (req, res) => {
   } catch (error) {
     console.log({ error })
     return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: results });
-
-    res.status(400);
-    throw new Error(error.message);
   }
 });
 

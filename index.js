@@ -10,6 +10,7 @@ const postRoutes = require("./routes/postRoutes");
 const commentRoutes = require("./routes/commentRoutes");
 
 const questionRoutes = require("./routes/questionRoutes");
+const surveyRoutes = require("./routes/surveyRoutes");
 
 
 const cors = require("cors");
@@ -27,7 +28,7 @@ const app = express();
 
 app.use(cors({
   origin: process.env.ALLOW_ORIGIN,
-  methods: ["GET", "POST", "DELETE"],
+  methods: ["GET", "POST", "DELETE", "PUT"],
   credentials: true,
   transports: ['websocket']
 }));
@@ -42,6 +43,7 @@ app.use("/api/job", jobRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
+app.use("/api/survey", surveyRoutes);
 
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
