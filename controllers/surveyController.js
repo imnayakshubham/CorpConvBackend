@@ -231,11 +231,52 @@ const surveySubmission = async (req, res) => {
     }
 };
 
+const getSurveySubmission = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const survey = await Survey.findById(surveyId, {
+            survey_title: 1,
+            survey_description: 1,
+            view_count: 1
+
+        }).lean().exec()
+
+        const surveySubmission = await Submission.find({ survey_id: surveyId });
+
+        if (!surveySubmission || !survey) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Submission not found for the Survey',
+                data: null
+            });
+        }
+
+
+        return res.status(200).json({
+            status: 'Success',
+            data: {
+                ...survey,
+                submissions: surveySubmission
+            },
+            message: 'Submission Fetch successfully'
+        });
+    } catch (error) {
+        console.log({ error })
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Server Error: Unable to Fetch Submission',
+            data: null
+        });
+    }
+};
+
+
 module.exports = {
     createSurvey,
     listSurveys,
     archiveSurvey,
     editSurvey,
     getSurvey,
-    surveySubmission
+    surveySubmission,
+    getSurveySubmission
 }

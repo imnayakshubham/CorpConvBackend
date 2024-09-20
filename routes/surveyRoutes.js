@@ -1,7 +1,7 @@
 const express = require("express");
 
 const { protect } = require("../middleware/authMiddleware");
-const { createSurvey, listSurveys, archiveSurvey, editSurvey, getSurvey, surveySubmission } = require("../controllers/surveyController");
+const { createSurvey, listSurveys, archiveSurvey, editSurvey, getSurvey, surveySubmission, getSurveySubmission } = require("../controllers/surveyController");
 
 const router = express.Router();
 
@@ -11,5 +11,6 @@ router.route("/:id").delete(protect, archiveSurvey); // Soft Delete Survey (arch
 router.route("/edit/:id").put(protect, editSurvey); // Edit Survey
 router.route("/:id").get(protect, getSurvey);
 router.route("/submission/:id").post(protect, surveySubmission);
+router.route("/submissions/:id").get(protect, getSurveySubmission);
 
 module.exports = router;
