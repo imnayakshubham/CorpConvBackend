@@ -6,7 +6,7 @@ const createSurvey = async (req, res) => {
         const payload = req.body;
         const updatedPayload = {
             survey_title: payload.survey_title.trim(),
-            survey_description: payload.survey_description.trim(),
+            survey_description: payload.survey_description?.trim(),
             created_by: req.user._id
         }
 
@@ -131,6 +131,7 @@ const editSurvey = async (req, res) => {
 
 
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, { ...updatedPayload }, { new: true })
+        console.log(updatedSurvey)
 
         return res.status(200).json({
             status: 'Success',

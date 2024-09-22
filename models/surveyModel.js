@@ -21,7 +21,7 @@ const submissionSchema = new mongoose.Schema({
         required: true
     }],
     access: { type: Boolean, default: true }
-}, { timestamps: true });
+}, { _id: false });
 
 
 const surveyFormFieldSchema = new mongoose.Schema({
@@ -31,11 +31,14 @@ const surveyFormFieldSchema = new mongoose.Schema({
     user_select_options: [
         {
             label: { type: String, required: true },
-            value: { type: String, required: true }
+            value: { type: String, required: true },
+            option: { type: String }
         }
     ],
-    is_requried: { type: Boolean, default: false }
-}, { _id: false });
+    is_required: { type: Boolean, default: false },
+    question_id: { type: String, required: true },
+    select_option_type: { type: String }
+});
 
 const surveySchema = new mongoose.Schema({
     survey_title: {
