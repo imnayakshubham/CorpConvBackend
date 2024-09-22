@@ -20,6 +20,7 @@ const submissionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.Mixed,
         required: true
     }],
+    access: { type: Boolean, default: true }
 }, { timestamps: true });
 
 
@@ -32,7 +33,8 @@ const surveyFormFieldSchema = new mongoose.Schema({
             label: { type: String, required: true },
             value: { type: String, required: true }
         }
-    ]
+    ],
+    is_requried: { type: Boolean, default: false }
 }, { _id: false });
 
 const surveySchema = new mongoose.Schema({

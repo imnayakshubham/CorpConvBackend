@@ -67,7 +67,7 @@ const archiveSurvey = async (req, res) => {
         const surveyId = req.params.id;
         const survey = await Survey.findById(surveyId);
 
-        if (!survey) {
+        if (!survey || !survey?.access) {
             return res.status(404).json({
                 status: 'Failed',
                 message: 'Survey not found',
@@ -82,7 +82,10 @@ const archiveSurvey = async (req, res) => {
 
         return res.status(200).json({
             status: 'Success',
-            data: null,
+            data: {
+                access: survey.access,
+                _id: survey._id
+            },
             message: 'Survey Deleted successfully'
         });
     } catch (error) {
@@ -150,14 +153,13 @@ const getSurvey = async (req, res) => {
 
         const survey = await Survey.findById(surveyId);
 
-        if (!survey) {
+        if (!survey || !survey?.access) {
             return res.status(404).json({
                 status: 'Failed',
                 message: 'Survey not found',
                 data: null
             });
         }
-
 
         return res.status(200).json({
             status: 'Success',
@@ -278,5 +280,5 @@ module.exports = {
     editSurvey,
     getSurvey,
     surveySubmission,
-    getSurveySubmission
+    getSurveySubmission,
 }
