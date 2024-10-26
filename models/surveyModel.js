@@ -20,6 +20,7 @@ const submissionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.Mixed,
         required: true
     }],
+    access: { type: Boolean, default: true }
 }, { timestamps: true });
 
 

@@ -44,7 +44,7 @@ const createSurvey = async (req, res) => {
 // LIST Surveys API
 const listSurveys = async (req, res) => {
     try {
-        const surveys = await Survey.find({ created_by: req.user._id, access: true })
+        const surveys = await Survey.find({ created_by: req.user._id, access: true }).sort({ createdAt: -1 })
             .select('survey_title survey_description status submissions view_count createdAt')
 
         return res.status(200).json({
