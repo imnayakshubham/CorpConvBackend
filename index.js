@@ -36,6 +36,19 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get("/api/init", (req, res) => {
+  try {
+    res.status(200).json({
+      status: "Success"
+    });
+  } catch (error) {
+    console.error("Error handling /init request:", error);
+    res.status(500).json({
+      status: "Failed"
+    });
+  }
+});
+
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -48,6 +61,9 @@ app.use("/api/survey", surveyRoutes);
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
 });
+
+
+
 
 function generateRandomUserId() {
   return new mongoose.Types.ObjectId();
