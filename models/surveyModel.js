@@ -33,8 +33,9 @@ const surveyFormFieldSchema = new mongoose.Schema({
             label: { type: String, required: true },
             value: { type: String, required: true }
         }
-    ]
-}, { _id: false });
+    ],
+    is_required: { type: Boolean, default: false }
+});
 
 const surveySchema = new mongoose.Schema({
     survey_title: {

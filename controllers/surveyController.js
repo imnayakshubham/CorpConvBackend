@@ -216,7 +216,7 @@ const surveySubmission = async (req, res) => {
         }
 
         return res.status(200).json({
-            message: 'Submission created and survey updated successfully',
+            message: 'Submission Submitted',
             data: newSubmission,
             status: 'Success',
         });
