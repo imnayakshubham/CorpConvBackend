@@ -21,6 +21,7 @@ const { initializeSocket, getIo } = require("./utils/socketManger");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
+const { job } = require("./restartServerCron");
 
 dotenv.config();
 connectDB();
@@ -35,6 +36,10 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+if (process.env.APP_ENV === "PROD") {
+  job.start()
+}
 
 app.get("/api/init", (req, res) => {
   try {
@@ -63,12 +68,9 @@ app.get("/", (req, res) => {
 });
 
 
-
-
 function generateRandomUserId() {
   return new mongoose.Types.ObjectId();
 }
-
 
 // Error Handling middlewares
 app.use(notFound);
