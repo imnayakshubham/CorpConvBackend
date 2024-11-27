@@ -11,6 +11,7 @@ const commentRoutes = require("./routes/commentRoutes");
 
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
+const siteMapRoutes = require("./routes/siteMapRoutes");
 
 
 const cors = require("cors");
@@ -62,6 +63,8 @@ app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
+app.use("/api/site_map", siteMapRoutes);
+
 
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
