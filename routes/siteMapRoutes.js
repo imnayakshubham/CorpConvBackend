@@ -13,7 +13,7 @@ const listData = async (req, res) => {
 
         const allSurveys = surveys.map((survey) => `surveys/${survey._id}`)
         const allUsers = users.map((user) => `user/${user._id}`)
-        const allQuestions = questions.map((question) => `/answerlink/question/${question._id}`)
+        const allQuestions = questions.map((question) => `answerlink/question/${question._id}`)
 
         return res.status(200).json({
             status: 'Success',
