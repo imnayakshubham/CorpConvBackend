@@ -194,37 +194,50 @@ const updateUserProfile = async (req, res) => {
 
 const getUserInfo = async (req, res) => {
   try {
-    const userId = req.params
-    if (!userId?.id.length) {
+    const userId = req.params?.id
+    if (!userId) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
-    } else {
-      const keysToRetrieve = ["user_job_role", "is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", "followings", "followers"]
-      const projection = keysToRetrieve.reduce((acc, key) => {
-        acc[`${key}`] = 1;
-        return acc;
-      }, {});
-      const id = userId?.id
-      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${id}`
-      const redis = getRedisInstance()
-      const cachedData = await redis.get(userInfoRedisKey)
-      const parsedCachedData = JSON.parse(cachedData)
+    }
 
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+    const redis = getRedisInstance()
+    const cachedData = await redis.get(userInfoRedisKey)
+
+    if (cachedData) {
+      const parsedCachedData = JSON.parse(cachedData)
       if (parsedCachedData) {
         return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
-      } else if (parsedCachedData === null) {
-        const user = await User.findOne({ _id: id, access: true }, { ...projection })
-        await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600); //Cached for 6 hours
-        if (user) {
-          return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
-        } else {
-          return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
-        }
+      } else {
+        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: parsedCachedData })
       }
     }
+
+    const projection = {
+      user_job_role: 1,
+      is_anonymous: 1,
+      is_email_verified: 1,
+      user_bio: 1,
+      user_current_company_name: 1,
+      user_id: 1,
+      user_job_experience: 1,
+      user_location: 1,
+      public_user_name: 1,
+      followings: 1,
+      followers: 1,
+    };
+
+    const user = await User.findOne({ _id: userId, access: true }, projection)
+    await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+
+    if (user) {
+      return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
+    } else {
+      return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
+    }
+
   } catch (error) {
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
-
 }
 
 const fetchUsersPayloadFormatter = (type, data) => {

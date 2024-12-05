@@ -23,6 +23,7 @@ const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
+const getRedisInstance = require("./redisClient/redisClient");
 
 dotenv.config();
 connectDB();
@@ -85,6 +86,18 @@ const server = app.listen(
   console.log(`Server running on PORT ${PORT}...`.yellow.bold)
 );
 initializeSocket(server);
+
+
+const redis = getRedisInstance();
+
+(async () => {
+  try {
+    await redis.ping(); // Test connection
+    console.log('Redis connection ready');
+  } catch (error) {
+    console.error('Failed to connect to Redis:', error);
+  }
+})();
 
 const io = getIo()
 
