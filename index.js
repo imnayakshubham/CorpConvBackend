@@ -29,8 +29,21 @@ dotenv.config();
 connectDB();
 const app = express();
 
+const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
+
+
 app.use(cors({
-  origin: process.env.ALLOW_ORIGIN,
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.some(o => {
+      return (typeof o === "string" && o === origin) ||
+        (o instanceof RegExp && o.test(origin));
+    })) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked by CORS: ${origin}`);
+      callback(null, false);
+    }
+  },
   methods: ["GET", "POST", "DELETE", "PUT"],
   credentials: true,
   transports: ['websocket']
