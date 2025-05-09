@@ -22,7 +22,7 @@ const { initializeSocket, getIo } = require("./utils/socketManger");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
-const { job } = require("./restartServerCron");
+const { job, pingRedis } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
 
 dotenv.config();
@@ -54,7 +54,9 @@ app.use(express.urlencoded({ extended: true }));
 
 if (process.env.APP_ENV === "PROD") {
   job.start()
+  pingRedis.start()
 }
+
 
 app.get("/api/init", (req, res) => {
   try {
