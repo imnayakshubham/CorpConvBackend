@@ -1,3 +1,5 @@
+const { isProd } = require("..");
+
 const jobPostSites = [
     "indeed",
     "linkedin",
@@ -175,4 +177,17 @@ const jobPostSites = [
 ];
 
 
-module.exports = { jobPostSites }
+const tokenkeyName = "hush-work-key"
+
+
+const cookieOptions = {
+    httpOnly: true,
+    secure: isProd,             // must be true in production
+    sameSite: isProd ? 'none' : 'lax', // cross-origin needs None in prod
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+};
+
+
+module.exports = { jobPostSites, tokenkeyName, cookieOptions }
