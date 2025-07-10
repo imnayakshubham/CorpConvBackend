@@ -1,4 +1,3 @@
-const { isProd } = require("..");
 
 const jobPostSites = [
     "indeed",
@@ -179,6 +178,7 @@ const jobPostSites = [
 
 const tokenkeyName = "hush-work-key"
 
+const isProd = process.env.APP_ENV === 'PROD';
 
 const cookieOptions = {
     httpOnly: true,
@@ -190,4 +190,4 @@ const cookieOptions = {
 };
 
 
-module.exports = { jobPostSites, tokenkeyName, cookieOptions }
+module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd }
