@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
+const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 
 const protect = asyncHandler(async (req, res, next) => {
   const token = req.headers.token
@@ -15,12 +16,12 @@ const protect = asyncHandler(async (req, res, next) => {
         req.user = await User.findOne({ _id: decoded.id })
         next();
       } else {
-        console.log("hello")
+        res.clearCookie(tokenkeyName, cookieOptions);
         return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
       }
 
     } catch (error) {
-
+      res.clearCookie(tokenkeyName, cookieOptions);
       if (error.name === 'TokenExpiredError') {
         return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
       }

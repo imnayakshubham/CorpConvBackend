@@ -29,6 +29,9 @@ dotenv.config();
 connectDB();
 const app = express();
 
+app.set('trust proxy', 1);
+
+
 const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
 
 
@@ -51,6 +54,8 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+export const isProd = process.env.APP_ENV === 'PROD';
 
 if (process.env.APP_ENV === "PROD") {
   job.start()

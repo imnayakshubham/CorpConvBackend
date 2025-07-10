@@ -6,6 +6,8 @@ const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
+const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+
 
 
 
@@ -93,9 +95,14 @@ const authUser = async (req, res) => {
     });
 
     if (userData) {
+
+      const token = generateToken(userData._id)
+
+      res.cookie(tokenkeyName, token, cookieOptions);
+
       const result = {
         ...userData._doc,
-        token: generateToken(userData._id)
+        token: token
       }
 
       return res.status(200).json({ message: "email already exists!", status: "Success", result: responseFormatterForAuth(result) });
@@ -126,11 +133,14 @@ const authUser = async (req, res) => {
       }
       const user = await new User(data);
       const result = await user.save();
+      const token = generateToken(result._id)
+
+      res.cookie(tokenkeyName, token, cookieOptions);
       if (result) {
         return res.status(200).json({
           message: "Registration Successfully. Welcome!!",
           status: "Success",
-          result: { ...responseFormatterForAuth(result), token: generateToken(result._id), _id: result._id }
+          result: { ...responseFormatterForAuth(result), token: token, _id: result._id }
         });
       }
     }
@@ -150,6 +160,7 @@ const logout = async (req, res) => {
     const updatedData = await User.updateOne({ token: req.user.token }, updateOperation)
 
     if (updatedData) {
+      res.clearCookie(tokenkeyName, cookieOptions);
       return res.status(200).json({ message: "Logged Out", status: "Success" })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
