@@ -55,8 +55,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-export const isProd = process.env.APP_ENV === 'PROD';
-
 if (process.env.APP_ENV === "PROD") {
   job.start()
 }
