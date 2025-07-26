@@ -234,6 +234,7 @@ const getUserInfo = async (req, res) => {
       public_user_name: 1,
       followings: 1,
       followers: 1,
+      avatar: 1
     };
 
     const user = await User.findOne({ _id: userId, access: true }, projection)
