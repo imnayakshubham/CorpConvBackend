@@ -1,3 +1,6 @@
+const dotenv = require('dotenv');
+
+dotenv.config();
 
 const jobPostSites = [
     "indeed",
@@ -176,8 +179,6 @@ const jobPostSites = [
 ];
 
 
-const tokenkeyName = "hush-work-key"
-
 const isProd = process.env.APP_ENV === 'PROD';
 
 const cookieOptions = {
@@ -188,6 +189,8 @@ const cookieOptions = {
     path: '/',
     domain: isProd ? undefined : 'localhost'
 };
+
+const tokenkeyName = `${process.env.APP_ENV}:hushwork-root`;
 
 
 module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd }

@@ -102,7 +102,6 @@ const authUser = async (req, res) => {
 
       const result = {
         ...userData._doc,
-        token: token
       }
 
       return res.status(200).json({ message: "email already exists!", status: "Success", result: responseFormatterForAuth(result) });
@@ -140,7 +139,7 @@ const authUser = async (req, res) => {
         return res.status(200).json({
           message: "Registration Successfully. Welcome!!",
           status: "Success",
-          result: { ...responseFormatterForAuth(result), token: token, _id: result._id }
+          result: { ...responseFormatterForAuth(result), _id: result._id }
         });
       }
     }
@@ -160,7 +159,7 @@ const logout = async (req, res) => {
     const updatedData = await User.updateOne({ token: req.user.token }, updateOperation)
 
     if (updatedData) {
-      res.clearCookie(tokenkeyName, cookieOptions);
+      res.clearCookie(tokenkeyName);
       return res.status(200).json({ message: "Logged Out", status: "Success" })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
