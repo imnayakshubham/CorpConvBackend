@@ -1,4 +1,6 @@
 const express = require("express");
+const cookieParser = require("cookie-parser");
+
 const connectDB = require("./config/db");
 const dotenv = require("dotenv");
 const userRoutes = require("./routes/userRoutes");
@@ -28,6 +30,7 @@ const getRedisInstance = require("./redisClient/redisClient");
 dotenv.config();
 connectDB();
 const app = express();
+app.use(cookieParser());
 
 app.set('trust proxy', 1);
 
@@ -120,9 +123,9 @@ const io = getIo()
 io.on("connection", (socket) => {
   let currentActiveChat = null
   console.log("Connected to socket.io");
-  socket.on("setup", (userData) => {
-    if (userData?._id) {
-      socket.join(userData._id);
+  socket.on("setup", (user_id) => {
+    if (user_id) {
+      socket.join(user_id);
       socket.emit("connected");
     }
   });
@@ -368,8 +371,14 @@ io.on("connection", (socket) => {
 
   })
 
+
+
+  socket.on("remove-user", (id) => {
+    socket.leave(id);
+  });
+
   socket.off("setup", () => {
-    console.log("USER DISCONNECTED");
-    socket.leave(userData._id);
+    console.log("USER DISCONNECTED", user_id);
+    socket.leave(user_id);
   });
 });

@@ -1,10 +1,14 @@
 let io;
 
+const allowed = process.env.ALLOW_ORIGIN
+    ? process.env.ALLOW_ORIGIN.split(",").map(o => o.trim())
+    : []
+
 function initializeSocket(server) {
     io = require("socket.io")(server, {
         pingTimeout: 60000,
         cors: {
-            origin: process.env.ALLOW_ORIGIN,
+            origin: allowed,
             methods: ["GET", "POST"],
             credentials: true,
         },
@@ -16,6 +20,9 @@ function initializeSocket(server) {
         // Handle disconnection
         socket.on('disconnect', () => {
             console.log('User disconnected');
+            socket.leave(socket.id);
+
+
         });
     });
 }

@@ -4,7 +4,12 @@ const asyncHandler = require("express-async-handler");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 
 const protect = asyncHandler(async (req, res, next) => {
-  const token = req.headers.token
+  const token = req.headers.token || req.cookies?.[tokenkeyName]
+
+  if (!token) {
+    res.clearCookie(tokenkeyName);
+    return res.status(401).send({ error: 'Unauthorized', message: 'No token provided' });
+  }
 
   if (!!token) {
     try {
@@ -16,24 +21,22 @@ const protect = asyncHandler(async (req, res, next) => {
         req.user = await User.findOne({ _id: decoded.id })
         next();
       } else {
-        res.clearCookie(tokenkeyName, cookieOptions);
+        res.clearCookie(tokenkeyName);
         return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
       }
 
     } catch (error) {
-      res.clearCookie(tokenkeyName, cookieOptions);
+      console.log(error)
+      res.clearCookie(tokenkeyName);
       if (error.name === 'TokenExpiredError') {
         return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
       }
 
-      return res.status(400).send({ error: 'Invalid token' });
+      return res.status(401).send({ error: 'Invalid token' });
     }
   }
 
-  if (!token) {
-    res.status(401);
-    throw new Error("Not authorized");
-  }
+
 });
 
 module.exports = { protect };

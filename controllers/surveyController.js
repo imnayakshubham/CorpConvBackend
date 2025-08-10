@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const { Survey, Submission } = require("../models/surveyModel");
 
 // CREATE Survey API
@@ -44,15 +45,25 @@ const createSurvey = async (req, res) => {
 // LIST Surveys API
 const listSurveys = async (req, res) => {
     try {
-        const surveys = await Survey.find({ created_by: req.user._id, access: true }).sort({ createdAt: -1 })
+        const userQuery = req.query?.user || null;
+
+        const filter = { access: true };
+
+        if (userQuery) {
+            filter.created_by = new mongoose.Types.ObjectId('6884adb364cfdf71f2fb28fe');
+        }
+        console.log(filter, userQuery)
+        const surveys = await Survey.find(filter).sort({ createdAt: -1 })
             .select('survey_title survey_description status submissions view_count createdAt')
 
+        // console.log(surveys)
         return res.status(200).json({
             status: 'Success',
             data: surveys,
             message: 'Surveys retrieved successfully'
         });
     } catch (error) {
+
         return res.status(500).json({
             status: 'Failed',
             message: 'Server Error: Unable to fetch surveys',

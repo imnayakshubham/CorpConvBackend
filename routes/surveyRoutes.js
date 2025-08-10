@@ -6,7 +6,7 @@ const { createSurvey, listSurveys, archiveSurvey, editSurvey, getSurvey, surveyS
 const router = express.Router();
 
 router.route("/create-survey").post(protect, createSurvey);  // Create Survey
-router.route("/survey-list").get(protect, listSurveys);   // List Surveys
+router.route("/survey-list").get(listSurveys);   // List Surveys
 router.route("/:id").delete(protect, archiveSurvey); // Soft Delete Survey (archive)
 router.route("/edit/:id").put(protect, editSurvey); // Edit Survey
 router.route("/:id").get(getSurvey);
