@@ -192,5 +192,4 @@ const cookieOptions = {
 
 const tokenkeyName = `${process.env.APP_ENV}:hushwork-root`;
 
-
 module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd }

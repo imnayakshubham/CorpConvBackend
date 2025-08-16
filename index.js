@@ -1,6 +1,10 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 
+const swaggerUi = require('swagger-ui-express');
+const swaggerGenerator = require('./swagger/swaggerGenerator');
+
+
 const connectDB = require("./config/db");
 const dotenv = require("dotenv");
 const userRoutes = require("./routes/userRoutes");
@@ -14,6 +18,7 @@ const commentRoutes = require("./routes/commentRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
+const aiRoutes = require('./routes/ai');
 
 
 const cors = require("cors");
@@ -26,6 +31,7 @@ const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
+
 
 dotenv.config();
 connectDB();
@@ -65,12 +71,14 @@ if (process.env.APP_ENV === "PROD") {
 app.get("/api/init", (req, res) => {
   try {
     res.status(200).json({
-      status: "Success"
+      status: "Success",
+      message: "Helllo"
     });
   } catch (error) {
     console.error("Error handling /init request:", error);
     res.status(500).json({
-      status: "Failed"
+      status: "Failed",
+      message: "Something went wrong. Please try again."
     });
   }
 });
@@ -84,10 +92,40 @@ app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
+app.use('/api/ai', aiRoutes);
 
 
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
+});
+
+const swaggerSpec = swaggerGenerator.generateSpec();
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customSiteTitle: 'Auto-Generated API Documentation',
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info .title { color: #ff6600 }
+    .swagger-ui .scheme-container { background: #f7f7f7; padding: 10px; }
+  `,
+  swaggerOptions: {
+    docExpansion: 'list',
+    defaultModelsExpandDepth: 2,
+    displayRequestDuration: true
+  }
+}));
+
+// Raw OpenAPI spec
+app.get('/api-docs.json', (req, res) => {
+  res.json(swaggerSpec);
+});
+
+app.use('*', (req, res) => {
+  res.status(404).json({
+    Status: "Failed",
+    message: "404 Not Found"
+  });
 });
 
 

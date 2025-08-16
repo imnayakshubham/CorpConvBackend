@@ -25,9 +25,7 @@ const jobMetaData = async (link) => {
     const preview = {
         job_post_link: link,
         title: $("title").first().text(),
-        favicon:
-            $('link[rel="shortcut icon"]').attr("href") ||
-            $('link[rel="alternate icon"]').attr("href"),
+        favicon: $('link[rel="shortcut icon"]').attr("href") || $('link[rel="alternate icon"]').attr("href"),
         description: getMetaTag("description"),
         image: getMetaTag("image"),
         author: getMetaTag("author"),

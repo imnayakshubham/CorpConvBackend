@@ -10,7 +10,8 @@ const {
   acceptFollowRequest,
   rejectFollowRequest,
   getfollowersList,
-  getUserInfo
+  getUserInfo,
+  updateUserProfileDetails
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -23,7 +24,7 @@ router.post("/auth", authUser);
 router.route("/users").post(fetchUsers);
 router.route("/logout").post(protect, logout)
 router.route("/update-profile").post(protect, updateUserProfile);
-
+router.route("/update-profile-details").post(protect, updateUserProfileDetails);
 
 router.route("/send-follow-request").post(protect, sendFollowRequest);
 router.route("/accept-follow-request").post(protect, acceptFollowRequest);

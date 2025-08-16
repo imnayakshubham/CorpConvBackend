@@ -1,14 +1,33 @@
 const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel");
 const Company = require("../models/companySchema");
-const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
+const { toTitleCase, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
 const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { addOrupdateCachedDataInRedis } = require("../redisClient/redisUtils.js");
 
 
+
+const projection = {
+  user_job_role: 1,
+  is_anonymous: 1,
+  is_email_verified: 1,
+  user_bio: 1,
+  user_current_company_name: 1,
+  user_id: 1,
+  user_job_experience: 1,
+  user_location: 1,
+  public_user_name: 1,
+  followings: 1,
+  followers: 1,
+  avatar: 1,
+  user_public_profile_pic: 1,
+  pending_followings: 1,
+  profile_details: 1
+};
 
 
 const allUsers = asyncHandler(async (req, res) => {
@@ -171,33 +190,119 @@ const logout = async (req, res) => {
 }
 
 const updateUserProfile = async (req, res) => {
-  try {
 
-    const UserInfo = await User.findOne({ _id: req.body._id })
-    if (!UserInfo) {
+  const userId = req.body._id ?? req.user._id;
+
+  if (!userId) {
+    return res.status(400).json({
+      message: "User ID is required",
+      status: "Failed",
+      result: [],
+    });
+  }
+
+  try {
+    const userInfo = await User.findOne({ _id: req.body._id ?? req.user._id })
+    if (!userInfo) {
       return res.status(200).json({ message: "No User Exist", status: "Failed", })
+    }
+    const profession = req.body.profession
+
+    let role = null
+    let suffix = null
+
+    let updateFields = {
+      ...req.body,
+    }
+
+    if (profession) {
+      role = profession === "student" ? req.body.field_of_study : profession === "homemaker" ? `Anything & Everything` : req.body.user_job_role
+      suffix = profession === "homemaker" ? profession : req.body.user_current_company_name ? req.body.user_current_company_name : userInfo.user_current_company_name
+      updateFields = {
+        ...updateFields,
+        public_user_name: `${toTitleCase(role)} @ ${toTitleCase(suffix)}`,
+        user_job_experience: Number(req.body.user_job_experience)
+      }
     }
 
 
-    const updateOperation = {
-      $set: {
-        ...req.body,
-        public_user_name: `${toTitleCase(req.body.user_job_role)} @ ${UserInfo.user_current_company_name}`
-      },
-    };
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId },
+      { $set: updateFields },
+      { new: true, projection }
+    );
+    if (updatedUser) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
 
-    const redis = getRedisInstance()
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
-    const result = await redis.del(userInfoRedisKey);
-    const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
-    if (updatedData) {
+      addOrupdateCachedDataInRedis(userInfoRedisKey, updatedUser)
       return res.status(200).json({
-        message: "Your Profile has been Updated Successfully", status: "Success", result: updateOperation["$set"]
+        message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
       })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
+    console.log("error", error)
+    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+  }
+}
+
+
+
+const updateUserProfileDetails = async (req, res) => {
+
+  const userId = req.body._id ?? req.user._id;
+
+  if (!userId) {
+    return res.status(400).json({
+      message: "User ID is required",
+      status: "Failed",
+      result: [],
+    });
+  }
+
+  try {
+    const userInfo = await User.findOne({ _id: req.body._id ?? req.user._id })
+    if (!userInfo) {
+      return res.status(200).json({ message: "No User Exist", status: "Failed", })
+    }
+    const profession = req.body.profession
+
+    let role = null
+    let suffix = null
+
+    let updateFields = {
+      ...req.body,
+    }
+
+    if (profession) {
+      role = profession === "student" ? req.body.field_of_study : profession === "homemaker" ? `Anything & Everything` : req.body.user_job_role
+      suffix = profession === "homemaker" ? profession : req.body.user_current_company_name ? req.body.user_current_company_name : userInfo.user_current_company_name
+      updateFields = {
+        ...updateFields,
+        public_user_name: `${toTitleCase(role)} @ ${toTitleCase(suffix)}`,
+        user_job_experience: Number(req.body.user_job_experience)
+      }
+    }
+
+
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId },
+      { $set: updateFields },
+      { new: true, projection }
+    );
+    if (updatedUser) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+
+      addOrupdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+      return res.status(200).json({
+        message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
+      })
+    } else {
+      return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    }
+  } catch (error) {
+    console.log("error", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
@@ -222,22 +327,9 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-    const projection = {
-      user_job_role: 1,
-      is_anonymous: 1,
-      is_email_verified: 1,
-      user_bio: 1,
-      user_current_company_name: 1,
-      user_id: 1,
-      user_job_experience: 1,
-      user_location: 1,
-      public_user_name: 1,
-      followings: 1,
-      followers: 1,
-      avatar: 1
-    };
 
     const user = await User.findOne({ _id: userId, access: true }, projection)
+
     await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
 
     if (user) {
@@ -260,9 +352,9 @@ const fetchUsersPayloadFormatter = (type, data) => {
 const fetchUsers = async (req, res) => {
   try {
     const payload = req.body
-    const userLoggedIn = req.body.loggedIn
+    const userLoggedIn = !!payload?._id
 
-    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", ...(userLoggedIn ? ["pending_followings", "followings", "followers"] : [])]
+    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", "avatar", "user_public_profile_pic", ...(userLoggedIn ? ["pending_followings", "followings", "followers"] : [])]
     const projection = keysToRetrieve.reduce((acc, key) => {
       acc[`${key}`] = 1;
       return acc;
@@ -278,13 +370,33 @@ const fetchUsers = async (req, res) => {
         ...([payload?._id] ?? []),
       ];
 
-      const usersList = await User.find(
-        {
-          access: true,
-          _id: { $nin: ignoredIds },
-        },
-        { ...projection }
-      );
+
+      let usersList = []
+
+      const limitParam = req.body.limit;
+
+      if (limitParam !== undefined) {
+        const limitNum = parseInt(limitParam, 10);
+        if (!isNaN(limitNum) && limitNum > 0) {
+          usersList = await User.find(
+            {
+              access: true,
+              _id: { $nin: ignoredIds },
+              public_user_name: { $ne: null }
+            },
+            { public_user_name: 1, avatar: 1, user_bio: 1, user_public_profile_pic: 1 }
+          ).limit(limitNum)
+        }
+      } else {
+        usersList = await User.find(
+          {
+            access: true,
+            _id: { $nin: ignoredIds },
+          },
+          { ...projection }
+        ).sort({ createdAt: -1 });
+      }
+
       return res.status(200).json({
         message: "Users  Fetched SuccessFully", status: "Success", result: fetchUsersPayloadFormatter(payload.type, usersList)
       })
@@ -329,50 +441,90 @@ const fetchUsers = async (req, res) => {
 // ----------------------------------------------------------
 const sendFollowRequest = async (req, res) => {
   const { senderId, receiverId } = req.body;
+  if (!senderId || !receiverId) {
+    return res.status(400).json({
+      message: "Missing senderId or receiverId",
+      status: "Failed",
+      result: []
+    });
+  }
+
+  const redis = getRedisInstance();
 
   try {
-    const receiverUser = await User.findById(receiverId);
-    // Check if the receiverId is in the pending_followings of senderId
-    const isRequestWithdrawal = receiverUser.pending_followings.includes(senderId);
+    const [senderUser, receiverUser] = await Promise.all([
+      User.findById(senderId).select(projection).lean(),
+      User.findById(receiverId).select(projection).lean()
+    ]);
 
-    if (isRequestWithdrawal) {
-      // Withdraw request
-      const result = await User.findByIdAndUpdate(senderId, {
-        $pull: { followings: receiverId },
-      }, { upsert: true, new: true });
-      if (result) {
-        await User.findByIdAndUpdate(receiverId, {
-          $pull: { pending_followings: senderId },
-        });
-      }
-
-    } else {
-      // Send request
-      const recieverData = await User.findByIdAndUpdate(receiverId, { $addToSet: { pending_followings: senderId }, }, { upsert: true, new: true });
-      if (recieverData) {
-        const senderData = await User.findByIdAndUpdate(senderId, {
-          $addToSet: { followings: receiverId },
-        }, { upsert: true, new: true });
-
-        const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
-        if (notification) {
-          const io = getIo()
-          io.to(receiverId).emit('follow_request_send_notication', notification);
-
-        }
-
-      }
+    if (!senderUser || !receiverUser) {
+      return res.status(404).json({
+        message: "Sender or receiver not found",
+        status: "Failed",
+        result: []
+      });
     }
 
-    // const result = await User.findById(senderId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    const isWithdrawal = receiverUser.pending_followings?.includes(senderId);
+    let updatedSender = null;
 
-    res.status(200).json({ message: "Updated User Info ", status: "Success", result: [] });
+    if (isWithdrawal) {
+      updatedSender = await User.findByIdAndUpdate(
+        senderId,
+        { $pull: { followings: receiverId } },
+        { new: true, projection, lean: true }
+      );
+      await User.findByIdAndUpdate(
+        receiverId,
+        { $pull: { pending_followings: senderId } },
+        { new: true, projection, lean: true }
+      );
+    } else {
+      updatedSender = await User.findByIdAndUpdate(
+        senderId,
+        { $addToSet: { followings: receiverId } },
+        { new: true, projection, lean: true }
+      );
+      const updatedReceiver = await User.findByIdAndUpdate(
+        receiverId,
+        { $addToSet: { pending_followings: senderId } },
+        { new: true, projection, lean: true }
+      );
+
+      const notification = await Notifications.create({
+        content: `${senderUser.public_user_name} sent you a follow request`,
+        receiverId
+      });
+      if (notification) {
+        getIo().to(receiverId).emit("follow_request_send_notification", notification);
+      }
+
+      // Optionally cache receiver's updated info too:
+      const receiverKey = `${process.env.APP_ENV}_user_info_${receiverId}`;
+      await redis.set(receiverKey, JSON.stringify(updatedReceiver), 'EX', 21600);
+    }
+
+
+    // Cache the updated sender data
+    if (updatedSender) {
+      const senderKey = `${process.env.APP_ENV}_user_info_${senderId}`;
+      await redis.set(senderKey, JSON.stringify(updatedSender), 'EX', 21600);
+    }
+
+    return res.status(200).json({
+      message: "User info updated",
+      status: "Success",
+      result: updatedSender || []
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
+    console.error("Error processing follow request:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      status: "Failed",
+      result: []
+    });
   }
-}
-
+};
 
 const acceptFollowRequest = async (req, res) => {
   const { userId, requesterId } = req.body;
@@ -413,4 +565,4 @@ const rejectFollowRequest = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo };
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails };
