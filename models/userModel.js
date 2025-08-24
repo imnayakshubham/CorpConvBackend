@@ -1,6 +1,4 @@
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-
 
 const avatarSchema = new mongoose.Schema({
   style: {
@@ -10,7 +8,7 @@ const avatarSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-    enum: ["male", "female", "unisex"],
+    enum: ["male", "female", "unisex", "neutral"],
     required: [true, "Avatar gender is required"]
   },
   seed: {
@@ -36,13 +34,6 @@ const avatarSchema = new mongoose.Schema({
 }, { _id: false });
 
 
-
-const ProfileDetailSchema = new mongoose.Schema({
-  content: { type: String, default: null },
-  name: { type: String, default: null },
-  img_url: { type: String, default: null },
-  link: { type: String, default: null },
-}, { strict: false, timestamps: true });
 
 const userSchema = mongoose.Schema({
   actual_user_name: {
@@ -211,8 +202,7 @@ const userSchema = mongoose.Schema({
     default: null
   },
   profile_details: {
-    default: [],
-    type: [ProfileDetailSchema],
+    type: mongoose.Schema.Types.ObjectId, ref: 'ProfileDetails'
   }
 }, { timestaps: true });
 

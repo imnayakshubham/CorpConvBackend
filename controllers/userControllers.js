@@ -1,5 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel");
+const ProfileDetails = require("../models/profileDetailsModel.js");
+
 const Company = require("../models/companySchema");
 const { toTitleCase, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
 const { default: mongoose } = require("mongoose");
@@ -8,7 +10,6 @@ const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 const { addOrupdateCachedDataInRedis } = require("../redisClient/redisUtils.js");
-
 
 
 const projection = {
@@ -30,6 +31,46 @@ const projection = {
 };
 
 
+// userId: string,
+//   options?: {
+//     projection?: any;
+//     populateOptions?: Parameters<typeof User.prototype.populate>[0];
+//     profileItemsFilter?: (item: any) => boolean;
+//   }
+
+async function getUserWithFlatProfileDetails({
+  userId,
+  access = true,
+  options,
+}) {
+  // Destructure options with defaults
+  const { projection = null, populateOptions = {}, profileItemsFilter } = options || {};
+
+  // Fetch user with populated profile_details document
+  const userDoc = await User.findOne({ _id: userId, access }, projection).populate({
+    path: 'profile_details',
+    ...populateOptions,
+  });
+
+  if (!userDoc) return null;
+
+  // Convert mongoose doc to plain object
+  const userObj = userDoc.toObject();
+  console.log({ userDoc })
+  // Extract profile items array
+  let profileItems = {
+    layouts: userObj.profile_details?.layouts || {},
+    items: userObj.profile_details?.items || []
+  }
+
+  // Return user with flattened, optionally filtered profile items
+  return {
+    ...userObj,
+    profile_details: profileItems,
+  };
+}
+
+
 const allUsers = asyncHandler(async (req, res) => {
   try {
     const keyword = req.query.search ? {
@@ -39,6 +80,8 @@ const allUsers = asyncHandler(async (req, res) => {
       ],
     }
       : {};
+
+    console.log(req.user, keyword)
     const users = await User.find({ ...keyword, _id: { $ne: req.user._id } }, { public_user_name: 1, user_job_experience: 1 });
     return res.status(200).json({ message: "Filtered User List", status: "Success", result: users })
 
@@ -290,7 +333,7 @@ const updateUserProfileDetails = async (req, res) => {
       { _id: userId },
       { $set: updateFields },
       { new: true, projection }
-    );
+    ).populate("project_details");
     if (updatedUser) {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
 
@@ -328,11 +371,10 @@ const getUserInfo = async (req, res) => {
     }
 
 
-    const user = await User.findOne({ _id: userId, access: true }, projection)
-
-    await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+    const user = await getUserWithFlatProfileDetails({ userId, options: { projection } })
 
     if (user) {
+      await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
       return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
     } else {
       return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
@@ -352,22 +394,22 @@ const fetchUsersPayloadFormatter = (type, data) => {
 const fetchUsers = async (req, res) => {
   try {
     const payload = req.body
-    const userLoggedIn = !!payload?._id
+    const userLoggedId = payload?._id ?? req.user?._id
 
-    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", "avatar", "user_public_profile_pic", ...(userLoggedIn ? ["pending_followings", "followings", "followers"] : [])]
+    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", "avatar", "user_public_profile_pic", ...(!!userLoggedId ? ["pending_followings", "followings", "followers"] : [])]
     const projection = keysToRetrieve.reduce((acc, key) => {
       acc[`${key}`] = 1;
       return acc;
     }, {});
 
     if (payload.type === "all_users") {
-      const currentUser = await User.findOne({ _id: payload?._id }).select("followings pending_followings followers");
+      const currentUser = await User.findOne({ _id: payload?._id ?? userLoggedId }).select("followings pending_followings followers");
 
       const ignoredIds = [
         ...(currentUser?.followings ?? []),
         ...(currentUser?.pending_followings ?? []),
         ...(currentUser?.followers ?? []),
-        ...([payload?._id] ?? []),
+        ...(userLoggedId ? [userLoggedId] : []),
       ];
 
 
@@ -565,4 +607,217 @@ const rejectFollowRequest = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails };
+
+function assertSelf(userId, authedId) {
+  if (!userId || !authedId || userId.toString() !== authedId.toString()) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+}
+
+function sanitizeItemPayload(payload, userId) {
+  const { type, content, name, img_url, link } = payload || {};
+  if (!['title', 'text', 'image', 'links', 'socialLink'].includes(type)) {
+    const err = new Error('Invalid type');
+    err.status = 400;
+    throw err;
+  }
+  return {
+    type, content: content ?? null, name: name ?? null,
+    img_url: img_url ?? null, link: link ?? null,
+    created_by: userId,
+    ...payload
+  };
+}
+
+// GET /users/:user_id/
+
+const getProfile = async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user) return res.status(404).json({ status: 'Failed', message: 'User not found' });
+    const profile = user.profile_details
+      ? await ProfileDetails.findById(user.profile_details).lean()
+      : null;
+    return res.json({ status: 'Success', result: profile ?? { layouts: {}, items: [] } });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// POST /users/:user_id/profile/items  (add item)
+const addProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+    const sanitized = sanitizeItemPayload(req.body, authedId);
+    console.log({ sanitized })
+
+    const session = await mongoose.startSession();
+    let createdItem;
+    await session.withTransaction(async () => {
+      // ensure user & profile
+      let user = await User.findOne({ _id: user_id, access: true }).select(projection).session(session);
+      if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
+      console.log({ user })
+      let profile;
+      if (!user.profile_details) {
+        profile = await ProfileDetails.create([{ created_by: authedId, layouts: {}, items: [] }], { session });
+        console.log({ profile })
+        user.profile_details = profile[0]._id;
+        await user.save({ session });
+        profile = profile[0];
+      } else {
+        profile = await ProfileDetails.findById(user.profile_details).session(session);
+        if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+      }
+
+      profile.items.push(sanitized);
+      await profile.save({ session });
+
+      user = {
+        ...user.toObject(),
+        profile_details: profile
+      }
+
+      if (user) {
+        const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+        await addOrupdateCachedDataInRedis(userInfoRedisKey, user);
+      }
+
+      createdItem = profile.items[profile.items.length - 1];
+    });
+
+    return res.status(201).json({
+      status: 'Success',
+      message: 'Item created',
+      result: createdItem
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// PUT /users/:user_id/profile/items/:item_id  (update item metadata)
+const updateProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id, item_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+    // whitelist updatable fields
+    const { content, name, img_url, link, access } = req.body || {};
+    const updates = {};
+    if (content !== undefined) updates.content = content;
+    if (name !== undefined) updates.name = name;
+    if (img_url !== undefined) updates.img_url = img_url;
+    if (link !== undefined) updates.link = link;
+    if (access !== undefined) updates.access = !!access;
+
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user || !user.profile_details) return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+
+    const result = await ProfileDetails.findOneAndUpdate(
+      { _id: user.profile_details, 'items._id': item_id },
+      { $set: Object.fromEntries(Object.entries(updates).map(([k, v]) => [`items.$.${k}`, v])) },
+      { new: true, projection: { items: { $elemMatch: { _id: item_id } } } }
+    );
+
+    if (!result || !result.items?.length) return res.status(404).json({ status: 'Failed', message: 'Item not found' });
+    return res.json({ status: 'Success', message: 'Item updated', result: result.items[0] });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// DELETE (soft) /users/:user_id/profile/items/:item_id
+// Also remove the item id from all breakpoints in layouts to prevent rendering "dangling" ids.
+const deleteProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id, item_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+
+    const session = await mongoose.startSession();
+    let updated;
+    await session.withTransaction(async () => {
+      const user = await User.findById(user_id).select('profile_details').session(session);
+      if (!user || !user.profile_details) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      const profile = await ProfileDetails.findById(user.profile_details).session(session);
+      if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      // soft delete
+      const item = profile.items.id(item_id);
+      if (!item) throw Object.assign(new Error('Item not found'), { status: 404 });
+      item.access = false;
+
+      // prune from layouts
+      const bps = ['lg', 'md', 'sm', 'xs', 'xxs'];
+      for (const bp of bps) {
+        profile.layouts[bp] = (profile.layouts[bp] || []).filter(li => li.i !== String(item_id));
+      }
+
+      updated = await profile.save({ session });
+    });
+
+    return res.json({ status: 'Success', message: 'Item soft-deleted and removed from layouts' });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// PUT /users/:user_id/profile/layouts  (save responsive layouts)
+const updateLayouts = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+  const layouts = req.body?.layouts;
+
+  try {
+    assertSelf(user_id, authedId);
+
+    // Minimal shape validation: ensure keys are arrays of layout items with required fields
+    const bps = ['lg', 'md', 'sm', 'xs', 'xxs'];
+    for (const bp of bps) {
+      if (layouts[bp] && !Array.isArray(layouts[bp])) {
+        const err = new Error(`layouts.${bp} must be an array`);
+        err.status = 400; throw err;
+      }
+      (layouts[bp] || []).forEach(li => {
+        ['i', 'x', 'y', 'w', 'h'].forEach(k => {
+          if (li[k] === undefined) {
+            const err = new Error(`layouts.${bp}[].${k} is required`);
+            err.status = 400; throw err;
+          }
+        });
+      });
+    }
+
+
+    const user = await User.findById(user_id, { access: true }).select('profile_details').lean();
+
+    if (!user) return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+
+    const updated = await ProfileDetails.findByIdAndUpdate(
+      user.profile_details,
+      { $set: { layouts } },
+      { new: true, projection: { layouts: 1 } }
+    );
+
+    return res.json({ status: 'Success', message: 'Layouts updated', result: updated?.layouts });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts };
