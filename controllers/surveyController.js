@@ -52,11 +52,9 @@ const listSurveys = async (req, res) => {
         if (userQuery) {
             filter.created_by = new mongoose.Types.ObjectId('6884adb364cfdf71f2fb28fe');
         }
-        console.log(filter, userQuery)
         const surveys = await Survey.find(filter).sort({ createdAt: -1 })
             .select('survey_title survey_description status submissions view_count createdAt')
 
-        // console.log(surveys)
         return res.status(200).json({
             status: 'Success',
             data: surveys,

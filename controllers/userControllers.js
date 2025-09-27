@@ -15,6 +15,7 @@ const userEmbedding = require("../models/userEmbedding.js");
 const { recommendationQueue } = require("../queues/index.js");
 const Recommendation = require("../models/Recommendation.js");
 const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
+const logger = require("../utils/logger.js");
 
 
 const projection = {
@@ -50,9 +51,9 @@ async function getUserWithFlatProfileDetails({
 }) {
   // Destructure options with defaults
   const { projection = null, populateOptions = {}, profileItemsFilter } = options || {};
-
+  logger.info("id", userId)
   // Fetch user with populated profile_details document
-  const userDoc = await User.findOne({ _id: userId, access }, projection).populate({
+  const userDoc = await User.findById(userId, projection).where({ access }).populate({
     path: 'profile_details',
     ...populateOptions,
   });
@@ -91,7 +92,7 @@ const allUsers = asyncHandler(async (req, res) => {
     return res.status(200).json({ message: "Filtered User List", status: "Success", result: users })
 
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 });
@@ -232,6 +233,8 @@ const logout = async (req, res) => {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
+    logger.error("error ==>", error)
+
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
 
   }
@@ -310,7 +313,7 @@ const updateUserProfile = async (req, res) => {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
-    console.log("error", error)
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
@@ -369,13 +372,14 @@ const updateUserProfileDetails = async (req, res) => {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
-    console.log("error", error)
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
 
 const getUserInfo = async (req, res) => {
   try {
+    logger.info("req.params", req.params)
     const userId = req.params?.id
     if (!userId) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
@@ -394,7 +398,7 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-
+    logger.info("jhhhlekjlre", userId, projection)
     const user = await getUserWithFlatProfileDetails({ userId, options: { projection } })
 
     if (user) {
@@ -405,6 +409,7 @@ const getUserInfo = async (req, res) => {
     }
 
   } catch (error) {
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
@@ -498,7 +503,7 @@ const fetchUsers = async (req, res) => {
     }
 
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", result: [] })
   }
 }
@@ -844,11 +849,6 @@ const updateLayouts = async (req, res) => {
   }
 };
 
-function tagOverlap(userHobbies = [], itemTags = []) {
-  const set = new Set(userHobbies.map(h => h.toLowerCase()));
-  return itemTags.reduce((acc, t) => acc + (set.has(t.toLowerCase()) ? 1 : 0), 0) /
-    Math.max(1, itemTags.length);
-}
 
 // '/recommend/:userId'
 function paginate(list, limit) {
@@ -858,12 +858,15 @@ function paginate(list, limit) {
   return { results, nextCursor };
 }
 
-const getUserRecommendations = async (req, res, next) => {
+const getUserRecommendations = async (req, res) => {
+  console.log("user_id",)
+
   try {
-    const { user_id } = req.params;
+    const { user_id = null } = req.params;
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
     const cursor = req.query.cursor || null;
     const filter = cursor ? { _id: { $gt: new mongoose.Types.ObjectId(cursor) } } : {};
+
     // List all users if user_id is "users"
     if (!user_id) {
       const users = await User.find(filter, { ...projection })
@@ -887,6 +890,7 @@ const getUserRecommendations = async (req, res, next) => {
 
     // Fetch recommendations document for user
     const recDoc = await Recommendation.findOne({ user_id }).lean();
+
 
     // If no recommendations exist, enqueue background computation and fallback to users list
     if (!recDoc || !recDoc.items || recDoc.items.length === 0) {
@@ -930,7 +934,6 @@ const getUserRecommendations = async (req, res, next) => {
 
     // Extract user ids from recommendation items
     const recommendedUserIds = limitedItems.map(item => item.user_id.toString());
-    console.log(recommendedUserIds.length, [...new Set(recommendedUserIds)].length)
 
     // Fetch full user details for these recommended users
     const recommendedUsers = await User.find({ _id: { $in: recommendedUserIds, $ne: user_id } }, { ...projection })
@@ -943,11 +946,9 @@ const getUserRecommendations = async (req, res, next) => {
     const results = limitedItems.map(item => {
       const user = userMap.get(item.user_id.toString());
       return user ? { ...user, recommendation_value: item.recommendation_value } : null;
-    }).filter(Boolean); // filter out nulls if any
+    }) // filter out nulls if any
     // Determine nextCursor for pagination
     const nextCursor = limitedItems.length > limit ? limitedItems[limit].user_id.toString() : null;
-
-    console.log("item.user_id)", userMap.size, results.length, limitedItems.slice(0, limit).length)
 
     return res.json({
       status: 'Success',
@@ -958,7 +959,7 @@ const getUserRecommendations = async (req, res, next) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error("error ==>", err)
     return res.error({
       status: "Failed",
       message: "Internal server error",
@@ -967,8 +968,5 @@ const getUserRecommendations = async (req, res, next) => {
     });
   }
 };
-
-
-
 
 module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations };

@@ -10,6 +10,7 @@ class AppError extends Error {
 }
 
 const notFound = (req, res, next) => {
+  console.log("first", 404)
   next(new AppError(`Not Found -- ${req.originalUrl}`, 404));
 };
 

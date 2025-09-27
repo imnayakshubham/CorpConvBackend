@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Chat = require("../models/chatModel");
 const User = require("../models/userModel");
 const mongoose = require('mongoose');
+const logger = require("../utils/logger");
 
 const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -82,7 +83,8 @@ const fetchChats = asyncHandler(async (req, res) => {
       return res.status(200).send({ status: "Success", message: "No chats found for the user.", result: results });
     }
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
+
     return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: results });
   }
 });

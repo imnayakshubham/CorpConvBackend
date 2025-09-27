@@ -23,106 +23,114 @@ function paginate(list, limit) {
 
 
 router.get('/recommendation/:user_id?', async (req, res) => {
-    const user_id = req.params.user_id || null;
-    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-    const cursor = req.query.cursor || null;
+    console.log("hrtrr")
 
-    // Build filter for recently active users
-    const cutoff = new Date(Date.now() - RECENT_DAYS * 24 * 3600 * 1000);
-    const filter = {
-        last_active_at: { $gte: cutoff },
-        ...(user_id ? { _id: { $ne: user_id } } : {}),
-        ...(cursor ? { _id: { $gt: cursor } } : {})
-    };
+    try {
+        const user_id = req.params.user_id || null;
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+        const cursor = req.query.cursor || null;
 
-    const projection = {};
+        // Build filter for recently active users
+        const cutoff = new Date(Date.now() - RECENT_DAYS * 24 * 3600 * 1000);
+        const filter = {
+            last_active_at: { $gte: cutoff },
+            ...(user_id ? { _id: { $ne: user_id } } : {}),
+            ...(cursor ? { _id: { $gt: cursor } } : {})
+        };
 
-    if (!user_id) {
-        const users = await User.find(filter, projection)
-            .sort({ _id: 1 })
-            .limit(limit + 1)
-            .lean();
+        const projection = {};
 
-        const { results: records, nextCursor } = paginate(users, limit);
+        if (!user_id) {
+            const users = await User.find(filter, projection)
+                .sort({ _id: 1 })
+                .limit(limit + 1)
+                .lean();
 
-        await recommendationQueue.add('compute', { user_id, limit: 1000 }, {
-            removeOnComplete: true,
-            removeOnFail: true,
-        });
+            const { results: records, nextCursor } = paginate(users, limit);
 
-        return res.success({
-            status: "Success",
-            message: "Users fetched",
-            result: { data: records, nextCursor }
-        });
-    }
+            await recommendationQueue.add('compute', { user_id, limit: 1000 }, {
+                removeOnComplete: true,
+                removeOnFail: true,
+            });
 
-    const user = await User.findById(user_id, projection).lean();
-    if (!user) {
-        return res.error({
-            status: "Error",
-            message: "User not found"
-        }, 404);
-    }
+            return res.success({
+                status: "Success",
+                message: "Users fetched",
+                result: { data: records, nextCursor }
+            });
+        }
 
-    const recDoc = await Recommendation.findOne({ user_id });
+        const user = await User.findById(user_id, projection).lean();
+        if (!user) {
+            return res.error({
+                status: "Error",
+                message: "User not found",
+                result: null,
+                code: 404
+            });
+        }
 
-    if (!recDoc || !isCacheFresh(recDoc)) {
-        const users = await User.find(filter)
-            .sort({ last_active_at: -1 })
-            .limit(limit)
-            .lean();
+        const recDoc = await Recommendation.findOne({ user_id });
 
-        await recommendationQueue.add('compute', { user_id, limit: 1000 }, {
-            removeOnComplete: true,
-            removeOnFail: true,
-        });
+        if (!recDoc || !isCacheFresh(recDoc)) {
+            const users = await User.find(filter)
+                .sort({ last_active_at: -1 })
+                .limit(limit)
+                .lean();
 
-        const nextCursor = users.length === limit
-            ? users[users.length - 1]._id.toString()
+            await recommendationQueue.add('compute', { user_id, limit: 1000 }, {
+                removeOnComplete: true,
+                removeOnFail: true,
+            });
+
+            const nextCursor = users.length === limit
+                ? users[users.length - 1]._id.toString()
+                : null;
+
+            return res.success({
+                status: "Success",
+                message: "Users fetched (pending recommendations)",
+                result: {
+                    data: users,
+                    nextCursor
+                }
+            });
+        }
+
+        // Serve cached recommendations
+        const items = recDoc.items || [];
+        const startIdx = cursor
+            ? items.findIndex(i => i.userId.toString() === cursor) + 1
+            : 0;
+
+        const pageItems = items.slice(startIdx, startIdx + limit);
+        const nextCursorRec = pageItems.length === limit
+            ? pageItems[pageItems.length - 1].userId.toString()
             : null;
 
+        const users = pageItems.length
+            ? await User.find({ _id: { $in: pageItems.map(p => p.userId) } }).lean()
+            : [];
+
+        const byId = users.reduce((acc, u) => {
+            acc[u._id.toString()] = u;
+            return acc;
+        }, {});
+
+        const enriched = pageItems.map(p => ({
+            id: p.userId,
+            recommendation_value: p.recommendation_value,
+            profile: byId[p.userId.toString()] || null
+        }));
+
         return res.success({
             status: "Success",
-            message: "Users fetched (pending recommendations)",
-            result: {
-                data: users,
-                nextCursor
-            }
+            message: "Recommendations fetched",
+            result: { data: enriched, nextCursor: nextCursorRec }
         });
+    } catch (error) {
+
     }
-
-    // Serve cached recommendations
-    const items = recDoc.items || [];
-    const startIdx = cursor
-        ? items.findIndex(i => i.userId.toString() === cursor) + 1
-        : 0;
-
-    const pageItems = items.slice(startIdx, startIdx + limit);
-    const nextCursorRec = pageItems.length === limit
-        ? pageItems[pageItems.length - 1].userId.toString()
-        : null;
-
-    const users = pageItems.length
-        ? await User.find({ _id: { $in: pageItems.map(p => p.userId) } }).lean()
-        : [];
-
-    const byId = users.reduce((acc, u) => {
-        acc[u._id.toString()] = u;
-        return acc;
-    }, {});
-
-    const enriched = pageItems.map(p => ({
-        id: p.userId,
-        recommendation_value: p.recommendation_value,
-        profile: byId[p.userId.toString()] || null
-    }));
-
-    return res.success({
-        status: "Success",
-        message: "Recommendations fetched",
-        result: { data: enriched, nextCursor: nextCursorRec }
-    });
 });
 
 

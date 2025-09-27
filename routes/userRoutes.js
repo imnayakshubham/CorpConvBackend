@@ -22,6 +22,7 @@ const { protect } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 router.route("/user").get(protect, allUsers);
+router.route('/user/recommend/:user_id?').get(getUserRecommendations);
 router.route("/user/:id").get(getUserInfo)
 router.route("/followers").get(protect, getfollowersList);
 router.post("/auth", authUser);
@@ -54,6 +55,5 @@ router
   .put(protect, updateLayouts);
 
 
-router.route('/user/recommend/:user_id').get(getUserRecommendations);
 
 module.exports = router;

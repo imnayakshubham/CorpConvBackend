@@ -29,11 +29,11 @@ const projection = {
 const RECENT_DAYS = parseInt(process.env.RECENT_ACTIVE_DAYS || '14', 10);
 const CONCURRENCY = 5; // Tune concurrency to avoid API overload
 
+logger.info(RECENT_DAYS, CONCURRENCY)
+
+
 const defaultLimit = 500
 async function start() {
-    // 1. Connect to MongoDB
-    await mongoose.connect(process.env.MONGO_URI);
-    logger.info('Worker connected to DB');
 
     // 2. Set up the worker to handle recommendation jobs
     const worker = new Worker(

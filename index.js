@@ -18,7 +18,6 @@ const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
 
-require('./workers/recommendationWorker.js')
 
 const cors = require("cors");
 
@@ -31,12 +30,14 @@ const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
 const { responseFormatter } = require("./middleware/responseFormatter");
-const { markOnline } = require("./redisClient/redisUtils.js");
+const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
+const logger = require("./utils/logger.js");
 
 dotenv.config();
 connectDB();
 const app = express();
 app.use(cookieParser());
+
 
 app.set('trust proxy', 1);
 
@@ -63,6 +64,8 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(responseFormatter);
+
 app.use(express.urlencoded({ extended: true }));
 if (APP_ENV !== "PROD") {
   const swaggerUi = require('swagger-ui-express');
@@ -73,8 +76,7 @@ if (APP_ENV !== "PROD") {
   const endpointsFiles = ["index.js"]
 
   swaggerAutogen(outputFile, endpointsFiles, {})
-  const swaggerFile = require('./swagger_output.json')
-
+  const swaggerFile = require(outputFile)
 
   const swaggerOptions = {
     swaggerOptions: {
@@ -94,13 +96,15 @@ if (APP_ENV !== "PROD") {
 
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerFile, swaggerOptions));
 }
+require('./workers/recommendationWorker.js')
+
+
 
 
 if (APP_ENV === "PROD") {
   job.start()
 }
 
-app.use(responseFormatter);
 
 app.get("/api/init", (req, res) => {
   try {
@@ -117,6 +121,9 @@ app.get("/api/init", (req, res) => {
   }
 });
 
+
+
+
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -129,9 +136,12 @@ app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
 
 
+
 if (APP_ENV === "PROD") {
   app.use(trackActivity);
 }
+
+
 
 
 
@@ -150,44 +160,13 @@ app.get("/", (req, res) => {
   `);
 });
 
-// const swaggerSpec = swaggerGenerator.generateSpec();
-
-// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-//   explorer: true,
-//   customSiteTitle: 'Auto-Generated API Documentation',
-//   customCss: `
-//     .swagger-ui .topbar { display: none }
-//     .swagger-ui .info .title { color: #ff6600 }
-//     .swagger-ui .scheme-container { background: #f7f7f7; padding: 10px; }
-//   `,
-//   swaggerOptions: {
-//     docExpansion: 'list',
-//     defaultModelsExpandDepth: 2,
-//     displayRequestDuration: true
-//   }
-// }));
-
-// Raw OpenAPI spec
-// app.get('/api-docs.json', (req, res) => {
-//   res.json(swaggerSpec);
-// });
-
-// app.use('*', (req, res) => {
-//   res.status(404).json({
-//     Status: "Failed",
-//     message: "404 Not Found",
-//     result: null
-//   });
-// });
-
 
 function generateRandomUserId() {
   return new mongoose.Types.ObjectId();
 }
 
-app.use(notFound);
 app.use(errorHandler);
-
+app.use(notFound);
 
 const PORT = process.env.PORT;
 const server = app.listen(
@@ -198,19 +177,26 @@ initializeSocket(server);
 
 
 const redis = getRedisInstance();
+if (APP_ENV === "PROD") {
 
-(async () => {
-  try {
-    await redis.ping(); // Test connection
-    console.log('Redis connection ready');
-  } catch (error) {
-    console.error('Failed to connect to Redis:', error);
-  }
-})();
+  (async () => {
+    try {
+      await redis.ping(); // Test connection
+      console.log('Redis connection ready');
+    } catch (error) {
+      console.error('Failed to connect to Redis:', error);
+    }
+  })();
+}
+
+
+setInterval(() => {
+  syncOnlineStatusToDB().catch(logger.error);
+}, 10 * 60 * 1000);
 
 const io = getIo()
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   let currentActiveChat = null
 
   console.log("Connected to socket.io");
@@ -218,8 +204,10 @@ io.on("connection", (socket) => {
     if (user_id) {
       socket.join(user_id);
       socket.emit("connected");
-      await markOnline(user_id)
+
       socket.user_id = user_id
+      await markOnline(user_id)
+
     }
   });
 
@@ -281,6 +269,7 @@ io.on("connection", (socket) => {
         }
       }
     } catch (error) {
+      logger.error("error ==>", error)
       updatedAnswer = {
         data: null,
         status: 'Failed',
@@ -315,7 +304,6 @@ io.on("connection", (socket) => {
 
   socket.on("new message", (newMessageRecieved) => {
     let chat = newMessageRecieved.chat;
-
 
     if (!chat.users) return console.log("chat.users not defined");
 
@@ -378,7 +366,6 @@ io.on("connection", (socket) => {
           }
         }
       } catch (error) {
-        console.log({ error })
         answer = {
           data: null,
           status: 'Failed',
@@ -409,7 +396,8 @@ io.on("connection", (socket) => {
         }
       }
     } catch (error) {
-      console.log(error)
+      logger.error("error ==>", error)
+
       updatedQuestion = {
         data: null,
         status: 'Failed',

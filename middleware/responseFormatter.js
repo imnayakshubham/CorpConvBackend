@@ -3,7 +3,7 @@ const logger = require("../utils/logger.js");
 
 // middleware/responseFormatter.js
 function responseFormatter(req, res, next) {
-    res.success = ({ status = 'Success', message = '', result = null } = {}) => {
+    res.success = ({ status = 'Success', message = 'Success', result = null } = {}) => {
         return res.json({ status, message, result });
     };
 

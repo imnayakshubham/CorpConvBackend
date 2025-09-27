@@ -1,20 +1,18 @@
-const User = require("../models/userModel");
 const getRedisInstance = require("./redisClient")
+const User = require("../models/userModel");
+const logger = require("../utils/logger");
 
 const redis = getRedisInstance()
-
 
 const deleteCachedDataInRedis = async (...keys) => {
     await redis.del(...keys);
 }
 
 const addOrUpdateCachedDataInRedis = async (key, updatedData, time = 21600) => {
-    const redis = getRedisInstance()
     await redis.set(key, JSON.stringify(updatedData), 'EX', time);
 }
 
 const getDataInRedis = async (key) => {
-    const redis = getRedisInstance();
     const data = await redis.get(key);
     if (!data) return null;
     try {
@@ -52,18 +50,37 @@ async function markUserCompletedInJob(key, job, completedUserId) {
 
 
 const markOnline = async (userId) => {
-    // set key with TTL so if server crashes it expires
+    if (!userId) return;
+    // Set Redis key with TTL (e.g., 60 seconds)
     await redis.set(`online:${userId}`, '1', 'EX', 60);
-    // update DB quick snapshot (optional)
-    await User.findByIdAndUpdate(userId, { $set: { online: true, last_active_at: new Date() } }).catch(() => { });
-    // broadcast presence change
-    // we use a pub/sub key to let others know (socket.io adapter will propagate)
-    // Note: you may want to publish a message via a dedicated channel so all servers can pick it up.
-}
+};
 
-const markOffline = async (userId, redisClient) => {
-    await redisClient.del(`online:${userId}`);
-    await User.findByIdAndUpdate(userId, { $set: { online: false } }).catch(() => { });
-}
+const markOffline = async (userId) => {
+    if (!userId) return;
+    logger.info("login===> ", userId)
+    // Remove Redis key immediately
+    await redis.del(`online:${userId}`);
+    // Update MongoDB on explicit offline only
+    await User.findByIdAndUpdate(userId, { online: false, last_active_at: new Date() });
+};
 
-module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline }
+const syncOnlineStatusToDB = async () => {
+    try {
+        // Example: get all userIds with online keys from Redis (using SCAN or Redis sets if maintained)
+        const keys = await redis.keys('online:*');
+        const onlineUserIds = keys.map(key => key.split(':')[1]);
+
+        // Mark these users online & update last_active_at
+        await User.updateMany(
+            { _id: { $in: onlineUserIds } },
+            { $set: { online: true, last_active_at: new Date() } }
+        );
+
+        // Optionally mark users offline in DB who don't have Redis online keys
+        // if this fits the use case
+    } catch (err) {
+        console.error('Error syncing online status to DB:', err);
+    }
+};
+
+module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, syncOnlineStatusToDB }

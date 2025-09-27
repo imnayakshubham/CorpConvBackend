@@ -107,7 +107,6 @@ class AIController {
         try {
             const modelStatus = await aiService.getModelStatus();
             const embedingStatus = await aiService.getEmbeddingModelStatus()
-            console.log(embedingStatus)
 
             // Cleanup expired sessions
             const cleanedSessions = conversationService.cleanupExpiredSessions();
@@ -115,6 +114,10 @@ class AIController {
             if (embedingStatus.status === "ok") {
                 return res.json({
                     status: embedingStatus.status,
+                });
+            } else {
+                return res.json({
+                    status: "Failed",
                 });
             }
         } catch (error) {

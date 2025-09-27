@@ -193,4 +193,23 @@ const cookieOptions = {
 const tokenkeyName = `${process.env.APP_ENV}:hushwork-root`;
 const guestKey = `${tokenkeyName}:guest_id`;
 
-module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd, guestKey }
+
+const projection = {
+    user_job_role: 1,
+    is_anonymous: 1,
+    is_email_verified: 1,
+    user_bio: 1,
+    user_current_company_name: 1,
+    user_id: 1,
+    user_job_experience: 1,
+    user_location: 1,
+    public_user_name: 1,
+    followings: 1,
+    followers: 1,
+    avatar: 1,
+    user_public_profile_pic: 1,
+    pending_followings: 1,
+    profile_details: 1,
+};
+
+module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd, guestKey, projection }

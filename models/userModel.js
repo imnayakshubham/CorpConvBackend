@@ -33,7 +33,13 @@ const avatarSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-
+const CredentialSchema = new mongoose.Schema({
+  credentialID: { type: String, required: true },
+  publicKey: { type: Buffer, required: true },
+  counter: { type: Number, required: true },
+  transports: [{ type: String }],
+  nickname: { type: String, default: '', trim: true }, // Device label
+}, { timestaps: true });
 
 const userSchema = mongoose.Schema({
   actual_user_name: {
@@ -207,7 +213,11 @@ const userSchema = mongoose.Schema({
   embedding: { type: [Number], default: null }, // array of floats
   embedding_updated_at: Date,
   last_active_at: { type: Date, default: Date.now },
+  credentials: [CredentialSchema],
 }, { timestaps: true });
+
+
+
 
 userSchema.index({ hobbies: 1 });
 userSchema.index({ profession: 1, field_of_study: 1, last_active_at: -1 });
