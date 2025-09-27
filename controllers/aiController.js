@@ -105,24 +105,42 @@ class AIController {
 
     async getHealth(req, res) {
         try {
-            const modelStatus = aiService.getModelStatus();
+            const modelStatus = await aiService.getModelStatus();
+            const embedingStatus = await aiService.getEmbeddingModelStatus()
+            console.log(embedingStatus)
 
             // Cleanup expired sessions
             const cleanedSessions = conversationService.cleanupExpiredSessions();
 
-            res.json({
-                status: 'healthy',
-                timestamp: new Date().toISOString(),
-                models: modelStatus,
-                active_sessions: conversationService.conversations.size,
-                cleaned_sessions: cleanedSessions
-            });
+            if (embedingStatus.status === "ok") {
+                return res.json({
+                    status: embedingStatus.status,
+                });
+            }
         } catch (error) {
             console.log(error)
             res.status(500).json({
                 status: 'unhealthy',
                 error: error.message
             });
+        }
+    }
+
+    async generateEmbeddings(req, res) {
+        try {
+            const text = req.body
+            const res = await fetch(`${process.env.HF_API_END_POINT}embed`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text
+                }),
+            });
+            const data = await res.json()
+            console.log(data)
+            // res.ok is false even on 404/500
+        } catch (err) {
+            console.error(err);
         }
     }
 }

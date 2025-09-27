@@ -1,6 +1,4 @@
 
-
-
 const config = {
     cloudflare: {
         accountId: process.env.CLOUDFARE_ACCOUNT_ID,

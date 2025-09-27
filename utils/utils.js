@@ -55,6 +55,6 @@ const populateChildComments = async (comments) => {
             }
         }
     }
-};
+}
 
 module.exports = { generateToken, toTitleCase, randomIdGenerator, generateUserId, keepOnlyNumbers, isJobVerified, populateChildComments };

@@ -203,8 +203,15 @@ const userSchema = mongoose.Schema({
   },
   profile_details: {
     type: mongoose.Schema.Types.ObjectId, ref: 'ProfileDetails'
-  }
+  },
+  embedding: { type: [Number], default: null }, // array of floats
+  embedding_updated_at: Date,
+  last_active_at: { type: Date, default: Date.now },
 }, { timestaps: true });
+
+userSchema.index({ hobbies: 1 });
+userSchema.index({ profession: 1, field_of_study: 1, last_active_at: -1 });
+
 
 const User = mongoose.model("User", userSchema);
 

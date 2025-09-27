@@ -9,7 +9,12 @@ const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
-const { addOrupdateCachedDataInRedis } = require("../redisClient/redisUtils.js");
+const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob } = require("../redisClient/redisUtils.js");
+const Item = require("../models/Item.js");
+const userEmbedding = require("../models/userEmbedding.js");
+const { recommendationQueue } = require("../queues/index.js");
+const Recommendation = require("../models/Recommendation.js");
+const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 
 
 const projection = {
@@ -27,7 +32,7 @@ const projection = {
   avatar: 1,
   user_public_profile_pic: 1,
   pending_followings: 1,
-  profile_details: 1
+  profile_details: 1,
 };
 
 
@@ -56,7 +61,8 @@ async function getUserWithFlatProfileDetails({
 
   // Convert mongoose doc to plain object
   const userObj = userDoc.toObject();
-  console.log({ userDoc })
+
+
   // Extract profile items array
   let profileItems = {
     layouts: userObj.profile_details?.layouts || {},
@@ -81,7 +87,6 @@ const allUsers = asyncHandler(async (req, res) => {
     }
       : {};
 
-    console.log(req.user, keyword)
     const users = await User.find({ ...keyword, _id: { $ne: req.user._id } }, { public_user_name: 1, user_job_experience: 1 });
     return res.status(200).json({ message: "Filtered User List", status: "Success", result: users })
 
@@ -277,7 +282,27 @@ const updateUserProfile = async (req, res) => {
     if (updatedUser) {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
 
-      addOrupdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+      addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+
+
+      const textToEmbed = `Public Name: ${user.public_user_name || ''}
+          Profession: ${user.profession || ''}
+          Hobbies: ${(user.hobbies ?? [])?.join(', ')}
+          Bio: ${user.user_bio || ''}
+          Academic level: ${user.academic_level || ''}
+          Field of study: ${user.field_of_study || ''}
+        `
+
+      const { embedding } = await generateSingleEmbedding(userId, textToEmbed)
+
+
+      // Upsert embedding document to keep in sync
+      await userEmbedding.findOneAndUpdate(
+        { userId },
+        { embedding, lastUpdated: new Date() },
+        { upsert: true, new: true }
+      );
+
       return res.status(200).json({
         message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
       })
@@ -328,7 +353,6 @@ const updateUserProfileDetails = async (req, res) => {
       }
     }
 
-
     const updatedUser = await User.findOneAndUpdate(
       { _id: userId },
       { $set: updateFields },
@@ -337,7 +361,7 @@ const updateUserProfileDetails = async (req, res) => {
     if (updatedUser) {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
 
-      addOrupdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+      addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
       return res.status(200).json({
         message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
       })
@@ -687,7 +711,7 @@ const addProfileItem = async (req, res) => {
 
       if (user) {
         const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
-        await addOrupdateCachedDataInRedis(userInfoRedisKey, user);
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, user);
       }
 
       createdItem = profile.items[profile.items.length - 1];
@@ -772,7 +796,7 @@ const deleteProfileItem = async (req, res) => {
     return res.json({ status: 'Success', message: 'Item soft-deleted and removed from layouts' });
   } catch (e) {
     console.error(e);
-    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+    return res.status(e.status || 500).json({ status: 'Failed', message: e.message });
   }
 };
 
@@ -816,8 +840,135 @@ const updateLayouts = async (req, res) => {
     return res.json({ status: 'Success', message: 'Layouts updated', result: updated?.layouts });
   } catch (e) {
     console.error(e);
-    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+    return res.status(e.status || 500).json({ status: 'Failed', message: e.message });
   }
 };
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts };
+function tagOverlap(userHobbies = [], itemTags = []) {
+  const set = new Set(userHobbies.map(h => h.toLowerCase()));
+  return itemTags.reduce((acc, t) => acc + (set.has(t.toLowerCase()) ? 1 : 0), 0) /
+    Math.max(1, itemTags.length);
+}
+
+// '/recommend/:userId'
+function paginate(list, limit) {
+  const hasMore = list.length > limit;
+  const results = hasMore ? list.slice(0, limit) : list;
+  const nextCursor = hasMore ? list[limit]._id.toString() : null;
+  return { results, nextCursor };
+}
+
+const getUserRecommendations = async (req, res, next) => {
+  try {
+    const { user_id } = req.params;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const cursor = req.query.cursor || null;
+    const filter = cursor ? { _id: { $gt: new mongoose.Types.ObjectId(cursor) } } : {};
+    // List all users if user_id is "users"
+    if (!user_id) {
+      const users = await User.find(filter, { ...projection })
+        .sort({ _id: 1 })
+        .limit(limit + 1)
+        .lean();
+
+      const { results: records, nextCursor } = paginate(users, limit);
+      return res.success({
+        status: "Success",
+        message: "Users fetched",
+        result: { data: records, nextCursor }
+      });
+    }
+
+    // Personalized recommendations for specific user_id
+    const user = await User.findById(user_id, { ...projection }).lean();
+    if (!user) {
+      return res.error({ status: "Error", message: "User not found", code: 404 });
+    }
+
+    // Fetch recommendations document for user
+    const recDoc = await Recommendation.findOne({ user_id }).lean();
+
+    // If no recommendations exist, enqueue background computation and fallback to users list
+    if (!recDoc || !recDoc.items || recDoc.items.length === 0) {
+      // Assuming recommendationQueue is correctly initialized and imported elsewhere
+      recommendationQueue.add(
+        'compute',
+        { user_id, limit: 500 },
+        { removeOnComplete: true, removeOnFail: true }
+      );
+
+      // Fallback: get all users except current user, paginate and return
+      const fallbackUsers = await User.find({ _id: { $ne: user._id } }, { ...projection })
+        .sort({ _id: 1 })
+        .limit(limit + 1)
+        .lean();
+
+      const { results, nextCursor } = paginate(fallbackUsers, limit);
+
+      return res.json({
+        status: "Success",
+        message: "Fallback users fetched",
+        result: { data: results, nextCursor }
+      });
+    }
+
+    // If recommendations exist, we merge with user data and add recommendation_value key
+    // Apply pagination on recommendations
+    let recommendationItems = recDoc.items;
+
+    // If cursor is provided, find index of cursor in the items list
+    if (cursor) {
+      const cursorIndex = recommendationItems.findIndex(item => item.user_id.toString() === cursor);
+      if (cursorIndex >= 0) {
+        // slice from next element after cursor
+        recommendationItems = recommendationItems.slice(cursorIndex + 1);
+      }
+    }
+
+    // Limit the recommendation items to requested limit + 1 for nextCursor calculation
+    const limitedItems = recommendationItems.slice(0, limit + 1);
+
+    // Extract user ids from recommendation items
+    const recommendedUserIds = limitedItems.map(item => item.user_id.toString());
+    console.log(recommendedUserIds.length, [...new Set(recommendedUserIds)].length)
+
+    // Fetch full user details for these recommended users
+    const recommendedUsers = await User.find({ _id: { $in: recommendedUserIds, $ne: user_id } }, { ...projection })
+      .lean();
+
+    // Map user details by _id string for quick lookup
+    const userMap = new Map(recommendedUsers.map(u => [u._id.toString(), u]));
+
+    // Compose final results with recommendation_value added
+    const results = limitedItems.map(item => {
+      const user = userMap.get(item.user_id.toString());
+      return user ? { ...user, recommendation_value: item.recommendation_value } : null;
+    }).filter(Boolean); // filter out nulls if any
+    // Determine nextCursor for pagination
+    const nextCursor = limitedItems.length > limit ? limitedItems[limit].user_id.toString() : null;
+
+    console.log("item.user_id)", userMap.size, results.length, limitedItems.slice(0, limit).length)
+
+    return res.json({
+      status: 'Success',
+      message: 'Recommendations fetched',
+      result: {
+        data: results,
+        nextCursor
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.error({
+      status: "Failed",
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'production' ? null : err.message,
+      code: 500
+    });
+  }
+};
+
+
+
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations };

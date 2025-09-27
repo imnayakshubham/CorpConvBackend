@@ -1,8 +1,6 @@
+require("colors");
 const express = require("express");
 const cookieParser = require("cookie-parser");
-
-const swaggerUi = require('swagger-ui-express');
-const swaggerGenerator = require('./swagger/swaggerGenerator');
 
 
 const connectDB = require("./config/db");
@@ -20,6 +18,7 @@ const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
 
+require('./workers/recommendationWorker.js')
 
 const cors = require("cors");
 
@@ -31,7 +30,8 @@ const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
-
+const { responseFormatter } = require("./middleware/responseFormatter");
+const { markOnline } = require("./redisClient/redisUtils.js");
 
 dotenv.config();
 connectDB();
@@ -40,6 +40,7 @@ app.use(cookieParser());
 
 app.set('trust proxy', 1);
 
+const APP_ENV = process.env.APP_ENV
 
 const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
 
@@ -63,10 +64,43 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+if (APP_ENV !== "PROD") {
+  const swaggerUi = require('swagger-ui-express');
 
-if (process.env.APP_ENV === "PROD") {
+  const swaggerAutogen = require('swagger-autogen')()
+
+  const outputFile = './swagger_output.json'
+  const endpointsFiles = ["index.js"]
+
+  swaggerAutogen(outputFile, endpointsFiles, {})
+  const swaggerFile = require('./swagger_output.json')
+
+
+  const swaggerOptions = {
+    swaggerOptions: {
+      docExpansion: 'none',          // Collapse endpoints by default
+      deepLinking: true,             // Enable deep linking to sections
+      displayRequestDuration: true,  // Show request duration
+      defaultModelsExpandDepth: -1,  // Hide schema models by default
+      syntaxHighlight: {
+        theme: 'agate'               // Syntax highlight theme similar to FastAPI
+      }
+    },
+    customCss: `
+    .swagger-ui .topbar { display: none }  /* Hide default Swagger topbar like FastAPI */
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  `
+  }
+
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerFile, swaggerOptions));
+}
+
+
+if (APP_ENV === "PROD") {
   job.start()
 }
+
+app.use(responseFormatter);
 
 app.get("/api/init", (req, res) => {
   try {
@@ -95,47 +129,65 @@ app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
 
 
+if (APP_ENV === "PROD") {
+  app.use(trackActivity);
+}
+
+
+
 app.get("/", (req, res) => {
-  res.send(`Hello World!`);
+  const targetUrl = allowedOrigins.find(origin => origin.startsWith('https://') || origin.includes('hushwork'));
+  res.send(`
+    <main style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 90vh; font-family: Arial, sans-serif;">
+      <h1 style="color: #2c3e50;">Welcome to Hushwork</h1>
+      <p style="color: #34495e; font-size: 1.2rem; text-align: center; margin-bottom: 20px;">
+        Your platform for confidential surveys and discussions.
+      </p>
+      <a href=${targetUrl} target="_blank" rel="noopener noreferrer" style="padding: 10px 20px; background-color: #3498db; color: white; text-decoration: none; border-radius: 5px; font-size: 1rem; transition: background-color 0.3s;">
+        Visit Hushwork
+      </a>
+    </main>
+  `);
 });
 
-const swaggerSpec = swaggerGenerator.generateSpec();
+// const swaggerSpec = swaggerGenerator.generateSpec();
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  explorer: true,
-  customSiteTitle: 'Auto-Generated API Documentation',
-  customCss: `
-    .swagger-ui .topbar { display: none }
-    .swagger-ui .info .title { color: #ff6600 }
-    .swagger-ui .scheme-container { background: #f7f7f7; padding: 10px; }
-  `,
-  swaggerOptions: {
-    docExpansion: 'list',
-    defaultModelsExpandDepth: 2,
-    displayRequestDuration: true
-  }
-}));
+// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+//   explorer: true,
+//   customSiteTitle: 'Auto-Generated API Documentation',
+//   customCss: `
+//     .swagger-ui .topbar { display: none }
+//     .swagger-ui .info .title { color: #ff6600 }
+//     .swagger-ui .scheme-container { background: #f7f7f7; padding: 10px; }
+//   `,
+//   swaggerOptions: {
+//     docExpansion: 'list',
+//     defaultModelsExpandDepth: 2,
+//     displayRequestDuration: true
+//   }
+// }));
 
 // Raw OpenAPI spec
-app.get('/api-docs.json', (req, res) => {
-  res.json(swaggerSpec);
-});
+// app.get('/api-docs.json', (req, res) => {
+//   res.json(swaggerSpec);
+// });
 
-app.use('*', (req, res) => {
-  res.status(404).json({
-    Status: "Failed",
-    message: "404 Not Found"
-  });
-});
+// app.use('*', (req, res) => {
+//   res.status(404).json({
+//     Status: "Failed",
+//     message: "404 Not Found",
+//     result: null
+//   });
+// });
 
 
 function generateRandomUserId() {
   return new mongoose.Types.ObjectId();
 }
 
-// Error Handling middlewares
 app.use(notFound);
 app.use(errorHandler);
+
 
 const PORT = process.env.PORT;
 const server = app.listen(
@@ -160,11 +212,14 @@ const io = getIo()
 
 io.on("connection", (socket) => {
   let currentActiveChat = null
+
   console.log("Connected to socket.io");
-  socket.on("setup", (user_id) => {
+  socket.on("setup", async (user_id) => {
     if (user_id) {
       socket.join(user_id);
       socket.emit("connected");
+      await markOnline(user_id)
+      socket.user_id = user_id
     }
   });
 
@@ -406,17 +461,14 @@ io.on("connection", (socket) => {
       }
     }
     io.to(payload.question_id).emit("update_likes_response", updatedQuestion)
-
   })
-
-
 
   socket.on("remove-user", (id) => {
     socket.leave(id);
   });
 
-  socket.off("setup", () => {
-    console.log("USER DISCONNECTED", user_id);
+  socket.off("setup", async () => {
+    await markOffline(user_id)
     socket.leave(user_id);
   });
 });

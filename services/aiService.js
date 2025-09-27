@@ -156,6 +156,19 @@ class AIService {
             status: rateLimitHandler.shouldSkipModel(model.name) ? 'rate_limited' : 'available'
         }));
     }
+
+    async getEmbeddingModelStatus() {
+        try {
+            const res = await fetch(`${process.env.HF_API_END_POINT}health`);
+            const text = await res.text();
+            return {
+                status: text,
+            };
+        } catch (err) {
+            console.error('Health check failed:', err);
+            return { status: 'failed', error: err.message };
+        }
+    }
 }
 
 module.exports = new AIService();

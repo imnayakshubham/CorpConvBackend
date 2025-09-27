@@ -4,6 +4,8 @@ const { validateMessageRequest, validateSessionId } = require('../middleware/val
 
 const router = express.Router();
 
+router.post('/generate-embedding', aiController.generateEmbeddings);
+
 router.post('/generate', validateMessageRequest, aiController.generateResponse);
 
 router.post('/single', validateMessageRequest, aiController.generateSingleResponse);

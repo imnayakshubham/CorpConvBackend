@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const logger = require("../utils/logger");
 const colors = require("colors");
 
 const connectDB = async () => {
@@ -7,9 +8,9 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 30000
     });
 
-    console.log(`MongoDB Connected: ${db.connection.host}`.cyan.underline);
+    logger.info(`Connected`);
   } catch (error) {
-    console.error(`Error: ${error.message}`.red.bold);
+    logger.error(`Error: ${error.message}`);
     process.exit(1);
   }
 };

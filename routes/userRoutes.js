@@ -14,7 +14,8 @@ const {
   updateUserProfileDetails,
   addProfileItem, deleteProfileItem, updateProfileItem,
   getProfile,
-  updateLayouts
+  updateLayouts,
+  getUserRecommendations
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -51,5 +52,8 @@ router
 router
   .route('/user/:user_id/profile/layouts')
   .put(protect, updateLayouts);
+
+
+router.route('/user/recommend/:user_id').get(getUserRecommendations);
 
 module.exports = router;
