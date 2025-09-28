@@ -398,7 +398,6 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-    logger.info("jhhhlekjlre", userId, projection)
     const user = await getUserWithFlatProfileDetails({ userId, options: { projection } })
 
     if (user) {

@@ -17,6 +17,7 @@ const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
+const feedbackRoutes = require('./routes/feedbackRoutes');
 
 
 const cors = require("cors");
@@ -134,6 +135,7 @@ app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 
 

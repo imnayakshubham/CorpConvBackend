@@ -109,4 +109,39 @@ router.post('/form-submission', [
   }
 });
 
+// Send feedback notification to admin
+router.post('/feedback-notification', [
+  body('feedback').isObject().withMessage('Feedback object is required'),
+  body('feedback._id').notEmpty().withMessage('Feedback ID is required'),
+  body('feedback.type').notEmpty().withMessage('Feedback type is required'),
+  body('feedback.title').notEmpty().withMessage('Feedback title is required'),
+  body('feedback.description').notEmpty().withMessage('Feedback description is required'),
+  body('adminEmail').optional().isEmail().withMessage('Admin email must be valid'),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { feedback, adminEmail } = req.body;
+    const result = await emailService.sendFeedbackNotificationToAdmin({ feedback, adminEmail });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Feedback notification email error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+
 export default router;
