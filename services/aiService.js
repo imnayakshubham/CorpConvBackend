@@ -1,4 +1,4 @@
-const OpenAI = require('openai');
+const OpenAI = require('openai/index.js');
 const config = require('../config');
 const { MODELS } = require('../constants/models');
 const rateLimitHandler = require('./rateLimitHandler');
