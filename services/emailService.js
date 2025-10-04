@@ -11,20 +11,20 @@ class EmailService {
   }
 
   async initializeGoogleAuth() {
-    if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET || !process.env.GMAIL_REFRESH_TOKEN) {
+    if (!process.env.CLIENT_ID || !process.env.CLIENT_SECRET || !process.env.REFRESH_TOKEN) {
       console.warn("Gmail OAuth credentials not configured. Email functionality will be disabled.");
       return;
     }
 
     try {
       this.oauth2Client = new google.auth.OAuth2(
-        process.env.GMAIL_CLIENT_ID,
-        process.env.GMAIL_CLIENT_SECRET,
-        'https://developers.google.com/oauthplayground'
+        process.env.CLIENT_ID,
+        process.env.CLIENT_SECRET,
+        process.env.REDIRECT_URI || 'https://developers.google.com/oauthplayground'
       );
 
       this.oauth2Client.setCredentials({
-        refresh_token: process.env.GMAIL_REFRESH_TOKEN
+        refresh_token: process.env.REFRESH_TOKEN
       });
 
       await this.createTransporter();
@@ -36,15 +36,15 @@ class EmailService {
   async createTransporter() {
     try {
       const { token } = await this.oauth2Client.getAccessToken();
-
+      console.log({ token })
       this.transporter = nodemailer.createTransporter({
         service: 'gmail',
         auth: {
           type: 'OAuth2',
           user: process.env.GMAIL_USER_EMAIL,
-          clientId: process.env.GMAIL_CLIENT_ID,
-          clientSecret: process.env.GMAIL_CLIENT_SECRET,
-          refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+          clientId: process.env.CLIENT_ID,
+          clientSecret: process.env.CLIENT_SECRET,
+          refreshToken: process.env.REFRESH_TOKEN,
           accessToken: token,
         },
       });

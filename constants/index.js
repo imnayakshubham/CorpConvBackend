@@ -183,10 +183,11 @@ const isProd = process.env.APP_ENV === 'PROD';
 
 const cookieOptions = {
     httpOnly: true,
-    secure: isProd,             // must be true in production
-    sameSite: isProd ? 'none' : 'lax', // cross-origin needs None in prod
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    secure: isProd,             // must be true in production for HTTPS
+    sameSite: isProd ? 'none' : 'lax', // 'none' required for cross-origin in production
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days default
     path: '/',
+    // Don't set domain in production to allow cross-domain cookies
     domain: isProd ? undefined : 'localhost'
 };
 

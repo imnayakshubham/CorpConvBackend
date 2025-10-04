@@ -2,9 +2,9 @@ const jwt = require("jsonwebtoken");
 const { default: mongoose } = require("mongoose");
 const { jobPostSites } = require("../constants");
 
-const generateToken = (id) => {
+const generateToken = (id, expiresIn = "30d") => {
     return jwt.sign({ id }, process.env.JWT_SECRET_KEY, {
-        expiresIn: "30d",
+        expiresIn,
     });
 };
 

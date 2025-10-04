@@ -217,6 +217,10 @@ const authUser = async (req, res) => {
   }
 };
 
+/**
+ * Logout
+ * POST /api/auth/logout
+ */
 const logout = async (req, res) => {
   try {
     const updateOperation = {
@@ -968,4 +972,465 @@ const getUserRecommendations = async (req, res) => {
   }
 };
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations };
+
+/**
+ * Generate JWT tokens for authentication
+ * @param {string} userId - User ID
+ * @returns {Object} - Access and refresh tokens
+ */
+const generateTokens = (userId) => {
+  const accessToken = generateToken(userId, '15m'); // 15 minutes
+  const refreshToken = generateToken(userId, '7d'); // 7 days
+  return { accessToken, refreshToken };
+}
+
+/**
+ * Set authentication cookies
+ * @param {Object} res - Express response object
+ * @param {string} accessToken - JWT access token
+ * @param {string} refreshToken - JWT refresh token
+ */
+const setAuthCookies = (res, accessToken, refreshToken) => {
+  // Main auth token (httpOnly for security)
+  res.cookie(tokenkeyName, accessToken, {
+    ...cookieOptions,
+    maxAge: 15 * 60 * 1000, // 15 minutes
+  });
+
+  // Refresh token (httpOnly, longer expiry)
+  res.cookie(`${tokenkeyName}:refresh`, refreshToken, {
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+
+  // Client-readable auth status (not httpOnly)
+  res.cookie('isAuthenticated', 'true', {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 15 * 60 * 1000, // 15 minutes
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+}
+
+/**
+ * Clear authentication cookies
+ * @param {Object} res - Express response object
+ */
+const clearAuthCookies = (res) => {
+  const clearOptions = {
+    ...cookieOptions,
+    maxAge: 0
+  };
+
+  res.clearCookie(tokenkeyName, clearOptions);
+  res.clearCookie(`${tokenkeyName}:refresh`, clearOptions);
+  res.clearCookie('isAuthenticated', {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+}
+
+/**
+ * Firebase Google Authentication
+ * POST /api/auth/firebase-google
+ */
+const firebaseGoogleAuth = asyncHandler(async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(400).json({
+      success: false,
+      error: "Firebase ID token is required"
+    });
+  }
+
+  try {
+    // Verify Firebase token
+    const firebaseResult = await verifyFirebaseToken(idToken);
+
+    if (!firebaseResult.success) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid Firebase token",
+        detail: firebaseResult.error
+      });
+    }
+
+    const { user: firebaseUser } = firebaseResult;
+
+    // Check if user exists in our database
+    let userData = await User.findOne({
+      $or: [
+        { user_email_id: firebaseUser.email },
+        { secondary_email_id: firebaseUser.email },
+        { firebaseUid: firebaseUser.uid }
+      ]
+    });
+
+    if (userData) {
+      // Update existing user with Firebase UID if not set
+      if (!userData.firebaseUid) {
+        userData.firebaseUid = firebaseUser.uid;
+        await userData.save();
+      }
+
+      // Generate tokens and set cookies
+      const { accessToken, refreshToken } = generateTokens(userData._id);
+      setAuthCookies(res, accessToken, refreshToken);
+
+      logger.info(`User logged in: ${userData.user_email_id}`);
+
+      return res.status(200).json({
+        success: true,
+        message: "Login successful",
+        data: {
+          user: responseFormatterForAuth(userData._doc),
+          token: accessToken
+        }
+      });
+
+    } else {
+      // Create new user from Firebase data
+      const emailSplit = firebaseUser.email.split("@");
+      const domain = emailSplit[1].split(".")[0];
+      const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
+      const companyId = companyExist?.company_id || new mongoose.Types.ObjectId();
+      const companyName = companyExist?.company_name || toTitleCase(domain);
+
+      // Create company if it doesn't exist
+      if (!companyExist) {
+        const company = new Company({
+          company_id: companyId,
+          company_name: companyName
+        });
+        await company.save();
+      }
+
+      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain)
+        ? toTitleCase(domain)
+        : "Somewhere";
+
+      const newUserData = {
+        user_email_id: firebaseUser.email,
+        public_user_name: firebaseUser.name || firebaseUser.email.split('@')[0],
+        is_email_verified: firebaseUser.emailVerified,
+        is_anonymous: false, // Firebase users are not anonymous
+        user_current_company_name,
+        user_company_id: companyId,
+        user_past_company_history: [companyId],
+        primary_email_domain: emailSplit[1],
+        firebaseUid: firebaseUser.uid,
+        user_public_profile_pic: firebaseUser.picture || null,
+        access: true
+      };
+
+      const newUser = new User(newUserData);
+      await newUser.save();
+
+      // Generate tokens and set cookies
+      const { accessToken, refreshToken } = generateTokens(newUser._id);
+      setAuthCookies(res, accessToken, refreshToken);
+
+      logger.info(`New user created: ${newUser.user_email_id}`);
+
+      return res.status(201).json({
+        success: true,
+        message: "User created and logged in successfully",
+        data: {
+          user: responseFormatterForAuth(newUser._doc),
+          token: accessToken
+        }
+      });
+    }
+
+  } catch (error) {
+    logger.error("Firebase Google auth error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Authentication failed",
+      detail: error.message
+    });
+  }
+});
+
+/**
+ * Token Refresh
+ * POST /api/auth/refresh
+ */
+const refreshToken = asyncHandler(async (req, res) => {
+  const refreshTokenCookie = req.cookies?.[`${tokenkeyName}:refresh`];
+
+  if (!refreshTokenCookie) {
+    return res.status(401).json({
+      success: false,
+      error: "Refresh token not found"
+    });
+  }
+
+  try {
+    const jwt = require("jsonwebtoken");
+    const decoded = jwt.verify(refreshTokenCookie, process.env.JWT_SECRET_KEY);
+
+    // Check if user still exists and has access
+    const user = await User.findOne({ _id: decoded.id, access: true });
+
+    if (!user) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        success: false,
+        error: "User not found or access revoked"
+      });
+    }
+
+    // Generate new tokens
+    const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id);
+    setAuthCookies(res, accessToken, newRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: "Tokens refreshed successfully",
+      data: {
+        user: responseFormatterForAuth(user._doc),
+        token: accessToken
+      }
+    });
+
+  } catch (error) {
+    clearAuthCookies(res);
+    return res.status(401).json({
+      success: false,
+      error: "Invalid refresh token"
+    });
+  }
+});
+
+/**
+ * Get Current User
+ * GET /api/auth/me
+ */
+const getCurrentUser = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: responseFormatterForAuth(user._doc)
+      }
+    });
+
+  } catch (error) {
+    logger.error("Get current user error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to get user data"
+    });
+  }
+});
+
+
+
+/**
+ * Send Magic Link (Better-auth Email OTP)
+ * POST /api/auth/send-magic-link
+ */
+const sendMagicLink = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: "Email is required"
+    });
+  }
+
+  console.log({ email })
+  try {
+    // Check if email credentials are configured
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      logger.error("Email credentials not configured (EMAIL_USER or EMAIL_PASS missing)");
+      return res.status(500).json({
+        success: false,
+        error: "Email service not configured. Please contact support."
+      });
+    }
+
+    // Use better-auth's email OTP functionality
+    // This will trigger the sendOTP function configured in config/auth.js
+    const result = await generateMagicLink(email);
+    console.log({ result })
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || "Failed to send magic link"
+      });
+    }
+
+    // Send the magic link via email
+    const transporter = nodemailer.createTransporter({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"${process.env.APP_NAME || 'Hushwork'}" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Your Magic Link",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Sign in to ${process.env.APP_NAME || 'Hushwork'}</h2>
+          <p>Click the button below to sign in to your account:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${result.url}"
+               style="background: #007bff; color: white; padding: 12px 24px;
+                      text-decoration: none; border-radius: 6px; display: inline-block;">
+              Sign In
+            </a>
+          </div>
+          <p style="color: #666; font-size: 14px;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="${result.url}">${result.url}</a>
+          </p>
+          <p style="color: #666; font-size: 14px;">
+            This link will expire in 15 minutes for security reasons.
+          </p>
+        </div>
+      `
+    });
+
+    logger.info(`Magic link sent to ${email}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Magic link sent successfully"
+    });
+
+  } catch (error) {
+    logger.error("Send magic link error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send magic link"
+    });
+  }
+});
+
+/**
+ * Verify Magic Link or OTP
+ * POST /api/auth/verify
+ */
+const verifyAuth = asyncHandler(async (req, res) => {
+  const { email, otp, token, type } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: "Email is required"
+    });
+  }
+
+  try {
+    let verificationResult;
+
+    if (type === 'magic-link' && token) {
+      // Verify magic link token
+      verificationResult = verifyMagicToken(email, token);
+    } else if (type === 'otp' && otp) {
+      // Verify OTP
+      verificationResult = verifyOTPHelper(email, otp);
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid verification type or missing credentials"
+      });
+    }
+
+    if (!verificationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: verificationResult.error
+      });
+    }
+
+    // Find or create user
+    let user = await User.findOne({ user_email_id: email });
+
+    if (!user) {
+      // Create new user
+      const emailSplit = email.split("@");
+      const domain = emailSplit[1].split(".")[0];
+      const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
+      const companyId = companyExist?.company_id || new mongoose.Types.ObjectId();
+
+      if (!companyExist) {
+        const company = new Company({
+          company_id: companyId,
+          company_name: toTitleCase(domain)
+        });
+        await company.save();
+      }
+
+      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain)
+        ? toTitleCase(domain)
+        : "Somewhere";
+
+      user = new User({
+        user_email_id: email,
+        public_user_name: email.split('@')[0],
+        is_email_verified: true,
+        is_anonymous: false,
+        user_current_company_name,
+        user_company_id: companyId,
+        user_past_company_history: [companyId],
+        primary_email_domain: emailSplit[1],
+        access: true
+      });
+
+      await user.save();
+      logger.info(`New user created via ${type}: ${email}`);
+    }
+
+    // Generate tokens and set cookies
+    const { accessToken, refreshToken } = generateTokens(user._id);
+    setAuthCookies(res, accessToken, refreshToken);
+
+    logger.info(`User verified via ${type}: ${email}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Authentication successful",
+      data: {
+        user: responseFormatterForAuth(user._doc),
+        token: accessToken
+      }
+    });
+
+  } catch (error) {
+    logger.error("Verify auth error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Verification failed"
+    });
+  }
+});
+
+
+module.exports = {
+  allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations, firebaseGoogleAuth,
+  refreshToken,
+  getCurrentUser,
+  sendMagicLink,
+  verifyAuth
+};

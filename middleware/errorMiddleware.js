@@ -39,9 +39,9 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  const code = err.statusCode || res.statusCode === 200 ? 500 : res.statusCode;
+  const code = err.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
   console.log(err.message, err)
-  return res.status(code).error({
+  return res.error({
     status: 'Failed',
     message: err.message,
     error: process.env.NODE_ENV === 'production' ? null : err.stack,

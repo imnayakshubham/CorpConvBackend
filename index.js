@@ -18,6 +18,7 @@ const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
 const feedbackRoutes = require('./routes/feedbackRoutes');
+const { auth } = require('./config/auth');
 
 
 const cors = require("cors");
@@ -137,6 +138,9 @@ app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/feedback', feedbackRoutes);
 
+// Better-auth handler - handles all better-auth authentication endpoints
+// Must come before custom auth routes to handle better-auth specific paths
+app.use('/api/auth/*', auth.handler);
 
 
 if (APP_ENV === "PROD") {
@@ -179,6 +183,7 @@ initializeSocket(server);
 
 
 const redis = getRedisInstance();
+
 if (APP_ENV === "PROD") {
 
   (async () => {

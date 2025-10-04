@@ -3,4 +3,5 @@
 node_modules
 .node_modules
 .env
+.env.*
 swagger_output.json

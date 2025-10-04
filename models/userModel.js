@@ -110,6 +110,13 @@ const userSchema = mongoose.Schema({
     unique: true,
     required: [true, "Email is required"],
   },
+  firebaseUid: {
+    type: String,
+    trim: true,
+    sparse: true, // Allows multiple null values
+    unique: true, // But unique when not null
+    default: null
+  },
   is_email_verified: {
     type: Boolean,
     default: false,
@@ -214,6 +221,94 @@ const userSchema = mongoose.Schema({
   embedding_updated_at: Date,
   last_active_at: { type: Date, default: Date.now },
   credentials: [CredentialSchema],
+
+  // BetterAuth compatibility fields
+  betterAuthId: {
+    type: String,
+    sparse: true,
+    unique: true,
+    default: null
+  },
+  emailVerified: {
+    type: Date,
+    default: null
+  },
+  image: {
+    type: String,
+    default: null
+  },
+
+  // Password hash for BetterAuth email/password auth
+  hashedPassword: {
+    type: String,
+    default: null
+  },
+
+  // Magic link and OTP tracking
+  verificationTokens: [{
+    token: String,
+    type: {
+      type: String,
+      enum: ['email_verification', 'magic_link', 'otp', 'password_reset']
+    },
+    expires: Date,
+    used: {
+      type: Boolean,
+      default: false
+    }
+  }],
+
+  // Social auth providers
+  accounts: [{
+    provider: String,
+    providerId: String,
+    accessToken: String,
+    refreshToken: String,
+    expiresAt: Date
+  }],
+
+  // Passkey credentials for WebAuthn
+  passkeyCredentials: [{
+    id: String,
+    publicKey: Buffer,
+    counter: Number,
+    transports: [String],
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    lastUsed: Date,
+    nickname: String
+  }],
+
+  // Authentication method preferences
+  authMethods: {
+    email: {
+      type: Boolean,
+      default: true
+    },
+    google: {
+      type: Boolean,
+      default: true
+    },
+    passkey: {
+      type: Boolean,
+      default: false
+    }
+  },
+
+  // Security settings
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false
+  },
+  backupCodes: [{
+    code: String,
+    used: {
+      type: Boolean,
+      default: false
+    }
+  }]
 }, { timestaps: true });
 
 
