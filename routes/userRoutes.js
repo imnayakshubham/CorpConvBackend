@@ -24,8 +24,9 @@ const {
 
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
-const { auth, verifyOTP, generateMagicLink, verifyMagicToken } = require("../config/auth");
+const { auth, verifyOTP, verifyMagicToken } = require("../config/auth");
 const { MagicLink, OTP } = require("../models/authModels");
+const { sendUnifiedAuthEmail, verifyUnifiedAuth } = require("../services/unifiedAuth");
 const asyncHandler = require("express-async-handler");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
@@ -33,13 +34,23 @@ const emailService = require("../services/emailService");
 
 const router = express.Router();
 
-// BetterAuth handler - handles all BetterAuth routes
+// IMPORTANT: Custom auth routes must be registered BEFORE better-auth wildcard handler
+// to prevent better-auth from intercepting them
+
+// Firebase Google Authentication (custom implementation)
+router.post("/auth/firebase-google", firebaseGoogleAuth);
+router.post("/auth/refresh", refreshToken);
+router.get("/auth/me", protect, getCurrentUser);
+router.post("/auth/logout", protect, logout);
+
+// Better-auth handler - handles all remaining better-auth routes
+// This must come AFTER custom auth routes to avoid conflicts
 router.all("/auth/*", async (req, res) => {
   return auth.handler(req, res);
 });
 
 
-// Magic Link Authentication
+// Unified Magic Link + OTP Authentication
 router.post("/send-magic-link", asyncHandler(async (req, res) => {
   const { email } = req.body;
 
@@ -52,8 +63,8 @@ router.post("/send-magic-link", asyncHandler(async (req, res) => {
   console.log({ email })
 
   try {
-    // Generate magic link
-    const result = await generateMagicLink(email);
+    // Generate both magic link and OTP
+    const result = await sendUnifiedAuthEmail(email);
 
     if (!result.success) {
       return res.status(500).json({
@@ -62,7 +73,7 @@ router.post("/send-magic-link", asyncHandler(async (req, res) => {
       });
     }
 
-    // Send magic link email
+    // Send unified auth email with both options
     const transporter = emailService.createTransporter()
 
     await transporter.sendMail({
@@ -70,35 +81,66 @@ router.post("/send-magic-link", asyncHandler(async (req, res) => {
       to: email,
       subject: "Sign in to your account",
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #333;">Sign in to ${process.env.APP_NAME || 'Hushwork'}</h2>
-          <p>Click the button below to sign in to your account:</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${result.url}"
-               style="background: #007bff; color: white; padding: 12px 24px;
-                      text-decoration: none; border-radius: 6px; display: inline-block;">
-              Sign In
-            </a>
+          <p style="color: #555; font-size: 16px;">Choose your preferred method to sign in:</p>
+
+          <!-- Option 1: Magic Link -->
+          <div style="background: #f5f5f5; border-radius: 8px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #333; margin-top: 0;">Option 1: Magic Link</h3>
+            <p style="color: #666;">Click the button below for instant sign-in:</p>
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="${result.magicUrl}"
+                 style="background: #007bff; color: white; padding: 14px 32px;
+                        text-decoration: none; border-radius: 6px; display: inline-block;
+                        font-weight: 600; font-size: 16px;">
+                Sign In with Magic Link
+              </a>
+            </div>
+            <p style="color: #999; font-size: 13px; margin-bottom: 0;">
+              If the button doesn't work, copy this link:<br>
+              <a href="${result.magicUrl}" style="color: #007bff; word-break: break-all;">${result.magicUrl}</a>
+            </p>
           </div>
-          <p style="color: #666; font-size: 14px;">
-            If the button doesn't work, copy and paste this link into your browser:<br>
-            <a href="${result.url}">${result.url}</a>
-          </p>
-          <p style="color: #666; font-size: 14px;">
-            This link will expire in 15 minutes for security reasons.
-          </p>
-          <p style="color: #666; font-size: 14px;">
-            If you didn't request this link, you can safely ignore this email.
-          </p>
+
+          <!-- Divider -->
+          <div style="text-align: center; margin: 30px 0;">
+            <span style="color: #999; font-size: 14px; background: white; padding: 0 10px;">OR</span>
+            <hr style="margin-top: -12px; border: none; border-top: 1px solid #ddd;">
+          </div>
+
+          <!-- Option 2: OTP -->
+          <div style="background: #f5f5f5; border-radius: 8px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #333; margin-top: 0;">Option 2: One-Time Code</h3>
+            <p style="color: #666;">Enter this 6-digit code on the sign-in page:</p>
+            <div style="text-align: center; margin: 20px 0;">
+              <div style="background: white; border: 2px solid #007bff; border-radius: 8px;
+                          padding: 20px; display: inline-block;">
+                <span style="font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #007bff;">
+                  ${result.otp}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+            <p style="color: #666; font-size: 14px;">
+              ⏱️ Both options will expire in <strong>15 minutes</strong> for security.
+            </p>
+            <p style="color: #666; font-size: 14px;">
+              🔒 If you didn't request this, you can safely ignore this email.
+            </p>
+          </div>
         </div>
       `
     });
 
-    logger.info(`Magic link sent to ${email}`);
+    logger.info(`Unified auth (magic link + OTP) sent to ${email}`);
 
     res.status(200).json({
       success: true,
-      message: "Magic link sent to your email"
+      message: "Sign-in options sent to your email"
     });
 
   } catch (error) {
@@ -311,13 +353,10 @@ router
   .route('/user/:user_id/profile/layouts')
   .put(protect, updateLayouts);
 
+// Note: Firebase auth routes (firebase-google, refresh, me, logout) are registered
+// at the top of this file under /auth/* to ensure proper route precedence
 
-router.post("/firebase-google", firebaseGoogleAuth);
-router.post("/refresh", refreshToken);
-router.get("/me", protect, getCurrentUser);
-router.post("/logout", protect, logout);
-
-// Better-auth integration routes
+// Better-auth integration routes (non-auth paths)
 router.post("/send-magic-link", sendMagicLink);
 router.post("/verify", verifyAuth);
 

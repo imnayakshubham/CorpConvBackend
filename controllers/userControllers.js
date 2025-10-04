@@ -8,7 +8,7 @@ const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, isProd } = require("../constants/index.js");
 const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob } = require("../redisClient/redisUtils.js");
 const Item = require("../models/Item.js");
 const userEmbedding = require("../models/userEmbedding.js");
@@ -16,6 +16,8 @@ const { recommendationQueue } = require("../queues/index.js");
 const Recommendation = require("../models/Recommendation.js");
 const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 const logger = require("../utils/logger.js");
+const { verifyFirebaseToken, getFirebaseUser } = require("../services/firebaseAdmin");
+const { decryptUserData } = require("../utils/encryption");
 
 
 const projection = {
@@ -129,22 +131,26 @@ const getfollowersList = async (req, res) => {
 };
 
 const responseFormatterForAuth = (result) => {
+  // Decrypt sensitive user data before sending to client
+  const decrypted = decryptUserData(result);
+
   return {
-    is_email_verified: result.is_email_verified,
-    user_job_role: result.user_job_role,
-    user_job_experience: result.user_job_experience,
-    user_bio: result.user_bio,
-    isAdmin: result.isAdmin,
-    is_anonymous: result.is_anonymous,
-    token: result?.token,
-    user_current_company_name: result.user_current_company_name,
-    user_email_id: result.user_email_id,
-    _id: result._id,
-    secondary_email_id: result.secondary_email_id,
-    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
-    public_user_name: result.public_user_name,
-    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
-    user_public_profile_pic: result.user_public_profile_pic,
+    is_email_verified: decrypted.is_email_verified,
+    user_job_role: decrypted.user_job_role,
+    user_job_experience: decrypted.user_job_experience,
+    user_bio: decrypted.user_bio,
+    isAdmin: decrypted.isAdmin,
+    is_anonymous: decrypted.is_anonymous,
+    token: decrypted?.token,
+    user_current_company_name: decrypted.user_current_company_name,
+    user_email_id: decrypted.user_email_id,  // Now decrypted
+    _id: decrypted._id,
+    secondary_email_id: decrypted.secondary_email_id,  // Now decrypted
+    is_secondary_email_id_verified: decrypted.is_secondary_email_id_verified,
+    public_user_name: decrypted.public_user_name,
+    is_secondary_email_id_verified: decrypted.is_secondary_email_id_verified,
+    user_public_profile_pic: decrypted.user_public_profile_pic,
+    is_masked: decrypted.is_masked  // Include encryption flag
   }
 }
 
@@ -1036,6 +1042,10 @@ const clearAuthCookies = (res) => {
 /**
  * Firebase Google Authentication
  * POST /api/auth/firebase-google
+ *
+ * SECURITY: This endpoint only uses Firebase token for UID verification.
+ * User data is fetched from Firebase Admin SDK (not from the token payload)
+ * to prevent client-side tampering and ensure data integrity.
  */
 const firebaseGoogleAuth = asyncHandler(async (req, res) => {
   const { idToken } = req.body;
@@ -1048,7 +1058,7 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
   }
 
   try {
-    // Verify Firebase token
+    // SECURITY: Verify Firebase token and extract ONLY uid
     const firebaseResult = await verifyFirebaseToken(idToken);
 
     if (!firebaseResult.success) {
@@ -1059,42 +1069,60 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       });
     }
 
-    const { user: firebaseUser } = firebaseResult;
+    const firebaseUid = firebaseResult.uid;
+
+    // SECURITY: Fetch user data from Firebase Admin SDK (server-side, trusted source)
+    // Instead of using data from the ID token (which contains user info from client)
+    const firebaseUserResult = await getFirebaseUser(firebaseUid);
+
+    if (!firebaseUserResult.success) {
+      return res.status(401).json({
+        success: false,
+        error: "Failed to fetch user data from Firebase",
+        detail: firebaseUserResult.error
+      });
+    }
+
+    const firebaseUserRecord = firebaseUserResult.user;
+    const firebaseEmail = firebaseUserRecord.email;
+    const firebaseDisplayName = firebaseUserRecord.displayName;
+    const firebasePhotoURL = firebaseUserRecord.photoURL;
+    const firebaseEmailVerified = firebaseUserRecord.emailVerified;
 
     // Check if user exists in our database
     let userData = await User.findOne({
       $or: [
-        { user_email_id: firebaseUser.email },
-        { secondary_email_id: firebaseUser.email },
-        { firebaseUid: firebaseUser.uid }
+        { user_email_id: firebaseEmail },
+        { secondary_email_id: firebaseEmail },
+        { firebaseUid: firebaseUid }
       ]
     });
 
     if (userData) {
       // Update existing user with Firebase UID if not set
       if (!userData.firebaseUid) {
-        userData.firebaseUid = firebaseUser.uid;
+        userData.firebaseUid = firebaseUid;
         await userData.save();
       }
 
-      // Generate tokens and set cookies
+      // Generate minimal JWT tokens (only contains user ID)
       const { accessToken, refreshToken } = generateTokens(userData._id);
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info(`User logged in: ${userData.user_email_id}`);
+      logger.info(`User logged in: ${userData.user_email_id} (UID from DB, not token)`);
 
       return res.status(200).json({
         success: true,
         message: "Login successful",
         data: {
           user: responseFormatterForAuth(userData._doc),
-          token: accessToken
+          token: accessToken  // JWT contains only { id: userId }
         }
       });
 
     } else {
-      // Create new user from Firebase data
-      const emailSplit = firebaseUser.email.split("@");
+      // Create new user from Firebase Admin SDK data (trusted source)
+      const emailSplit = firebaseEmail.split("@");
       const domain = emailSplit[1].split(".")[0];
       const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
       const companyId = companyExist?.company_id || new mongoose.Types.ObjectId();
@@ -1114,34 +1142,34 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
         : "Somewhere";
 
       const newUserData = {
-        user_email_id: firebaseUser.email,
-        public_user_name: firebaseUser.name || firebaseUser.email.split('@')[0],
-        is_email_verified: firebaseUser.emailVerified,
-        is_anonymous: false, // Firebase users are not anonymous
+        user_email_id: firebaseEmail,
+        public_user_name: firebaseDisplayName || firebaseEmail.split('@')[0],
+        is_email_verified: firebaseEmailVerified,
+        is_anonymous: false,
         user_current_company_name,
         user_company_id: companyId,
         user_past_company_history: [companyId],
         primary_email_domain: emailSplit[1],
-        firebaseUid: firebaseUser.uid,
-        user_public_profile_pic: firebaseUser.picture || null,
+        firebaseUid: firebaseUid,
+        user_public_profile_pic: firebasePhotoURL || null,
         access: true
       };
 
       const newUser = new User(newUserData);
       await newUser.save();
 
-      // Generate tokens and set cookies
+      // Generate minimal JWT tokens (only contains user ID)
       const { accessToken, refreshToken } = generateTokens(newUser._id);
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info(`New user created: ${newUser.user_email_id}`);
+      logger.info(`New user created: ${newUser.user_email_id} (Data from Firebase Admin SDK)`);
 
       return res.status(201).json({
         success: true,
         message: "User created and logged in successfully",
         data: {
           user: responseFormatterForAuth(newUser._doc),
-          token: accessToken
+          token: accessToken  // JWT contains only { id: userId }
         }
       });
     }

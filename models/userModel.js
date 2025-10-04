@@ -308,7 +308,15 @@ const userSchema = mongoose.Schema({
       type: Boolean,
       default: false
     }
-  }]
+  }],
+
+  // Encryption flag - indicates if sensitive data is encrypted
+  is_masked: {
+    type: Boolean,
+    default: false,
+    required: true,
+    index: true  // For querying encrypted vs plain users
+  }
 }, { timestaps: true });
 
 
@@ -317,6 +325,45 @@ const userSchema = mongoose.Schema({
 userSchema.index({ hobbies: 1 });
 userSchema.index({ profession: 1, field_of_study: 1, last_active_at: -1 });
 
+// Encryption middleware - auto-encrypt sensitive fields before saving
+userSchema.pre('save', async function(next) {
+  // Skip if already masked and no sensitive fields modified
+  if (this.is_masked &&
+      !this.isModified('user_email_id') &&
+      !this.isModified('actual_user_name') &&
+      !this.isModified('user_phone_number') &&
+      !this.isModified('secondary_email_id') &&
+      !this.isModified('user_location')) {
+    return next();
+  }
+
+  // Encrypt sensitive fields
+  const { encrypt } = require('../utils/encryption');
+
+  const fieldsToEncrypt = [
+    'user_email_id',
+    'actual_user_name',
+    'user_phone_number',
+    'secondary_email_id',
+    'user_location'
+  ];
+
+  for (const field of fieldsToEncrypt) {
+    if (this[field] && this.isModified(field)) {
+      // Only encrypt if not already encrypted (doesn't contain ':' or not in format)
+      const value = String(this[field]);
+      const parts = value.split(':');
+
+      // Check if already encrypted (format: iv:authTag:encrypted)
+      if (parts.length !== 3 || !/^[0-9a-f]+$/.test(parts[0])) {
+        this[field] = encrypt(value);
+      }
+    }
+  }
+
+  this.is_masked = true;
+  next();
+});
 
 const User = mongoose.model("User", userSchema);
 

@@ -24,9 +24,11 @@ if (!admin.apps.length) {
 }
 
 /**
- * Verify Firebase ID token
+ * Verify Firebase ID token and extract ONLY uid for security
+ * For security purposes, we only extract the uid from Firebase token
+ * All other user information is fetched from our MongoDB database
  * @param {string} idToken - Firebase ID token from client
- * @returns {Promise<Object>} - Decoded token containing user information
+ * @returns {Promise<Object>} - Only contains uid from Firebase token
  */
 async function verifyFirebaseToken(idToken) {
   try {
@@ -37,16 +39,12 @@ async function verifyFirebaseToken(idToken) {
       };
     }
     const decodedToken = await admin.auth().verifyIdToken(idToken);
+
+    // SECURITY: Only extract uid, ignore all other claims (email, name, picture, etc.)
+    // User data will be fetched from MongoDB database instead
     return {
       success: true,
-      user: {
-        uid: decodedToken.uid,
-        email: decodedToken.email,
-        name: decodedToken.name,
-        picture: decodedToken.picture,
-        emailVerified: decodedToken.email_verified,
-        firebase: decodedToken
-      }
+      uid: decodedToken.uid  // Only return uid
     };
   } catch (error) {
     console.error('Error verifying Firebase token:', error);

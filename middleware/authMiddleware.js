@@ -3,6 +3,21 @@ const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 
+/**
+ * Authentication Middleware - Protects routes requiring authentication
+ *
+ * SECURITY FLOW:
+ * 1. Extract minimal JWT token (contains only user ID: { id: userId })
+ * 2. Verify token signature and expiration
+ * 3. Fetch complete user data from MongoDB database (trusted source)
+ * 4. Attach user object to req.user for use in route handlers
+ *
+ * This ensures that:
+ * - Tokens are minimal (only user ID, no sensitive data)
+ * - User data is always fresh from database
+ * - Revoked users are immediately blocked
+ * - No sensitive data is exposed in the token payload
+ */
 const protect = asyncHandler(async (req, res, next) => {
   const token = req.headers.token || req.cookies?.[tokenkeyName]
 
@@ -13,8 +28,11 @@ const protect = asyncHandler(async (req, res, next) => {
 
   if (!!token) {
     try {
-
+      // Verify JWT and extract user ID (token contains only { id: userId })
       const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+
+      // SECURITY: Fetch user from database (not from token payload)
+      // This ensures user data is always current and access can be revoked
       const user = await User.findOne({ _id: decoded.id })
 
       if (user && user.access) {

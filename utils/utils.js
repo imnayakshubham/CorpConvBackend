@@ -2,6 +2,16 @@ const jwt = require("jsonwebtoken");
 const { default: mongoose } = require("mongoose");
 const { jobPostSites } = require("../constants");
 
+/**
+ * Generate minimal JWT token for security
+ * SECURITY: Token payload contains ONLY the user ID ({ id: userId })
+ * No sensitive data (email, name, etc.) is included in the token
+ * All user information is fetched from MongoDB on each request via authMiddleware
+ *
+ * @param {string} id - User ID (MongoDB ObjectId)
+ * @param {string} expiresIn - Token expiration time (default: 30 days)
+ * @returns {string} - JWT token with minimal payload
+ */
 const generateToken = (id, expiresIn = "30d") => {
     return jwt.sign({ id }, process.env.JWT_SECRET_KEY, {
         expiresIn,
