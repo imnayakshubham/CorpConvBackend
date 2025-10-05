@@ -22,7 +22,7 @@ async function generateEmbeddings(text) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.HF_API_KEY}`,
+                'token': `Bearer ${process.env.HF_API_KEY}`,
             },
             body: JSON.stringify({ text }),
         });

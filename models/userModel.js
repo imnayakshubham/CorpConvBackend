@@ -316,6 +316,24 @@ const userSchema = mongoose.Schema({
     default: false,
     required: true,
     index: true  // For querying encrypted vs plain users
+  },
+
+  // Premium subscription fields
+  has_premium: {
+    type: Boolean,
+    default: false,
+    required: true,
+    index: true  // For querying premium users
+  },
+  premium_expires_at: {
+    type: Date,
+    default: null  // null means no expiration (lifetime) or not premium
+  },
+  premium_plan: {
+    type: String,
+    enum: ["free", "monthly", "yearly", "lifetime"],
+    default: "free",
+    required: true
   }
 }, { timestaps: true });
 

@@ -3,6 +3,28 @@ const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 
+const isProd = process.env.APP_ENV === 'PROD';
+
+/**
+ * Clear all authentication cookies (access token, refresh token, isAuthenticated flag)
+ * @param {Object} res - Express response object
+ */
+const clearAuthCookies = (res) => {
+  const clearOptions = {
+    ...cookieOptions,
+    maxAge: 0
+  };
+
+  res.clearCookie(tokenkeyName, clearOptions);
+  res.clearCookie(`${tokenkeyName}:refresh`, clearOptions);
+  res.clearCookie('isAuthenticated', {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+};
+
 /**
  * Authentication Middleware - Protects routes requiring authentication
  *
@@ -22,7 +44,7 @@ const protect = asyncHandler(async (req, res, next) => {
   const token = req.headers.token || req.cookies?.[tokenkeyName]
 
   if (!token) {
-    res.clearCookie(tokenkeyName);
+    clearAuthCookies(res);
     return res.status(401).send({ error: 'Unauthorized', message: 'No token provided' });
   }
 
@@ -39,13 +61,13 @@ const protect = asyncHandler(async (req, res, next) => {
         req.user = await User.findOne({ _id: decoded.id })
         next();
       } else {
-        res.clearCookie(tokenkeyName);
+        clearAuthCookies(res);
         return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
       }
 
     } catch (error) {
       console.log(error)
-      res.clearCookie(tokenkeyName);
+      clearAuthCookies(res);
       if (error.name === 'TokenExpiredError') {
         return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
       }

@@ -41,7 +41,7 @@ const projection = {
 
 // userId: string,
 //   options?: {
-//     projection?: any;
+//     projection?: unknown;
 //     populateOptions?: Parameters<typeof User.prototype.populate>[0];
 //     profileItemsFilter?: (item: any) => boolean;
 //   }
@@ -131,26 +131,31 @@ const getfollowersList = async (req, res) => {
 };
 
 const responseFormatterForAuth = (result) => {
-  // Decrypt sensitive user data before sending to client
+  // For anonymous app - only send public, non-sensitive data to frontend
+  // Sensitive data (email, actual name, phone) stays on backend only
   const decrypted = decryptUserData(result);
 
   return {
-    is_email_verified: decrypted.is_email_verified,
+    // Core identity (non-sensitive)
+    _id: decrypted._id,
+    public_user_name: decrypted.public_user_name,  // Public display name only
+    user_public_profile_pic: decrypted.user_public_profile_pic,
+    is_anonymous: decrypted.is_anonymous,
+
+    // Public profile information
+    user_bio: decrypted.user_bio,
     user_job_role: decrypted.user_job_role,
     user_job_experience: decrypted.user_job_experience,
-    user_bio: decrypted.user_bio,
-    isAdmin: decrypted.isAdmin,
-    is_anonymous: decrypted.is_anonymous,
-    token: decrypted?.token,
     user_current_company_name: decrypted.user_current_company_name,
-    user_email_id: decrypted.user_email_id,  // Now decrypted
-    _id: decrypted._id,
-    secondary_email_id: decrypted.secondary_email_id,  // Now decrypted
-    is_secondary_email_id_verified: decrypted.is_secondary_email_id_verified,
-    public_user_name: decrypted.public_user_name,
-    is_secondary_email_id_verified: decrypted.is_secondary_email_id_verified,
-    user_public_profile_pic: decrypted.user_public_profile_pic,
-    is_masked: decrypted.is_masked  // Include encryption flag
+
+    // Account status flags
+    is_email_verified: decrypted.is_email_verified,
+    isAdmin: decrypted.isAdmin,
+
+    // Premium subscription
+    has_premium: decrypted.has_premium || false,
+    premium_expires_at: decrypted.premium_expires_at || null,
+    premium_plan: decrypted.premium_plan || 'free'
   }
 }
 
@@ -985,8 +990,8 @@ const getUserRecommendations = async (req, res) => {
  * @returns {Object} - Access and refresh tokens
  */
 const generateTokens = (userId) => {
-  const accessToken = generateToken(userId, '15m'); // 15 minutes
-  const refreshToken = generateToken(userId, '7d'); // 7 days
+  const accessToken = generateToken(userId, '7d'); // 7 days (extended from 15m)
+  const refreshToken = generateToken(userId, '30d'); // 30 days (extended from 7d)
   return { accessToken, refreshToken };
 }
 
@@ -1000,20 +1005,21 @@ const setAuthCookies = (res, accessToken, refreshToken) => {
   // Main auth token (httpOnly for security)
   res.cookie(tokenkeyName, accessToken, {
     ...cookieOptions,
-    maxAge: 15 * 60 * 1000, // 15 minutes
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (extended from 15 minutes)
   });
 
   // Refresh token (httpOnly, longer expiry)
   res.cookie(`${tokenkeyName}:refresh`, refreshToken, {
     ...cookieOptions,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days (extended from 7 days)
   });
 
-  // Client-readable auth status (not httpOnly)
+  // Client-readable auth status (not httpOnly) - matches access token expiry
   res.cookie('isAuthenticated', 'true', {
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
-    maxAge: 15 * 60 * 1000, // 15 minutes
+    httpOnly: false, // Must be readable by client JavaScript
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (extended from 15 minutes)
     path: '/',
     domain: isProd ? undefined : 'localhost'
   });
@@ -1041,11 +1047,14 @@ const clearAuthCookies = (res) => {
 
 /**
  * Firebase Google Authentication
- * POST /api/auth/firebase-google
+ * POST /api/user/firebase-google
  *
  * SECURITY: This endpoint only uses Firebase token for UID verification.
  * User data is fetched from Firebase Admin SDK (not from the token payload)
  * to prevent client-side tampering and ensure data integrity.
+ *
+ * NOTE: Route moved from /api/auth/firebase-google to /api/user/firebase-google
+ * to avoid conflict with Better Auth handler at /api/auth/*
  */
 const firebaseGoogleAuth = asyncHandler(async (req, res) => {
   const { idToken } = req.body;
@@ -1455,10 +1464,88 @@ const verifyAuth = asyncHandler(async (req, res) => {
 });
 
 
+// Update premium status
+const updatePremiumStatus = asyncHandler(async (req, res) => {
+  const { has_premium, premium_plan, premium_expires_at } = req.body;
+
+  // Validate input
+  if (typeof has_premium !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: "has_premium must be a boolean"
+    });
+  }
+
+  const validPlans = ["free", "monthly", "yearly", "lifetime"];
+  if (premium_plan && !validPlans.includes(premium_plan)) {
+    return res.status(400).json({
+      success: false,
+      error: `premium_plan must be one of: ${validPlans.join(", ")}`
+    });
+  }
+
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Update premium status
+    user.has_premium = has_premium;
+
+    if (premium_plan) {
+      user.premium_plan = premium_plan;
+    }
+
+    if (premium_expires_at) {
+      user.premium_expires_at = new Date(premium_expires_at);
+    } else if (has_premium && premium_plan === "lifetime") {
+      user.premium_expires_at = null; // null means lifetime
+    } else if (!has_premium) {
+      user.premium_plan = "free";
+      user.premium_expires_at = null;
+    }
+
+    // Check if premium has expired
+    if (user.has_premium && user.premium_expires_at && new Date() > user.premium_expires_at) {
+      user.has_premium = false;
+      user.premium_plan = "free";
+    }
+
+    await user.save();
+
+    logger.info(`Premium status updated for user ${user.user_email_id}: ${has_premium} (${user.premium_plan})`);
+
+    // Return decrypted user data
+    const decryptedUser = decryptUserData(user._doc);
+
+    return res.status(200).json({
+      success: true,
+      message: "Premium status updated successfully",
+      data: {
+        user: responseFormatterForAuth(decryptedUser)
+      }
+    });
+
+  } catch (error) {
+    logger.error("Update premium status error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update premium status"
+    });
+  }
+});
+
+
 module.exports = {
   allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations, firebaseGoogleAuth,
   refreshToken,
   getCurrentUser,
+  updatePremiumStatus,
   sendMagicLink,
   verifyAuth
 };

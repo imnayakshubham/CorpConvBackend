@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 const emailService = require("../services/emailService");
+const { tokenkeyName } = require("../constants");
 
 
 // Generate OTP
@@ -42,7 +43,7 @@ const auth = betterAuth({
   // Cookie configuration for cross-domain
   cookies: {
     sessionToken: {
-      name: "better-auth.session_token",
+      name: tokenkeyName,
       options: {
         httpOnly: true,
         secure: process.env.APP_ENV === 'PROD',
@@ -163,7 +164,7 @@ const auth = betterAuth({
         : "localhost",
       origin: process.env.APP_ENV === 'PROD'
         ? [process.env.BETTER_AUTH_URL]
-        : ["http://localhost:3005", "http://localhost:8000"]
+        : ["http://localhost:3005", "http://localhost:5000"]
     }),
 
     // Email OTP for magic links

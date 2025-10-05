@@ -21,10 +21,11 @@ const {
   getCurrentUser,
   sendMagicLink,
   verifyAuth,
+  updatePremiumStatus,
 
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
-const { auth, verifyOTP, verifyMagicToken } = require("../config/auth");
+const { verifyOTP, verifyMagicToken } = require("../config/auth");
 const { MagicLink, OTP } = require("../models/authModels");
 const { sendUnifiedAuthEmail, verifyUnifiedAuth } = require("../services/unifiedAuth");
 const asyncHandler = require("express-async-handler");
@@ -34,20 +35,21 @@ const emailService = require("../services/emailService");
 
 const router = express.Router();
 
-// IMPORTANT: Custom auth routes must be registered BEFORE better-auth wildcard handler
-// to prevent better-auth from intercepting them
+// IMPORTANT: Custom auth routes moved outside /auth/* namespace
+// to prevent conflict with Better Auth handler at /api/auth/*
 
 // Firebase Google Authentication (custom implementation)
-router.post("/auth/firebase-google", firebaseGoogleAuth);
+// Changed path from /auth/firebase-google to /user/firebase-google to avoid conflict
+router.post("/user/firebase-google", firebaseGoogleAuth);
 router.post("/auth/refresh", refreshToken);
 router.get("/auth/me", protect, getCurrentUser);
 router.post("/auth/logout", protect, logout);
 
+// Premium management
+router.put("/premium", protect, updatePremiumStatus);
+
 // Better-auth handler - handles all remaining better-auth routes
 // This must come AFTER custom auth routes to avoid conflicts
-router.all("/auth/*", async (req, res) => {
-  return auth.handler(req, res);
-});
 
 
 // Unified Magic Link + OTP Authentication

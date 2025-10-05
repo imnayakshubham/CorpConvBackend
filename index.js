@@ -34,6 +34,7 @@ const getRedisInstance = require("./redisClient/redisClient");
 const { responseFormatter } = require("./middleware/responseFormatter");
 const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
 const logger = require("./utils/logger.js");
+const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
 
 dotenv.config();
 connectDB();
@@ -60,10 +61,15 @@ app.use(cors({
       callback(null, false);
     }
   },
-  methods: ["GET", "POST", "DELETE", "PUT"],
+  methods: ["GET", "POST", "DELETE", "PUT", "OPTIONS"],
   credentials: true,
   transports: ['websocket']
 }));
+
+
+app.all("/api/auth/*", toNodeHandler(auth));
+
+
 
 app.use(express.json());
 app.use(responseFormatter);
@@ -140,8 +146,14 @@ app.use('/api/feedback', feedbackRoutes);
 
 // Better-auth handler - handles all better-auth authentication endpoints
 // Must come before custom auth routes to handle better-auth specific paths
-app.use('/api/auth/*', auth.handler);
 
+
+app.get("/api/me", async (req, res) => {
+  const session = await auth.api.getSession({
+    headers: fromNodeHeaders(req.headers),
+  });
+  return res.json(session);
+});
 
 if (APP_ENV === "PROD") {
   app.use(trackActivity);

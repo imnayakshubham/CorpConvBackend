@@ -45,26 +45,50 @@ const createSurvey = async (req, res) => {
 // LIST Surveys API
 const listSurveys = async (req, res) => {
     try {
-        const userQuery = req.query?.user || null;
+        //Get pagination parameters
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
 
-        const filter = { access: true };
+        // Filter by authenticated user
+        const filter = {
+            access: true,
+            created_by: req.user._id  // Only get surveys created by the authenticated user
+        };
 
-        if (userQuery) {
-            filter.created_by = new mongoose.Types.ObjectId('6884adb364cfdf71f2fb28fe');
+        // Add status filter if provided
+        if (req.query.status) {
+            filter.status = req.query.status;
         }
-        const surveys = await Survey.find(filter).sort({ createdAt: -1 })
-            .select('survey_title survey_description status submissions view_count createdAt')
+
+        const surveys = await Survey.find(filter)
+            .sort({ updatedAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .select('survey_title survey_description status submissions view_count createdAt updatedAt');
+
+        const total = await Survey.countDocuments(filter);
+        const totalPages = Math.ceil(total / limit);
 
         return res.status(200).json({
-            status: 'Success',
-            data: surveys,
+            success: true,
+            data: {
+                forms: surveys,  // Keep as "forms" for frontend compatibility
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages,
+                    hasMore: page < totalPages
+                }
+            },
             message: 'Surveys retrieved successfully'
         });
     } catch (error) {
-
+        console.error('List surveys error:', error);
         return res.status(500).json({
-            status: 'Failed',
-            message: 'Server Error: Unable to fetch surveys',
+            success: false,
+            error: 'Unable to fetch surveys',
             data: null
         });
     }
