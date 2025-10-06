@@ -1,7 +1,5 @@
 const { createAuthEndpoint } = require("better-auth/api");
-const jwt = require("jsonwebtoken");
-const User = require("../models/userModel");
-const { tokenkeyName, projection } = require("../constants");
+const { validateJwtAndGetUser, extractTokenFromBetterAuth } = require("../utils/jwtAuth");
 const logger = require("../utils/logger");
 
 /**
@@ -22,37 +20,21 @@ const jwtSessionPlugin = () => {
         method: "GET"
       }, async (ctx) => {
         try {
-          // Extract JWT token from cookies
-          const cookieHeader = ctx.request.headers.get("cookie");
-          if (!cookieHeader) {
-            return ctx.json({ user: null, session: null });
-          }
-
-          const token = cookieHeader
-            .split("; ")
-            .find(c => c.startsWith(`${tokenkeyName}=`))
-            ?.split("=")[1];
+          // Extract JWT token from cookies using shared utility
+          const token = extractTokenFromBetterAuth(ctx);
 
           if (!token) {
             return ctx.json({ user: null, session: null });
           }
 
-          // Verify JWT token
-          const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
-
-          // Fetch user from database with projection (ensures fresh data, only needed fields)
-          const user = await User.findOne({ _id: decoded.id, access: true }, projection);
-
-          if (!user) {
-            logger.warn(`Session check failed for user ID: ${decoded.id}`);
-            return ctx.json({ user: null, session: null });
-          }
+          // Validate JWT and fetch user from database using shared utility
+          const { user, decoded } = await validateJwtAndGetUser(token);
 
           // Return better-auth compatible session format
           return ctx.json({
             user: user,
             session: {
-              userId: user._id.toString(),
+              user_id: user._id.toString(),
               expiresAt: new Date(decoded.exp * 1000), // JWT exp is in seconds
               token: token
             }

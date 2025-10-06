@@ -1,7 +1,6 @@
-const jwt = require("jsonwebtoken");
-const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { validateJwtAndGetUser, extractTokenFromExpress } = require("../utils/jwtAuth");
 
 const isProd = process.env.APP_ENV === 'PROD';
 
@@ -41,42 +40,31 @@ const clearAuthCookies = (res) => {
  * - No sensitive data is exposed in the token payload
  */
 const protect = asyncHandler(async (req, res, next) => {
-  const token = req.headers.token || req.cookies?.[tokenkeyName]
+  const token = extractTokenFromExpress(req);
 
   if (!token) {
     clearAuthCookies(res);
     return res.status(401).send({ error: 'Unauthorized', message: 'No token provided' });
   }
 
-  if (!!token) {
-    try {
-      // Verify JWT and extract user ID (token contains only { id: userId })
-      const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+  try {
+    // Validate JWT and fetch user from database using shared utility
+    // This ensures user data is always current and access can be revoked
+    const { user } = await validateJwtAndGetUser(token);
 
-      // SECURITY: Fetch user from database (not from token payload)
-      // This ensures user data is always current and access can be revoked
-      const user = await User.findOne({ _id: decoded.id, access: true }, projection)
+    req.user = user;
+    next();
 
-      if (user) {
-        req.user = user;
-        next();
-      } else {
-        clearAuthCookies(res);
-        return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
-      }
+  } catch (error) {
+    console.log(error);
+    clearAuthCookies(res);
 
-    } catch (error) {
-      console.log(error)
-      clearAuthCookies(res);
-      if (error.name === 'TokenExpiredError') {
-        return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
-      }
-
-      return res.status(401).send({ error: 'Invalid token' });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
     }
+
+    return res.status(401).send({ error: 'Invalid token' });
   }
-
-
 });
 
 // Admin middleware - checks if user has admin privileges
@@ -91,8 +79,8 @@ const admin = asyncHandler(async (req, res, next) => {
   // This can be enhanced later with a proper admin role system
   const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(email => email.trim());
 
-  const isAdmin = adminEmails.includes(req.user.email) ||
-    req.user.isAdmin === true ||
+  const isAdmin = adminEmails.includes(req.user.user_email_id) ||
+    req.user.is_admin === true ||
     req.user.role === 'admin';
 
   if (!isAdmin) {
