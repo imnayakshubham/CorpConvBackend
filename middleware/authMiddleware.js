@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 
 const isProd = process.env.APP_ENV === 'PROD';
 
@@ -55,10 +55,10 @@ const protect = asyncHandler(async (req, res, next) => {
 
       // SECURITY: Fetch user from database (not from token payload)
       // This ensures user data is always current and access can be revoked
-      const user = await User.findOne({ _id: decoded.id })
+      const user = await User.findOne({ _id: decoded.id, access: true }, projection)
 
-      if (user && user.access) {
-        req.user = await User.findOne({ _id: decoded.id })
+      if (user) {
+        req.user = user;
         next();
       } else {
         clearAuthCookies(res);
@@ -92,8 +92,8 @@ const admin = asyncHandler(async (req, res, next) => {
   const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(email => email.trim());
 
   const isAdmin = adminEmails.includes(req.user.email) ||
-                  req.user.isAdmin === true ||
-                  req.user.role === 'admin';
+    req.user.isAdmin === true ||
+    req.user.role === 'admin';
 
   if (!isAdmin) {
     res.status(403);

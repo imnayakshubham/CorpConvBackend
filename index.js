@@ -18,7 +18,7 @@ const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
 const feedbackRoutes = require('./routes/feedbackRoutes');
-const { auth } = require('./config/auth');
+const { getAuth } = require('./config/auth');
 
 
 const cors = require("cors");
@@ -37,17 +37,16 @@ const logger = require("./utils/logger.js");
 const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
 
 dotenv.config();
-connectDB();
+
+// Initialize app first
 const app = express();
 app.use(cookieParser());
-
 
 app.set('trust proxy', 1);
 
 const APP_ENV = process.env.APP_ENV
 
 const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
-
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -66,10 +65,26 @@ app.use(cors({
   transports: ['websocket']
 }));
 
+// Placeholder for better-auth - will be initialized after DB connection
+let authHandler = null;
 
-app.all("/api/auth/*", toNodeHandler(auth));
+// Middleware to handle better-auth routes (deferred initialization)
+app.all("/api/auth/*", async (req, res, next) => {
+  if (!authHandler) {
+    try {
+      const auth = getAuth();
+      authHandler = toNodeHandler(auth);
+      logger.info("Better-auth initialized with MongoDB adapter");
+    } catch (error) {
+      logger.error("Failed to initialize better-auth:", error);
+      return res.status(500).json({ error: "Auth service not available" });
+    }
+  }
+  return authHandler(req, res, next);
+});
 
-
+// Connect to database (auth will initialize on first request)
+connectDB();
 
 app.use(express.json());
 app.use(responseFormatter);

@@ -18,6 +18,7 @@ const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 const logger = require("../utils/logger.js");
 const { verifyFirebaseToken, getFirebaseUser } = require("../services/firebaseAdmin");
 const { decryptUserData } = require("../utils/encryption");
+const { getAuth } = require("../config/auth.js");
 
 
 const projection = {
@@ -1092,6 +1093,8 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       });
     }
 
+    console.log(firebaseResult)
+
     const firebaseUserRecord = firebaseUserResult.user;
     const firebaseEmail = firebaseUserRecord.email;
     const firebaseDisplayName = firebaseUserRecord.displayName;
@@ -1118,7 +1121,7 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       const { accessToken, refreshToken } = generateTokens(userData._id);
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info(`User logged in: ${userData.user_email_id} (UID from DB, not token)`);
+      logger.info(`User logged in: ${userData.user_email_id}`);
 
       return res.status(200).json({
         success: true,

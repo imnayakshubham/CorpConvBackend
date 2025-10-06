@@ -72,7 +72,7 @@ const userSchema = mongoose.Schema({
     type: String,
     default: null
   },
-  isAdmin: {
+  is_admin: {
     type: Boolean,
     required: true,
     default: false,
@@ -91,7 +91,7 @@ const userSchema = mongoose.Schema({
     type: String,
     required: true,
   },
-  providerId: {
+  provider_id: {
     type: String,
     required: true,
   },
@@ -110,7 +110,7 @@ const userSchema = mongoose.Schema({
     unique: true,
     required: [true, "Email is required"],
   },
-  firebaseUid: {
+  firebase_uid: {
     type: String,
     trim: true,
     sparse: true, // Allows multiple null values
@@ -223,29 +223,29 @@ const userSchema = mongoose.Schema({
   credentials: [CredentialSchema],
 
   // BetterAuth compatibility fields
-  betterAuthId: {
+  better_auth_id: {
     type: String,
     sparse: true,
     unique: true,
     default: null
   },
-  emailVerified: {
+  email_verified_at: {
     type: Date,
     default: null
   },
-  image: {
+  user_image: {
     type: String,
     default: null
   },
 
   // Password hash for BetterAuth email/password auth
-  hashedPassword: {
+  hashed_password: {
     type: String,
     default: null
   },
 
   // Magic link and OTP tracking
-  verificationTokens: [{
+  verification_tokens: [{
     token: String,
     type: {
       type: String,
@@ -259,30 +259,30 @@ const userSchema = mongoose.Schema({
   }],
 
   // Social auth providers
-  accounts: [{
+  auth_accounts: [{
     provider: String,
-    providerId: String,
-    accessToken: String,
-    refreshToken: String,
-    expiresAt: Date
+    provider_id: String,
+    access_token: String,
+    refresh_token: String,
+    expires_at: Date
   }],
 
   // Passkey credentials for WebAuthn
-  passkeyCredentials: [{
+  passkey_credentials: [{
     id: String,
-    publicKey: Buffer,
+    public_key: Buffer,
     counter: Number,
     transports: [String],
-    createdAt: {
+    created_at: {
       type: Date,
       default: Date.now
     },
-    lastUsed: Date,
+    last_used: Date,
     nickname: String
   }],
 
   // Authentication method preferences
-  authMethods: {
+  auth_methods: {
     email: {
       type: Boolean,
       default: true
@@ -298,11 +298,11 @@ const userSchema = mongoose.Schema({
   },
 
   // Security settings
-  twoFactorEnabled: {
+  two_factor_enabled: {
     type: Boolean,
     default: false
   },
-  backupCodes: [{
+  backup_codes: [{
     code: String,
     used: {
       type: Boolean,
@@ -344,14 +344,14 @@ userSchema.index({ hobbies: 1 });
 userSchema.index({ profession: 1, field_of_study: 1, last_active_at: -1 });
 
 // Encryption middleware - auto-encrypt sensitive fields before saving
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   // Skip if already masked and no sensitive fields modified
   if (this.is_masked &&
-      !this.isModified('user_email_id') &&
-      !this.isModified('actual_user_name') &&
-      !this.isModified('user_phone_number') &&
-      !this.isModified('secondary_email_id') &&
-      !this.isModified('user_location')) {
+    !this.isModified('user_email_id') &&
+    !this.isModified('actual_user_name') &&
+    !this.isModified('user_phone_number') &&
+    !this.isModified('secondary_email_id') &&
+    !this.isModified('user_location')) {
     return next();
   }
 

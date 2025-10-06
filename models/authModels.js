@@ -1,82 +1,5 @@
 const mongoose = require("mongoose");
 
-// BetterAuth Session Schema
-const sessionSchema = new mongoose.Schema({
-  id: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  expiresAt: {
-    type: Date,
-    required: true
-  },
-  token: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  ipAddress: String,
-  userAgent: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-}, {
-  timestamps: true,
-  collection: 'session'
-});
-
-// BetterAuth Account Schema (for social logins)
-const accountSchema = new mongoose.Schema({
-  id: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  provider: {
-    type: String,
-    required: true
-  },
-  providerId: {
-    type: String,
-    required: true
-  },
-  accessToken: String,
-  refreshToken: String,
-  expiresAt: Date,
-  scope: String,
-  tokenType: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-}, {
-  timestamps: true,
-  collection: 'account'
-});
-
-// Ensure unique combination of provider and providerId
-accountSchema.index({ provider: 1, providerId: 1 }, { unique: true });
-
 // BetterAuth Verification Schema
 const verificationSchema = new mongoose.Schema({
   id: {
@@ -272,18 +195,12 @@ const otpSchema = new mongoose.Schema({
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 otpSchema.index({ email: 1, used: 1, expiresAt: 1 });
 
-// Add indexes for performance
-sessionSchema.index({ userId: 1 });
-sessionSchema.index({ expiresAt: 1 });
-accountSchema.index({ userId: 1 });
 verificationSchema.index({ identifier: 1, type: 1 });
 passkeyCredentialSchema.index({ userId: 1 });
 magicLinkSchema.index({ email: 1, used: 1 });
 otpSchema.index({ email: 1, used: 1 });
 
 // Create models
-const Session = mongoose.model("Session", sessionSchema);
-const Account = mongoose.model("Account", accountSchema);
 const Verification = mongoose.model("Verification", verificationSchema);
 const RateLimit = mongoose.model("RateLimit", rateLimitSchema);
 const PasskeyCredential = mongoose.model("PasskeyCredential", passkeyCredentialSchema);
@@ -291,8 +208,6 @@ const MagicLink = mongoose.model("MagicLink", magicLinkSchema);
 const OTP = mongoose.model("OTP", otpSchema);
 
 module.exports = {
-  Session,
-  Account,
   Verification,
   RateLimit,
   PasskeyCredential,

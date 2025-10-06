@@ -7,11 +7,12 @@ const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 const emailService = require("../services/emailService");
 const { tokenkeyName } = require("../constants");
+const { jwtSessionPlugin } = require("../plugins/jwtSessionPlugin");
 
 
 // Generate OTP
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return Math.floor(100000 + Math.random() + 900000).toString();
 };
 
 // Store OTP in Redis or memory (for production use Redis)
@@ -23,12 +24,42 @@ if (!process.env.BETTER_AUTH_URL && !process.env.ALLOW_ORIGIN) {
   logger.warn(`BETTER_AUTH_URL not configured - using fallback: ${baseURL}`);
 }
 
+const allowedOrgins = process.env.ALLOW_ORIGIN ? process.env.ALLOW_ORIGIN.split(",").map(o => o.trim()) : []
 
-const auth = betterAuth({
+// Factory function to create auth instance after DB connection
+const createAuth = () => {
+  // Ensure mongoose is connected
+  if (!mongoose.connection.db) {
+    throw new Error("MongoDB must be connected before initializing better-auth");
+  }
+
+  return betterAuth({
   database: mongodbAdapter(mongoose.connection.db),
 
   secret: process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET_KEY,
   baseURL,
+  appName: "hushwork",
+  advanced: {
+    cookies: {
+
+      session_token: {
+        name: tokenkeyName,
+
+        attributes: {
+          httpOnly: true,
+          secure: process.env.APP_ENV === 'PROD',
+          sameSite: process.env.APP_ENV === 'PROD' ? 'none' : 'lax',
+          maxAge: 60 * 60 * 24 * 7 * 1000, // 7 days in ms
+          path: '/',
+        }
+      },
+      crossSubDomainCookies: {
+        enabled: true,
+        domain: process.env.FRONTEND_URL, // your domain
+      },
+      trustedOrigins: process.env.ALLOW_ORIGIN ? process.env.ALLOW_ORIGIN.split(",").map(o => o.trim()) : [],
+    },
+  },
 
   // Session configuration
   session: {
@@ -37,21 +68,6 @@ const auth = betterAuth({
     cookieCache: {
       enabled: true,
       maxAge: 60 * 5 // 5 minutes
-    }
-  },
-
-  // Cookie configuration for cross-domain
-  cookies: {
-    sessionToken: {
-      name: tokenkeyName,
-      options: {
-        httpOnly: true,
-        secure: process.env.APP_ENV === 'PROD',
-        sameSite: process.env.APP_ENV === 'PROD' ? 'none' : 'lax',
-        maxAge: 60 * 60 * 24 * 7 * 1000, // 7 days in ms
-        path: '/',
-        domain: process.env.APP_ENV === 'PROD' ? undefined : 'localhost'
-      }
     }
   },
 
@@ -64,48 +80,11 @@ const auth = betterAuth({
       // Map Google profile to our user schema
       mapProfile: (profile) => ({
         sub: profile.sub,
-        email: profile.email,
-        name: profile.name,
-        image: profile.picture,
-        emailVerified: profile.email_verified
+        user_email: profile.email,
+        actual_user_name: profile.name,
+        actual_profile_pic: profile.picture,
+        is_email_verified: profile.email_verified
       })
-    }
-  },
-
-  // User configuration
-  user: {
-    modelName: "User",
-    fields: {
-      email: "user_email_id",
-      name: "public_user_name",
-      image: "user_public_profile_pic",
-      emailVerified: "is_email_verified"
-    },
-    additionalFields: {
-      user_bio: {
-        type: "string",
-        required: false
-      },
-      user_job_role: {
-        type: "string",
-        required: false
-      },
-      user_location: {
-        type: "string",
-        required: false
-      },
-      user_current_company_name: {
-        type: "string",
-        required: false
-      },
-      is_anonymous: {
-        type: "boolean",
-        defaultValue: false
-      },
-      access: {
-        type: "boolean",
-        defaultValue: true
-      }
     }
   },
 
@@ -156,15 +135,16 @@ const auth = betterAuth({
 
   // Plugin configuration
   plugins: [
+    // JWT Session Plugin - MUST BE FIRST to override default get-session
+    jwtSessionPlugin(),
+
     // Passkey authentication
     passkey({
       rpName: process.env.APP_NAME || "Hushwork",
       rpID: process.env.APP_ENV === 'PROD'
         ? new URL(process.env.BETTER_AUTH_URL || '').hostname
         : "localhost",
-      origin: process.env.APP_ENV === 'PROD'
-        ? [process.env.BETTER_AUTH_URL]
-        : ["http://localhost:3005", "http://localhost:5000"]
+      origin: allowedOrgins
     }),
 
     // Email OTP for magic links
@@ -239,7 +219,10 @@ const auth = betterAuth({
 
       expiresIn: 60 * 10, // 10 minutes
       otpLength: 6
-    })
+    }),
+
+
+
   ],
 
   // Rate limiting
@@ -261,8 +244,20 @@ const auth = betterAuth({
   // Custom success handling
   onSuccess: (context) => {
     logger.info(`Authentication success: ${context.user?.email || 'Unknown'}`);
-  }
+  },
 });
+};
+
+// Singleton instance
+let authInstance = null;
+
+// Get or create auth instance
+const getAuth = () => {
+  if (!authInstance) {
+    authInstance = createAuth();
+  }
+  return authInstance;
+};
 
 // Helper function to verify OTP manually
 const verifyOTP = (email, otp) => {
@@ -331,7 +326,8 @@ const verifyMagicToken = (email, token) => {
 
 
 module.exports = {
-  auth,
+  getAuth,
+  createAuth,
   verifyOTP,
   generateMagicLink,
   verifyMagicToken,

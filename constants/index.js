@@ -211,6 +211,13 @@ const projection = {
     user_public_profile_pic: 1,
     pending_followings: 1,
     profile_details: 1,
+    _id: 1,
+    profession: 1,
+    academic_level: 1,
+    field_of_study: 1,
+    hobbies: 1,
+    last_active_at: 1,
+    is_admin: 1
 };
 
 module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd, guestKey, projection }
