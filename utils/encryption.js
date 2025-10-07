@@ -29,13 +29,19 @@ const KEY = KEY_HEX ? Buffer.from(KEY_HEX, 'hex') : null;
 /**
  * Encrypt text - returns single string with format: {iv}:{authTag}:{encrypted}
  * @param {string} text - Plain text to encrypt
+ * @param {Object} options - Encryption options
+ * @param {boolean} options.strict - If true, throws error when key is missing (default: false)
  * @returns {string|null} - Encrypted string or null if input is null/empty
  */
-function encrypt(text) {
+function encrypt(text, options = { strict: false }) {
   if (!text || text === '') return null;
 
   if (!KEY) {
-    console.warn('Encryption key not configured. Returning plain text.');
+    const errorMsg = 'Encryption key not configured. Cannot encrypt data.';
+    if (options.strict) {
+      throw new Error(errorMsg);
+    }
+    console.warn(errorMsg + ' Returning plain text.');
     return text;
   }
 
@@ -50,7 +56,14 @@ function encrypt(text) {
     const ivHex = iv.toString('hex');
 
     // Format: iv:authTag:encrypted
-    return `${ivHex}:${authTag}:${encrypted}`;
+    const result = `${ivHex}:${authTag}:${encrypted}`;
+
+    // Validate encryption result
+    if (!result.includes(':') || result === text) {
+      throw new Error('Encryption produced invalid output');
+    }
+
+    return result;
   } catch (error) {
     console.error('Encryption error:', error);
     throw new Error('Failed to encrypt data');
@@ -129,16 +142,23 @@ function encryptUserData(userData) {
 
 /**
  * Decrypt user data object - decrypts sensitive fields in place
+ * Handles backward compatibility for mixed encrypted/unencrypted data
  * @param {Object} userData - User data object (can be Mongoose document or plain object)
+ * @param {Object} options - Decryption options
+ * @param {boolean} options.forceDecrypt - Attempt decryption even if is_masked is false (default: false)
  * @returns {Object} - Same object with decrypted fields
  */
-function decryptUserData(userData) {
+function decryptUserData(userData, options = { forceDecrypt: false }) {
   if (!userData) return null;
 
   // Convert Mongoose document to plain object if needed
   const user = userData.toObject ? userData.toObject() : userData;
 
-  if (!user.is_masked) {
+  // Backward compatibility: If is_masked is false, check if any fields are actually encrypted
+  // This handles cases where is_masked flag is incorrect
+  const shouldAttemptDecryption = user.is_masked || options.forceDecrypt;
+
+  if (!shouldAttemptDecryption) {
     return user; // Not encrypted, return as-is
   }
 
@@ -152,7 +172,87 @@ function decryptUserData(userData) {
 
   for (const field of fieldsToDecrypt) {
     if (user[field]) {
-      user[field] = decrypt(user[field]);
+      // Check if field is actually encrypted before attempting decryption
+      if (isEncrypted(user[field])) {
+        user[field] = decrypt(user[field]);
+      }
+      // If not encrypted (plain text), leave as-is for backward compatibility
+    }
+  }
+
+  return user;
+}
+
+/**
+ * Check if a string is encrypted (format: iv:authTag:encrypted)
+ * @param {string} value - String to check
+ * @returns {boolean} - True if encrypted, false otherwise
+ */
+function isEncrypted(value) {
+  if (!value || typeof value !== 'string') return false;
+
+  const parts = value.split(':');
+  if (parts.length !== 3) return false;
+
+  // Check if all parts are hexadecimal
+  const hexRegex = /^[0-9a-f]+$/i;
+  return parts.every(part => hexRegex.test(part));
+}
+
+/**
+ * Verify if encryption is properly configured
+ * @returns {boolean} - True if encryption key is configured
+ */
+function isEncryptionConfigured() {
+  return !!KEY && KEY_HEX && KEY_HEX.length === 64;
+}
+
+/**
+ * Smart decrypt - attempts to decrypt but returns original if not encrypted
+ * Perfect for backward compatibility where data might be mixed
+ * @param {string} value - Value to decrypt (might be encrypted or plain text)
+ * @returns {string|null} - Decrypted value or original if not encrypted
+ */
+function smartDecrypt(value) {
+  if (!value) return value;
+
+  // Check if actually encrypted before attempting decryption
+  if (isEncrypted(value)) {
+    try {
+      return decrypt(value);
+    } catch (error) {
+      console.warn('Smart decrypt failed, returning original value:', error.message);
+      return value;
+    }
+  }
+
+  // Not encrypted, return as-is
+  return value;
+}
+
+/**
+ * Get safe user data for API responses - automatically decrypts if needed
+ * This is the recommended function to use when returning user data to clients
+ * @param {Object} userData - User data object
+ * @returns {Object} - User data with decrypted sensitive fields
+ */
+function getSafeUserData(userData) {
+  if (!userData) return null;
+
+  const user = userData.toObject ? userData.toObject() : { ...userData };
+
+  const fieldsToProcess = [
+    'user_email_id',
+    'actual_user_name',
+    'user_phone_number',
+    'secondary_email_id',
+    'user_location'
+  ];
+
+  // Smart decrypt all sensitive fields (handles both encrypted and plain text)
+  for (const field of fieldsToProcess) {
+    if (user[field]) {
+      user[field] = smartDecrypt(user[field]);
     }
   }
 
@@ -163,5 +263,9 @@ module.exports = {
   encrypt,
   decrypt,
   encryptUserData,
-  decryptUserData
+  decryptUserData,
+  isEncrypted,
+  isEncryptionConfigured,
+  smartDecrypt,
+  getSafeUserData
 };

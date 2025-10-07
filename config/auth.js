@@ -138,13 +138,23 @@ const createAuth = () => {
     // JWT Session Plugin - MUST BE FIRST to override default get-session
     jwtSessionPlugin(),
 
-    // Passkey authentication
+    // Passkey authentication with autofill support
     passkey({
       rpName: process.env.APP_NAME || "Hushwork",
       rpID: process.env.APP_ENV === 'PROD'
         ? new URL(process.env.BETTER_AUTH_URL || '').hostname
         : "localhost",
-      origin: allowedOrgins
+      origin: allowedOrgins,
+      // Enable conditional mediation for autofill
+      authenticatorSelection: {
+        userVerification: "preferred",
+        residentKey: "preferred", // Enable discoverable credentials
+        requireResidentKey: false
+      },
+      // Support for passkey autofill in forms
+      extensions: {
+        credProps: true
+      }
     }),
 
     // Email OTP for magic links

@@ -93,7 +93,8 @@ const userSchema = mongoose.Schema({
   },
   provider_id: {
     type: String,
-    required: true,
+    required: false,
+    default: null
   },
   user_phone_number: {
     type: Number,
@@ -220,6 +221,8 @@ const userSchema = mongoose.Schema({
   embedding: { type: [Number], default: null }, // array of floats
   embedding_updated_at: Date,
   last_active_at: { type: Date, default: Date.now },
+
+  // Legacy credentials (deprecated - use Better-auth PasskeyCredential model instead)
   credentials: [CredentialSchema],
 
   // BetterAuth compatibility fields
@@ -267,9 +270,9 @@ const userSchema = mongoose.Schema({
     expires_at: Date
   }],
 
-  // Passkey credentials for WebAuthn
+  // Passkey credentials for WebAuthn (deprecated - use Better-auth PasskeyCredential model instead)
+  // Better-auth stores passkeys in separate 'passkeyCredential' collection
   passkey_credentials: [{
-    id: String,
     public_key: Buffer,
     counter: Number,
     transports: [String],
@@ -355,6 +358,13 @@ userSchema.pre('save', async function (next) {
     return next();
   }
 
+  // Check if encryption is configured
+  if (!process.env.ENCRYPTION_KEY) {
+    console.warn('⚠️  ENCRYPTION_KEY not configured - data will not be encrypted');
+    this.is_masked = false;
+    return next();
+  }
+
   // Encrypt sensitive fields
   const { encrypt } = require('../utils/encryption');
 
@@ -366,6 +376,8 @@ userSchema.pre('save', async function (next) {
     'user_location'
   ];
 
+  let encryptionSucceeded = true;
+
   for (const field of fieldsToEncrypt) {
     if (this[field] && this.isModified(field)) {
       // Only encrypt if not already encrypted (doesn't contain ':' or not in format)
@@ -374,14 +386,73 @@ userSchema.pre('save', async function (next) {
 
       // Check if already encrypted (format: iv:authTag:encrypted)
       if (parts.length !== 3 || !/^[0-9a-f]+$/.test(parts[0])) {
-        this[field] = encrypt(value);
+        try {
+          const encrypted = encrypt(value);
+
+          // Verify encryption actually happened (not plain text fallback)
+          if (!encrypted || encrypted === value || !encrypted.includes(':')) {
+            console.error(`❌ Encryption failed for field: ${field}`);
+            encryptionSucceeded = false;
+            break;
+          }
+
+          this[field] = encrypted;
+        } catch (error) {
+          console.error(`❌ Encryption error for field ${field}:`, error);
+          encryptionSucceeded = false;
+          break;
+        }
       }
     }
   }
 
-  this.is_masked = true;
+  // Only set is_masked if encryption succeeded for all fields
+  this.is_masked = encryptionSucceeded;
+
+  if (!encryptionSucceeded) {
+    console.warn('⚠️  User data saved without encryption due to errors');
+  }
+
   next();
 });
+
+// Virtual method to get decrypted user data (backward compatible)
+// This automatically handles both encrypted and plain text data
+userSchema.methods.getDecryptedData = function() {
+  const { getSafeUserData } = require('../utils/encryption');
+  return getSafeUserData(this);
+};
+
+// Helper method to check if user's sensitive data is properly encrypted
+userSchema.methods.isDataEncrypted = function() {
+  const { isEncrypted } = require('../utils/encryption');
+
+  const sensitiveFields = [
+    'user_email_id',
+    'actual_user_name',
+    'user_phone_number',
+    'secondary_email_id',
+    'user_location'
+  ];
+
+  // Check if all non-null sensitive fields are encrypted
+  const results = sensitiveFields
+    .filter(field => this[field]) // Only check fields that have values
+    .map(field => ({
+      field,
+      encrypted: isEncrypted(this[field])
+    }));
+
+  const allEncrypted = results.every(r => r.encrypted);
+  const someEncrypted = results.some(r => r.encrypted);
+
+  return {
+    allEncrypted,
+    someEncrypted,
+    mixedState: someEncrypted && !allEncrypted,
+    details: results
+  };
+};
 
 const User = mongoose.model("User", userSchema);
 

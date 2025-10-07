@@ -14,6 +14,17 @@ const connectDB = async () => {
     await aiService.getEmbeddingModelStatus()
 
     logger.info(`Connected`);
+
+    // Validate encryption configuration
+    const { isEncryptionConfigured } = require("../utils/encryption");
+    if (!isEncryptionConfigured()) {
+      logger.warn('⚠️  ENCRYPTION_KEY not configured or invalid!'.yellow);
+      logger.warn('User data will NOT be encrypted. Generate a key with:'.yellow);
+      logger.warn('node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'.yellow);
+    } else {
+      logger.info('🔐 Encryption configured correctly'.green);
+    }
+
   } catch (error) {
     logger.error(`Error: ${error.message}`);
     process.exit(1);

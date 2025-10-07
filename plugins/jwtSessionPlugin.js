@@ -51,6 +51,43 @@ const jwtSessionPlugin = () => {
 
           return ctx.json({ user: null, session: null });
         }
+      }),
+
+      // Override /sign-out endpoint to handle JWT-based sessions gracefully
+      signOut: createAuthEndpoint("/sign-out", {
+        method: "POST"
+      }, async (ctx) => {
+        try {
+          const { tokenkeyName, cookieOptions } = require("../constants");
+
+          // Clear the JWT cookie
+          ctx.setCookie(tokenkeyName, "", {
+            ...cookieOptions,
+            maxAge: 0, // Immediately expire
+          });
+
+          logger.info("User signed out successfully");
+
+          return ctx.json({
+            success: true,
+            message: "Signed out successfully"
+          });
+
+        } catch (error) {
+          logger.error("Error during sign-out:", error);
+
+          // Still clear the cookie even if there's an error
+          const { tokenkeyName, cookieOptions } = require("../constants");
+          ctx.setCookie(tokenkeyName, "", {
+            ...cookieOptions,
+            maxAge: 0,
+          });
+
+          return ctx.json({
+            success: true,
+            message: "Signed out"
+          });
+        }
       })
     }
   };

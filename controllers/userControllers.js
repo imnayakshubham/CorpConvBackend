@@ -1079,11 +1079,11 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       });
     }
 
-    const firebaseUid = firebaseResult.uid;
+    const firebase_uid = firebaseResult.uid;
 
     // SECURITY: Fetch user data from Firebase Admin SDK (server-side, trusted source)
     // Instead of using data from the ID token (which contains user info from client)
-    const firebaseUserResult = await getFirebaseUser(firebaseUid);
+    const firebaseUserResult = await getFirebaseUser(firebase_uid);
 
     if (!firebaseUserResult.success) {
       return res.status(401).json({
@@ -1093,27 +1093,23 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       });
     }
 
-    console.log(firebaseResult)
-
     const firebaseUserRecord = firebaseUserResult.user;
     const firebaseEmail = firebaseUserRecord.email;
     const firebaseDisplayName = firebaseUserRecord.displayName;
-    const firebasePhotoURL = firebaseUserRecord.photoURL;
-    const firebaseEmailVerified = firebaseUserRecord.emailVerified;
 
     // Check if user exists in our database
     let userData = await User.findOne({
       $or: [
         { user_email_id: firebaseEmail },
         { secondary_email_id: firebaseEmail },
-        { firebaseUid: firebaseUid }
+        { firebase_uid: firebase_uid }
       ]
     });
 
     if (userData) {
       // Update existing user with Firebase UID if not set
-      if (!userData.firebaseUid) {
-        userData.firebaseUid = firebaseUid;
+      if (!userData.firebase_uid) {
+        userData.firebase_uid = firebase_uid;
         await userData.save();
       }
 
@@ -1121,7 +1117,6 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
       const { accessToken, refreshToken } = generateTokens(userData._id);
       setAuthCookies(res, accessToken, refreshToken);
 
-      logger.info(`User logged in: ${userData.user_email_id}`);
 
       return res.status(200).json({
         success: true,
@@ -1155,17 +1150,26 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
 
       const newUserData = {
         user_email_id: firebaseEmail,
+        actual_user_name: firebaseUserResult?.displayName || firebaseDisplayName || firebaseEmail.split('@')[0],
         public_user_name: firebaseDisplayName || firebaseEmail.split('@')[0],
-        is_email_verified: firebaseEmailVerified,
-        is_anonymous: false,
         user_current_company_name,
         user_company_id: companyId,
         user_past_company_history: [companyId],
         primary_email_domain: emailSplit[1],
-        firebaseUid: firebaseUid,
-        user_public_profile_pic: firebasePhotoURL || null,
-        access: true
+        is_email_verified: firebaseUserResult?.emailVerified,
+        is_anonymous: true,
+        user_phone_number: firebaseUserResult?.phoneNumber,
+        actual_profile_pic: firebaseUserResult?.photoURL,
+        user_public_profile_pic: firebaseUserResult?.photoURL || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        provider: "google",
+        provider_id: firebase_uid,
+        meta_data: firebaseUserResult?.metadata,
+        firebase_uid: firebase_uid,
+        access: true,
+        is_admin: false,
       };
+
+      console.log({ newUserData })
 
       const newUser = new User(newUserData);
       await newUser.save();
