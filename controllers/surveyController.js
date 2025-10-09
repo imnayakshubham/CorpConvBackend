@@ -50,45 +50,57 @@ const listSurveys = async (req, res) => {
         const limit = parseInt(req.query.limit) || 50;
         const skip = (page - 1) * limit;
 
-        // Filter by authenticated user
+        // Build filter object
         const filter = {
-            access: true,
-            created_by: req.user._id  // Only get surveys created by the authenticated user
+            access: true
         };
+
+        // Only filter by user if not showing all surveys
+        if (req.query.showAll !== 'true') {
+            filter.created_by = req.user._id;  // Only get surveys created by the authenticated user
+        }
 
         // Add status filter if provided
         if (req.query.status) {
             filter.status = req.query.status;
         }
 
+        // Add search functionality
+        if (req.query.search) {
+            const searchRegex = { $regex: req.query.search, $options: 'i' };
+            filter.$or = [
+                { survey_title: searchRegex },
+                { survey_description: searchRegex }
+            ];
+        }
+
         const surveys = await Survey.find(filter)
+            .populate('created_by', 'public_user_name user_public_profile_pic _id')
             .sort({ updatedAt: -1 })
             .skip(skip)
             .limit(limit)
-            .select('survey_title survey_description status submissions view_count createdAt updatedAt');
+            .select('survey_title survey_description status submissions view_count createdAt updatedAt created_by');
 
         const total = await Survey.countDocuments(filter);
         const totalPages = Math.ceil(total / limit);
 
         return res.status(200).json({
-            success: true,
-            data: {
-                forms: surveys,  // Keep as "forms" for frontend compatibility
-                pagination: {
-                    page,
-                    limit,
-                    total,
-                    totalPages,
-                    hasMore: page < totalPages
-                }
-            },
-            message: 'Surveys retrieved successfully'
+            status: 'Success',
+            data: surveys,  // Direct array for legacy frontend compatibility
+            message: 'Surveys retrieved successfully',
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasMore: page < totalPages
+            }
         });
     } catch (error) {
         console.error('List surveys error:', error);
         return res.status(500).json({
-            success: false,
-            error: 'Unable to fetch surveys',
+            status: 'Failed',
+            message: 'Unable to fetch surveys',
             data: null
         });
     }
