@@ -37,10 +37,10 @@ function getAIModel() {
 }
 
 // Helper function to get comprehensive form analytics data for AI
-async function getFormAnalyticsForAI(formId, userId) {
+async function getFormAnalyticsForAI(formId, user_id) {
   try {
     // Get form details
-    const form = await Form.findOne({ _id: formId, userId });
+    const form = await Form.findOne({ _id: formId, user_id });
     if (!form) {
       throw new Error('Form not found');
     }
@@ -49,7 +49,7 @@ async function getFormAnalyticsForAI(formId, userId) {
     const submissions = await Submission.find({ formId }).sort({ submittedAt: -1 });
 
     // Calculate basic metrics
-    const totalSubmissions = submissions.length;
+    const total_submissions = submissions.length;
     const submissionsToday = submissions.filter(s => {
       const today = new Date();
       const submissionDate = new Date(s.submittedAt);
@@ -86,17 +86,17 @@ async function getFormAnalyticsForAI(formId, userId) {
 
     // Analyze field responses
     submissions.forEach(submission => {
-      Object.entries(submission.data).forEach(([fieldId, value]) => {
-        if (fieldData[fieldId] && value !== null && value !== undefined && value !== '') {
-          fieldData[fieldId].values.push(value);
+      Object.entries(submission.data).forEach(([field_id, value]) => {
+        if (fieldData[field_id] && value !== null && value !== undefined && value !== '') {
+          fieldData[field_id].values.push(value);
         }
       });
     });
 
     // Calculate completion rates
-    Object.keys(fieldData).forEach(fieldId => {
-      const responses = fieldData[fieldId].values.length;
-      fieldData[fieldId].completionRate = totalSubmissions > 0 ? (responses / totalSubmissions) * 100 : 0;
+    Object.keys(fieldData).forEach(field_id => {
+      const responses = fieldData[field_id].values.length;
+      fieldData[field_id].completionRate = total_submissions > 0 ? (responses / total_submissions) * 100 : 0;
     });
 
     return {
@@ -108,7 +108,7 @@ async function getFormAnalyticsForAI(formId, userId) {
         updatedAt: form.updatedAt
       },
       metrics: {
-        totalSubmissions,
+        total_submissions,
         submissionsToday,
         submissionsThisWeek,
         avgCompletionRate: Object.values(fieldData).reduce((acc, field) => acc + field.completionRate, 0) / Object.keys(fieldData).length
@@ -144,7 +144,7 @@ router.post('/event', [
     'submit_success', 'submit_error', 'validation_error', 'file_upload', 'page_exit'
   ]).withMessage('Invalid event type'),
   body('sessionId').isString().withMessage('Session ID is required'),
-  body('fieldId').optional().isString().withMessage('Field ID must be a string'),
+  body('field_id').optional().isString().withMessage('Field ID must be a string'),
   body('data').optional().isObject().withMessage('Data must be an object'),
   handleValidationErrors
 ], async (req, res) => {
@@ -153,7 +153,7 @@ router.post('/event', [
       formId: req.body.formId,
       eventType: req.body.eventType,
       sessionId: req.body.sessionId,
-      fieldId: req.body.fieldId,
+      field_id: req.body.field_id,
       fieldType: req.body.fieldType,
       data: req.body.data,
       timeOnField: req.body.timeOnField,
@@ -275,11 +275,15 @@ router.get('/:formId', [
           _id: 1,
           events: 1,
           totalEvents: 1,
-          totalUsers: { $size: { $reduce: {
-            input: '$totalUsers',
-            initialValue: [],
-            in: { $setUnion: ['$$value', '$$this'] }
-          }}}
+          totalUsers: {
+            $size: {
+              $reduce: {
+                input: '$totalUsers',
+                initialValue: [],
+                in: { $setUnion: ['$$value', '$$this'] }
+              }
+            }
+          }
         }
       },
       { $sort: { '_id': 1 } }
@@ -291,13 +295,13 @@ router.get('/:formId', [
         $match: {
           formId: form._id,
           timestamp: { $gte: startDate, $lte: endDate },
-          fieldId: { $exists: true, $ne: null }
+          field_id: { $exists: true, $ne: null }
         }
       },
       {
         $group: {
           _id: {
-            fieldId: '$fieldId',
+            field_id: '$field_id',
             eventType: '$eventType'
           },
           count: { $sum: 1 },
@@ -306,7 +310,7 @@ router.get('/:formId', [
       },
       {
         $group: {
-          _id: '$_id.fieldId',
+          _id: '$_id.field_id',
           events: {
             $push: {
               eventType: '$_id.eventType',
@@ -343,14 +347,14 @@ router.get('/:formId', [
       {
         $group: {
           _id: null,
-          totalViews: { $sum: { $cond: ['$hasView', 1, 0] } },
+          total_views: { $sum: { $cond: ['$hasView', 1, 0] } },
           totalInteractions: { $sum: { $cond: ['$hasInteraction', 1, 0] } },
-          totalSubmissions: { $sum: { $cond: ['$hasSubmission', 1, 0] } }
+          total_submissions: { $sum: { $cond: ['$hasSubmission', 1, 0] } }
         }
       }
     ]);
 
-    const funnel = funnelData[0] || { totalViews: 0, totalInteractions: 0, totalSubmissions: 0 };
+    const funnel = funnelData[0] || { total_views: 0, totalInteractions: 0, total_submissions: 0 };
 
     res.json({
       success: true,
@@ -365,12 +369,12 @@ router.get('/:formId', [
         timeBasedAnalytics,
         fieldAnalytics,
         conversionFunnel: {
-          views: funnel.totalViews,
+          views: funnel.total_views,
           interactions: funnel.totalInteractions,
-          submissions: funnel.totalSubmissions,
-          viewToInteractionRate: funnel.totalViews > 0 ? (funnel.totalInteractions / funnel.totalViews * 100).toFixed(2) : 0,
-          interactionToSubmissionRate: funnel.totalInteractions > 0 ? (funnel.totalSubmissions / funnel.totalInteractions * 100).toFixed(2) : 0,
-          overallConversionRate: funnel.totalViews > 0 ? (funnel.totalSubmissions / funnel.totalViews * 100).toFixed(2) : 0
+          submissions: funnel.total_submissions,
+          viewToInteractionRate: funnel.total_views > 0 ? (funnel.totalInteractions / funnel.total_views * 100).toFixed(2) : 0,
+          interactionToSubmissionRate: funnel.totalInteractions > 0 ? (funnel.total_submissions / funnel.totalInteractions * 100).toFixed(2) : 0,
+          overallConversionRate: funnel.total_views > 0 ? (funnel.total_submissions / funnel.total_views * 100).toFixed(2) : 0
         }
       }
     });
@@ -475,12 +479,12 @@ router.get('/:formId/heatmap', [
           formId: new mongoose.Types.ObjectId(formId),
           timestamp: { $gte: startDate, $lte: endDate },
           eventType: { $in: ['field_focus', 'field_blur', 'field_change'] },
-          fieldId: { $exists: true, $ne: null }
+          field_id: { $exists: true, $ne: null }
         }
       },
       {
         $group: {
-          _id: '$fieldId',
+          _id: '$field_id',
           totalInteractions: { $sum: 1 },
           focusEvents: { $sum: { $cond: [{ $eq: ['$eventType', 'field_focus'] }, 1, 0] } },
           changeEvents: { $sum: { $cond: [{ $eq: ['$eventType', 'field_change'] }, 1, 0] } },
@@ -490,7 +494,7 @@ router.get('/:formId/heatmap', [
       },
       {
         $project: {
-          fieldId: '$_id',
+          field_id: '$_id',
           totalInteractions: 1,
           focusEvents: 1,
           changeEvents: 1,
@@ -539,27 +543,27 @@ router.post('/chat/:formId', authenticateToken, async (req, res) => {
     let conversationHistory = conversationStore.get(convId) || [];
 
     // Get form analytics data
-    const analyticsData = await getFormAnalyticsForAI(formId, req.user.userId);
+    const analyticsData = await getFormAnalyticsForAI(formId, req.user.user_id);
 
     // Prepare context for AI
     const systemPrompt = `You are an expert data analyst helping users understand their form analytics.
 
 Form Information:
 - Title: ${analyticsData.form.title}
-- Total Submissions: ${analyticsData.metrics.totalSubmissions}
+- Total Submissions: ${analyticsData.metrics.total_submissions}
 - Submissions Today: ${analyticsData.metrics.submissionsToday}
 - Submissions This Week: ${analyticsData.metrics.submissionsThisWeek}
 - Average Completion Rate: ${analyticsData.metrics.avgCompletionRate.toFixed(1)}%
 
 Field Information:
 ${Object.entries(analyticsData.fieldData).map(([id, field]) =>
-  `- ${field.name} (${field.type}): ${field.completionRate.toFixed(1)}% completion rate, ${field.values.length} responses`
-).join('\n')}
+      `- ${field.name} (${field.type}): ${field.completionRate.toFixed(1)}% completion rate, ${field.values.length} responses`
+    ).join('\n')}
 
 Recent Trends:
 ${analyticsData.chartData.submissionsByDay.slice(-7).map(day =>
-  `- ${day.date}: ${day.count} submissions`
-).join('\n')}
+      `- ${day.date}: ${day.count} submissions`
+    ).join('\n')}
 
 Please provide insights, answer questions, and suggest improvements based on this data. Be specific and actionable in your recommendations.`;
 
@@ -620,27 +624,27 @@ router.post('/chat/:formId/stream', authenticateToken, async (req, res) => {
     let conversationHistory = conversationStore.get(convId) || [];
 
     // Get form analytics data
-    const analyticsData = await getFormAnalyticsForAI(formId, req.user.userId);
+    const analyticsData = await getFormAnalyticsForAI(formId, req.user.user_id);
 
     // Prepare context for AI
     const systemPrompt = `You are an expert data analyst helping users understand their form analytics.
 
 Form Information:
 - Title: ${analyticsData.form.title}
-- Total Submissions: ${analyticsData.metrics.totalSubmissions}
+- Total Submissions: ${analyticsData.metrics.total_submissions}
 - Submissions Today: ${analyticsData.metrics.submissionsToday}
 - Submissions This Week: ${analyticsData.metrics.submissionsThisWeek}
 - Average Completion Rate: ${analyticsData.metrics.avgCompletionRate.toFixed(1)}%
 
 Field Information:
 ${Object.entries(analyticsData.fieldData).map(([id, field]) =>
-  `- ${field.name} (${field.type}): ${field.completionRate.toFixed(1)}% completion rate, ${field.values.length} responses`
-).join('\n')}
+      `- ${field.name} (${field.type}): ${field.completionRate.toFixed(1)}% completion rate, ${field.values.length} responses`
+    ).join('\n')}
 
 Recent Trends:
 ${analyticsData.chartData.submissionsByDay.slice(-7).map(day =>
-  `- ${day.date}: ${day.count} submissions`
-).join('\n')}
+      `- ${day.date}: ${day.count} submissions`
+    ).join('\n')}
 
 Please provide insights, answer questions, and suggest improvements based on this data. Be specific and actionable in your recommendations.`;
 

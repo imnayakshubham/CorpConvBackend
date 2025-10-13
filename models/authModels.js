@@ -70,7 +70,7 @@ const passkeyCredentialSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  userId: {
+  user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
@@ -196,7 +196,7 @@ otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 otpSchema.index({ email: 1, used: 1, expiresAt: 1 });
 
 verificationSchema.index({ identifier: 1, type: 1 });
-passkeyCredentialSchema.index({ userId: 1 });
+passkeyCredentialSchema.index({ user_id: 1 });
 magicLinkSchema.index({ email: 1, used: 1 });
 otpSchema.index({ email: 1, used: 1 });
 

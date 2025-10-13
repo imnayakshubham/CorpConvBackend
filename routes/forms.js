@@ -60,7 +60,7 @@ router.get('/', authenticateToken, [
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const filter = { userId: req.user._id };
+    const filter = { user_id: req.user._id };
     if (req.query.status) {
       filter.status = req.query.status;
     }
@@ -105,7 +105,7 @@ router.get('/:id', authenticateToken, [
   try {
     const form = await Form.findOne({
       _id: req.params.id,
-      userId: req.user._id
+      user_id: req.user._id
     }).select('-__v');
 
     if (!form) {
@@ -186,7 +186,7 @@ router.post('/', authenticateToken, createFormLimit, validateForm, handleValidat
       settings: req.body.settings || {},
       theme: req.body.theme || {},
       status: req.body.status || 'draft',
-      userId: req.user._id
+      user_id: req.user._id
     };
 
     const form = new Form(formData);
@@ -224,7 +224,7 @@ router.put('/:id', authenticateToken, [
     };
 
     const form = await Form.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
+      { _id: req.params.id, user_id: req.user._id },
       updateData,
       { new: true, runValidators: true }
     );
@@ -258,7 +258,7 @@ router.delete('/:id', authenticateToken, [
   try {
     const form = await Form.findOneAndDelete({
       _id: req.params.id,
-      userId: req.user._id
+      user_id: req.user._id
     });
 
     if (!form) {
@@ -295,7 +295,7 @@ router.post('/:id/duplicate', authenticateToken, [
   try {
     const originalForm = await Form.findOne({
       _id: req.params.id,
-      userId: req.user._id
+      user_id: req.user._id
     });
 
     if (!originalForm) {
@@ -313,7 +313,7 @@ router.post('/:id/duplicate', authenticateToken, [
       settings: originalForm.settings,
       theme: originalForm.theme,
       status: 'draft',
-      userId: req.user._id
+      user_id: req.user._id
     });
 
     await duplicatedForm.save();
@@ -419,7 +419,7 @@ router.put('/:id/publish', authenticateToken, [
 ], async (req, res) => {
   try {
     const form = await Form.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
+      { _id: req.params.id, user_id: req.user._id },
       { status: req.body.isPublished ? 'published' : 'draft' },
       { new: true, runValidators: true }
     );
@@ -453,7 +453,7 @@ router.get('/:id/verify-ownership', authenticateToken, [
   try {
     const form = await Form.findOne({
       _id: req.params.id,
-      userId: req.user._id
+      user_id: req.user._id
     }).select('_id');
 
     res.json({

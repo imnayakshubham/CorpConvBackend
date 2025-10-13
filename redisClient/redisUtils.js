@@ -49,19 +49,19 @@ async function markUserCompletedInJob(key, job, completedUserId) {
 }
 
 
-const markOnline = async (userId) => {
-    if (!userId) return;
+const markOnline = async (user_id) => {
+    if (!user_id) return;
     // Set Redis key with TTL (e.g., 60 seconds)
-    await redis.set(`online:${userId}`, '1', 'EX', 60);
+    await redis.set(`online:${user_id}`, '1', 'EX', 60);
 };
 
-const markOffline = async (userId) => {
-    if (!userId) return;
-    logger.info("login===> ", userId)
+const markOffline = async (user_id) => {
+    if (!user_id) return;
+    logger.info("login===> ", user_id)
     // Remove Redis key immediately
-    await redis.del(`online:${userId}`);
+    await redis.del(`online:${user_id}`);
     // Update MongoDB on explicit offline only
-    await User.findByIdAndUpdate(userId, { online: false, last_active_at: new Date() });
+    await User.findByIdAndUpdate(user_id, { online: false, last_active_at: new Date() });
 };
 
 const syncOnlineStatusToDB = async () => {

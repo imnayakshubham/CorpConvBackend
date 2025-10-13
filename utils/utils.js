@@ -4,7 +4,7 @@ const { jobPostSites } = require("../constants");
 
 /**
  * Generate minimal JWT token for security
- * SECURITY: Token payload contains ONLY the user ID ({ id: userId })
+ * SECURITY: Token payload contains ONLY the user ID ({ id: user_id })
  * No sensitive data (email, name, etc.) is included in the token
  * All user information is fetched from MongoDB on each request via authMiddleware
  *
@@ -38,8 +38,8 @@ const generateUserId = (userType = "user_") => {
     const randomId = randomIdGenerator(size);
     const newId = randomId.padEnd(size, '0');
 
-    const userId = `${userType.toLowerCase()}${newId}${year}`;
-    return userId;
+    const user_id = `${userType.toLowerCase()}${newId}${year}`;
+    return user_id;
 };
 
 const keepOnlyNumbers = (inputString) => {

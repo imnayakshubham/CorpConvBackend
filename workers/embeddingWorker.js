@@ -13,8 +13,8 @@ async function start() {
 
     const worker = new Worker('embeddings',
         async job => {
-            const { userId } = job.data;
-            const user = await User.findById(userId);
+            const { user_id } = job.data;
+            const user = await User.findById(user_id);
             if (!user) return;
 
             // Compose text per requirement:

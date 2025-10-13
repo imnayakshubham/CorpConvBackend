@@ -59,11 +59,11 @@ class EncryptionMigration {
    * Encrypt a single user's data
    */
   async encryptUser(user) {
-    const userId = user._id;
+    const user_id = user._id;
     const email = user.user_email_id;
 
     try {
-      logger.info(`Processing user: ${userId} (${email})`);
+      logger.info(`Processing user: ${user_id} (${email})`);
 
       let modified = false;
 
@@ -99,16 +99,16 @@ class EncryptionMigration {
       // Save the user (bypasses pre-save hook since fields are already encrypted)
       if (!this.dryRun) {
         await user.save({ validateBeforeSave: true });
-        logger.info(`  ✓ User ${userId} encrypted successfully`);
+        logger.info(`  ✓ User ${user_id} encrypted successfully`);
       } else {
-        logger.info(`  [DRY RUN] Would encrypt user ${userId}`);
+        logger.info(`  [DRY RUN] Would encrypt user ${user_id}`);
       }
 
       this.stats.encrypted++;
       return true;
 
     } catch (error) {
-      logger.error(`  ✗ Failed to encrypt user ${userId}:`, error.message);
+      logger.error(`  ✗ Failed to encrypt user ${user_id}:`, error.message);
       this.stats.failed++;
       return false;
     }

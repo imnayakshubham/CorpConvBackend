@@ -3,13 +3,36 @@ const logger = require("../utils/logger.js");
 
 // middleware/responseFormatter.js
 function responseFormatter(req, res, next) {
-    res.success = ({ status = 'Success', message = 'Success', result = null } = {}) => {
-        return res.json({ status, message, result });
+    // Success response helper - supports both 'result' and 'data' for backward compatibility
+    res.success = ({
+        status = 'Success',
+        message = 'Success',
+        result = null,
+        data = null  // Accept both result and data
+    } = {}) => {
+        return res.json({
+            success: true,           // Frontend expects this flag
+            status,
+            message,
+            data: data || result     // Use data if provided, fallback to result
+        });
     };
 
-    res.error = ({ status = 'Error', message = '', error = null, code = 400 } = {}) => {
+    // Error response helper
+    res.error = ({
+        status = 'Error',
+        message = '',
+        error = null,
+        code = 400
+    } = {}) => {
         logger.error(`User: ${req?.user?._id ?? req?.cookie?.[guestKey] ?? "anonymous"} \n Code: ${code}\n Error occurred: ${message}`, { error });
-        return res.status(code).json({ status, message, error });
+        return res.status(code).json({
+            success: false,          // Frontend expects this flag
+            status,
+            message,
+            error,
+            data: null               // Consistent with frontend expectations
+        });
     };
 
     next();

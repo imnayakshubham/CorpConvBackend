@@ -25,7 +25,7 @@ const FeedbackNotificationEmail = ({ feedback }) => {
   return React.createElement(Html, null,
     React.createElement(Head, null,
       React.createElement(Font, {
-        fontFamily: "Roboto",
+        font_family: "Roboto",
         fallbackFontFamily: "Verdana",
         webFont: {
           url: "https://fonts.gstatic.com/s/roboto/v27/KFOmCnqEu92Fr1Mu4mxKKTU1Kg.woff2",
@@ -38,8 +38,8 @@ const FeedbackNotificationEmail = ({ feedback }) => {
     React.createElement(Preview, null, `New ${feedback.type} feedback: ${feedback.title}`),
     React.createElement(Body, {
       style: {
-        backgroundColor: "#f9fafb",
-        fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif",
+        background_color: "#f9fafb",
+        font_family: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif",
       }
     },
       React.createElement(Container, {
@@ -52,9 +52,9 @@ const FeedbackNotificationEmail = ({ feedback }) => {
         React.createElement(Section, {
           style: {
             padding: "24px",
-            backgroundColor: "white",
+            background_color: "white",
             border: "1px solid #e5e7eb",
-            borderRadius: "8px",
+            border_radius: "8px",
           }
         },
           React.createElement(Text, {
@@ -68,9 +68,9 @@ const FeedbackNotificationEmail = ({ feedback }) => {
 
           React.createElement(Section, {
             style: {
-              backgroundColor: "#f3f4f6",
+              background_color: "#f3f4f6",
               padding: "16px",
-              borderRadius: "6px",
+              border_radius: "6px",
               margin: "20px 0",
             }
           },
@@ -118,9 +118,9 @@ const FeedbackNotificationEmail = ({ feedback }) => {
             }, feedback.title),
             React.createElement(Section, {
               style: {
-                backgroundColor: "#f9fafb",
+                background_color: "#f9fafb",
                 padding: "16px",
-                borderRadius: "6px",
+                border_radius: "6px",
                 borderLeft: `4px solid ${priorityColor}`
               }
             },
@@ -159,11 +159,11 @@ const FeedbackNotificationEmail = ({ feedback }) => {
             React.createElement(Link, {
               href: feedbackUrl,
               style: {
-                backgroundColor: "#1f2937",
+                background_color: "#1f2937",
                 color: "#fff",
                 padding: "12px 24px",
                 textDecoration: "none",
-                borderRadius: "6px",
+                border_radius: "6px",
                 display: "inline-block",
                 fontWeight: "600"
               }

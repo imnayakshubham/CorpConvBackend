@@ -53,7 +53,7 @@ const fileUploadSchema = new mongoose.Schema({
   thumbnailPath: String,
 
   // Access control
-  isPublic: {
+  is_public: {
     type: Boolean,
     default: false
   },
@@ -88,7 +88,7 @@ fileUploadSchema.index({ submissionId: 1 });
 fileUploadSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // File size validation
-fileUploadSchema.pre('save', function(next) {
+fileUploadSchema.pre('save', function (next) {
   const maxFileSize = 10 * 1024 * 1024; // 10MB
   if (this.size > maxFileSize) {
     return next(new Error('File size exceeds maximum limit of 10MB'));
@@ -97,21 +97,21 @@ fileUploadSchema.pre('save', function(next) {
 });
 
 // Increment download count
-fileUploadSchema.methods.incrementDownload = function() {
+fileUploadSchema.methods.incrementDownload = function () {
   this.downloadCount += 1;
   return this.save();
 };
 
 // Get file URL (for future cloud storage integration)
-fileUploadSchema.methods.getUrl = function() {
-  if (this.isPublic) {
+fileUploadSchema.methods.getUrl = function () {
+  if (this.is_public) {
     return `/api/files/${this.fileName}`;
   }
   return `/api/files/private/${this.fileName}`;
 };
 
 // Generate thumbnail path for images
-fileUploadSchema.methods.generateThumbnail = function() {
+fileUploadSchema.methods.generateThumbnail = function () {
   if (this.mimeType.startsWith('image/')) {
     const pathParts = this.path.split('.');
     const extension = pathParts.pop();

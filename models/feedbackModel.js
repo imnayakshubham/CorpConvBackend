@@ -35,7 +35,7 @@ const userContextSchema = new mongoose.Schema({
 }, { _id: false });
 
 const feedbackSchema = mongoose.Schema({
-  userId: {
+  user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     default: null // Allows anonymous feedback
@@ -160,7 +160,7 @@ const feedbackSchema = mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   }],
-  isPublic: {
+  is_public: {
     type: Boolean,
     default: false // Whether feedback is visible to other users
   },
@@ -187,17 +187,17 @@ const feedbackSchema = mongoose.Schema({
 // Indexes for better query performance
 feedbackSchema.index({ type: 1, status: 1 });
 feedbackSchema.index({ priority: 1, createdAt: -1 });
-feedbackSchema.index({ userId: 1, createdAt: -1 });
+feedbackSchema.index({ user_id: 1, createdAt: -1 });
 feedbackSchema.index({ assignedTo: 1, status: 1 });
 feedbackSchema.index({ source: 1, createdAt: -1 });
 
 // Virtual for feedback age
-feedbackSchema.virtual('age').get(function() {
+feedbackSchema.virtual('age').get(function () {
   return Date.now() - this.createdAt.getTime();
 });
 
 // Virtual for response time (if resolved)
-feedbackSchema.virtual('responseTime').get(function() {
+feedbackSchema.virtual('responseTime').get(function () {
   if (this.resolvedAt) {
     return this.resolvedAt.getTime() - this.createdAt.getTime();
   }
@@ -205,7 +205,7 @@ feedbackSchema.virtual('responseTime').get(function() {
 });
 
 // Pre-save middleware to auto-generate title if not provided
-feedbackSchema.pre('save', function(next) {
+feedbackSchema.pre('save', function (next) {
   if (!this.title && this.description) {
     // Generate title from first 50 characters of description
     this.title = this.description.substring(0, 50).trim();
@@ -223,7 +223,7 @@ feedbackSchema.pre('save', function(next) {
 });
 
 // Instance method to add admin note
-feedbackSchema.methods.addAdminNote = function(note, adminId) {
+feedbackSchema.methods.addAdminNote = function (note, adminId) {
   this.adminNotes.push({
     note: note,
     addedBy: adminId,
@@ -233,7 +233,7 @@ feedbackSchema.methods.addAdminNote = function(note, adminId) {
 };
 
 // Instance method to resolve feedback
-feedbackSchema.methods.resolve = function(resolution, resolvedBy) {
+feedbackSchema.methods.resolve = function (resolution, resolvedBy) {
   this.status = 'resolved';
   this.resolution = resolution;
   this.resolvedBy = resolvedBy;
@@ -242,9 +242,9 @@ feedbackSchema.methods.resolve = function(resolution, resolvedBy) {
 };
 
 // Instance method to add upvote
-feedbackSchema.methods.addUpvote = function(userId) {
-  if (!this.upvotedBy.includes(userId)) {
-    this.upvotedBy.push(userId);
+feedbackSchema.methods.addUpvote = function (user_id) {
+  if (!this.upvotedBy.includes(user_id)) {
+    this.upvotedBy.push(user_id);
     this.upvotes += 1;
     return this.save();
   }
@@ -252,8 +252,8 @@ feedbackSchema.methods.addUpvote = function(userId) {
 };
 
 // Instance method to remove upvote
-feedbackSchema.methods.removeUpvote = function(userId) {
-  const index = this.upvotedBy.indexOf(userId);
+feedbackSchema.methods.removeUpvote = function (user_id) {
+  const index = this.upvotedBy.indexOf(user_id);
   if (index > -1) {
     this.upvotedBy.splice(index, 1);
     this.upvotes -= 1;
@@ -263,7 +263,7 @@ feedbackSchema.methods.removeUpvote = function(userId) {
 };
 
 // Static method to get feedback statistics
-feedbackSchema.statics.getStats = function() {
+feedbackSchema.statics.getStats = function () {
   return this.aggregate([
     {
       $group: {
@@ -296,11 +296,11 @@ feedbackSchema.statics.getStats = function() {
 };
 
 // Static method to get trending feedback
-feedbackSchema.statics.getTrending = function(limit = 10) {
-  return this.find({ isPublic: true })
+feedbackSchema.statics.getTrending = function (limit = 10) {
+  return this.find({ is_public: true })
     .sort({ upvotes: -1, createdAt: -1 })
     .limit(limit)
-    .populate('userId', 'actual_user_name public_user_name')
+    .populate('user_id', 'actual_user_name public_user_name')
     .lean();
 };
 

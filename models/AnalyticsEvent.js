@@ -25,7 +25,7 @@ const analyticsEventSchema = new mongoose.Schema({
   },
 
   // Field-specific events
-  fieldId: String,
+  field_id: String,
   fieldType: String,
 
   // Event data
@@ -75,7 +75,7 @@ const analyticsEventSchema = new mongoose.Schema({
   },
 
   // User ID for authenticated users (future)
-  userId: {
+  user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }
@@ -90,13 +90,13 @@ analyticsEventSchema.index({ formId: 1, timestamp: -1 });
 analyticsEventSchema.index({ eventType: 1, timestamp: -1 });
 
 // Update form view count for view events
-analyticsEventSchema.post('save', async function(doc) {
+analyticsEventSchema.post('save', async function (doc) {
   if (doc.eventType === 'view') {
     try {
       const Form = mongoose.model('Form');
       await Form.findByIdAndUpdate(
         doc.formId,
-        { $inc: { 'analytics.totalViews': 1 } }
+        { $inc: { 'analytics.total_views': 1 } }
       );
     } catch (error) {
       console.error('Error updating form view count:', error);
@@ -105,7 +105,7 @@ analyticsEventSchema.post('save', async function(doc) {
 });
 
 // Static methods for analytics aggregation
-analyticsEventSchema.statics.getFormAnalytics = function(formId, startDate, endDate) {
+analyticsEventSchema.statics.getFormAnalytics = function (formId, startDate, endDate) {
   const match = {
     formId: new mongoose.Types.ObjectId(formId),
     timestamp: {
@@ -133,12 +133,12 @@ analyticsEventSchema.statics.getFormAnalytics = function(formId, startDate, endD
   ]);
 };
 
-analyticsEventSchema.statics.getFieldAnalytics = function(formId, fieldId) {
+analyticsEventSchema.statics.getFieldAnalytics = function (formId, field_id) {
   return this.aggregate([
     {
       $match: {
         formId: new mongoose.Types.ObjectId(formId),
-        fieldId: fieldId,
+        field_id: field_id,
         eventType: { $in: ['field_focus', 'field_blur', 'field_change', 'validation_error'] }
       }
     },

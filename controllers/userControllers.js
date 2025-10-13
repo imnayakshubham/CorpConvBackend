@@ -40,7 +40,7 @@ const projection = {
 };
 
 
-// userId: string,
+// user_id: string,
 //   options?: {
 //     projection?: unknown;
 //     populateOptions?: Parameters<typeof User.prototype.populate>[0];
@@ -48,15 +48,15 @@ const projection = {
 //   }
 
 async function getUserWithFlatProfileDetails({
-  userId,
+  user_id,
   access = true,
   options,
 }) {
   // Destructure options with defaults
   const { projection = null, populateOptions = {}, profileItemsFilter } = options || {};
-  logger.info("id", userId)
+  logger.info("id", user_id)
   // Fetch user with populated profile_details document
-  const userDoc = await User.findById(userId, projection).where({ access }).populate({
+  const userDoc = await User.findById(user_id, projection).where({ access }).populate({
     path: 'profile_details',
     ...populateOptions,
   });
@@ -103,10 +103,10 @@ const allUsers = asyncHandler(async (req, res) => {
 const getfollowersList = async (req, res) => {
   try {
     const searchTerm = req.query.search;
-    const userId = req.user._id;
+    const user_id = req.user._id;
 
     if (!searchTerm) {
-      const user = await User.findById(userId, { followers: 1 })
+      const user = await User.findById(user_id, { followers: 1 })
         .populate({
           path: "followers",
           select: "public_user_name user_job_experience"
@@ -115,7 +115,7 @@ const getfollowersList = async (req, res) => {
       const followers = user?.followers || [];
       return res.status(200).json({ message: "All Followers", status: "Success", result: followers });
     }
-    const followerIds = (await User.findById(userId, { followers: 1 })).followers || [];
+    const followerIds = (await User.findById(user_id, { followers: 1 })).followers || [];
     const followersMatchingSearch = await User.find({
       _id: { $in: followerIds },
       $or: [
@@ -258,9 +258,9 @@ const logout = async (req, res) => {
 
 const updateUserProfile = async (req, res) => {
 
-  const userId = req.body._id ?? req.user._id;
+  const user_id = req.body._id ?? req.user._id;
 
-  if (!userId) {
+  if (!user_id) {
     return res.status(400).json({
       message: "User ID is required",
       status: "Failed",
@@ -294,12 +294,12 @@ const updateUserProfile = async (req, res) => {
 
 
     const updatedUser = await User.findOneAndUpdate(
-      { _id: userId },
+      { _id: user_id },
       { $set: updateFields },
       { new: true, projection }
     );
     if (updatedUser) {
-      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
 
       addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
 
@@ -312,12 +312,12 @@ const updateUserProfile = async (req, res) => {
           Field of study: ${user.field_of_study || ''}
         `
 
-      const { embedding } = await generateSingleEmbedding(userId, textToEmbed)
+      const { embedding } = await generateSingleEmbedding(user_id, textToEmbed)
 
 
       // Upsert embedding document to keep in sync
       await userEmbedding.findOneAndUpdate(
-        { userId },
+        { user_id },
         { embedding, lastUpdated: new Date() },
         { upsert: true, new: true }
       );
@@ -338,9 +338,9 @@ const updateUserProfile = async (req, res) => {
 
 const updateUserProfileDetails = async (req, res) => {
 
-  const userId = req.body._id ?? req.user._id;
+  const user_id = req.body._id ?? req.user._id;
 
-  if (!userId) {
+  if (!user_id) {
     return res.status(400).json({
       message: "User ID is required",
       status: "Failed",
@@ -373,12 +373,12 @@ const updateUserProfileDetails = async (req, res) => {
     }
 
     const updatedUser = await User.findOneAndUpdate(
-      { _id: userId },
+      { _id: user_id },
       { $set: updateFields },
       { new: true, projection }
     ).populate("project_details");
     if (updatedUser) {
-      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
 
       addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
       return res.status(200).json({
@@ -396,12 +396,12 @@ const updateUserProfileDetails = async (req, res) => {
 const getUserInfo = async (req, res) => {
   try {
     logger.info("req.params", req.params)
-    const userId = req.params?.id
-    if (!userId) {
+    const user_id = req.params?.id
+    if (!user_id) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
     }
 
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
     const redis = getRedisInstance()
     const cachedData = await redis.get(userInfoRedisKey)
 
@@ -414,7 +414,7 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-    const user = await getUserWithFlatProfileDetails({ userId, options: { projection } })
+    const user = await getUserWithFlatProfileDetails({ user_id, options: { projection } })
 
     if (user) {
       await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
@@ -613,21 +613,21 @@ const sendFollowRequest = async (req, res) => {
 };
 
 const acceptFollowRequest = async (req, res) => {
-  const { userId, requesterId } = req.body;
+  const { user_id, requesterId } = req.body;
 
 
   try {
-    await User.findByIdAndUpdate(userId, {
+    await User.findByIdAndUpdate(user_id, {
       $pull: { pending_followings: requesterId },
       $addToSet: { followers: requesterId },
     }, { upsert: true, new: true });
 
     await User.findByIdAndUpdate(requesterId, {
-      $pull: { followings: userId },
-      $addToSet: { followers: userId },
+      $pull: { followings: user_id },
+      $addToSet: { followers: user_id },
     }, { upsert: true, new: true });
 
-    const result = await User.findById(userId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    const result = await User.findById(user_id, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: result });
   } catch (error) {
@@ -638,9 +638,9 @@ const acceptFollowRequest = async (req, res) => {
 
 // API 3: Reject Connection Request
 const rejectFollowRequest = async (req, res) => {
-  const { userId, requesterId } = req.body;
+  const { user_id, requesterId } = req.body;
   try {
-    await User.findByIdAndUpdate(userId, {
+    await User.findByIdAndUpdate(user_id, {
       $pull: { pending_followings: requesterId },
     }, { upsert: true, new: true });
 
@@ -652,15 +652,15 @@ const rejectFollowRequest = async (req, res) => {
 }
 
 
-function assertSelf(userId, authedId) {
-  if (!userId || !authedId || userId.toString() !== authedId.toString()) {
+function assertSelf(user_id, authedId) {
+  if (!user_id || !authedId || user_id.toString() !== authedId.toString()) {
     const err = new Error('Forbidden');
     err.status = 403;
     throw err;
   }
 }
 
-function sanitizeItemPayload(payload, userId) {
+function sanitizeItemPayload(payload, user_id) {
   const { type, content, name, img_url, link } = payload || {};
   if (!['title', 'text', 'image', 'links', 'socialLink'].includes(type)) {
     const err = new Error('Invalid type');
@@ -670,7 +670,7 @@ function sanitizeItemPayload(payload, userId) {
   return {
     type, content: content ?? null, name: name ?? null,
     img_url: img_url ?? null, link: link ?? null,
-    created_by: userId,
+    created_by: user_id,
     ...payload
   };
 }
@@ -865,7 +865,7 @@ const updateLayouts = async (req, res) => {
 };
 
 
-// '/recommend/:userId'
+// '/recommend/:user_id'
 function paginate(list, limit) {
   const hasMore = list.length > limit;
   const results = hasMore ? list.slice(0, limit) : list;
@@ -987,12 +987,12 @@ const getUserRecommendations = async (req, res) => {
 
 /**
  * Generate JWT tokens for authentication
- * @param {string} userId - User ID
+ * @param {string} user_id - User ID
  * @returns {Object} - Access and refresh tokens
  */
-const generateTokens = (userId) => {
-  const accessToken = generateToken(userId, '7d'); // 7 days (extended from 15m)
-  const refreshToken = generateToken(userId, '30d'); // 30 days (extended from 7d)
+const generateTokens = (user_id) => {
+  const accessToken = generateToken(user_id, '7d'); // 7 days (extended from 15m)
+  const refreshToken = generateToken(user_id, '30d'); // 30 days (extended from 7d)
   return { accessToken, refreshToken };
 }
 
@@ -1123,7 +1123,7 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
         message: "Login successful",
         data: {
           user: responseFormatterForAuth(userData._doc),
-          token: accessToken  // JWT contains only { id: userId }
+          token: accessToken  // JWT contains only { id: user_id }
         }
       });
 
@@ -1185,7 +1185,7 @@ const firebaseGoogleAuth = asyncHandler(async (req, res) => {
         message: "User created and logged in successfully",
         data: {
           user: responseFormatterForAuth(newUser._doc),
-          token: accessToken  // JWT contains only { id: userId }
+          token: accessToken  // JWT contains only { id: user_id }
         }
       });
     }

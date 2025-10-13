@@ -104,7 +104,7 @@ async function migrateUsers() {
       } catch (error) {
         errorCount++;
         errors.push({
-          userId: user._id,
+          user_id: user._id,
           email: user.user_email_id,
           error: error.message
         });
@@ -121,7 +121,7 @@ async function migrateUsers() {
     if (errors.length > 0) {
       console.log('\n❌ Failed Users:');
       errors.forEach(err => {
-        console.log(`  - User ID: ${err.userId} (${err.email})`);
+        console.log(`  - User ID: ${err.user_id} (${err.email})`);
         console.log(`    Error: ${err.error}`);
       });
     }

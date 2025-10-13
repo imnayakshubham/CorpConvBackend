@@ -1,12 +1,12 @@
 import mongoose from 'mongoose';
 
 const conditionalLogicSchema = new mongoose.Schema({
-  fieldId: {
+  field_id: {
     type: String,
     required: true
   },
   condition: {
-    fieldId: {
+    field_id: {
       type: String,
       required: true
     },
@@ -25,10 +25,10 @@ const conditionalLogicSchema = new mongoose.Schema({
 });
 
 const fieldValidationSchema = new mongoose.Schema({
-  minLength: Number,
-  maxLength: Number,
+  min_length: Number,
+  max_length: Number,
   pattern: String,
-  customMessage: String,
+  custom_message: String,
   required: {
     type: Boolean,
     default: false
@@ -69,8 +69,8 @@ const formFieldSchema = new mongoose.Schema({
   validation: fieldValidationSchema,
 
   // Conditional logic
-  conditionalLogic: {
-    showIf: [conditionalLogicSchema]
+  conditional_logic: {
+    show_if: [conditionalLogicSchema]
   },
 
   // Styling
@@ -84,15 +84,15 @@ const formFieldSchema = new mongoose.Schema({
 });
 
 const formSettingsSchema = new mongoose.Schema({
-  allowMultipleSubmissions: {
+  allow_multiple_submissions: {
     type: Boolean,
     default: true
   },
-  requireAuthentication: {
+  require_authentication: {
     type: Boolean,
     default: false
   },
-  submitButtonText: {
+  submit_button_text: {
     type: String,
     default: 'Submit'
   },
@@ -100,60 +100,60 @@ const formSettingsSchema = new mongoose.Schema({
     type: String,
     default: 'Thank you for your submission!'
   },
-  redirectUrl: String,
+  redirect_url: String,
   collectEmail: {
     type: Boolean,
     default: false
   },
-  isPublic: {
+  is_public: {
     type: Boolean,
     default: true
   }
 });
 
 const formThemeSchema = new mongoose.Schema({
-  primaryColor: {
+  primary_color: {
     type: String,
     default: '#3b82f6'
   },
-  backgroundColor: {
+  background_color: {
     type: String,
     default: '#ffffff'
   },
-  fontFamily: {
+  font_family: {
     type: String,
     default: 'Inter'
   },
-  borderRadius: {
+  border_radius: {
     type: String,
     default: '8px'
   },
-  customCSS: String
+  custom_css: String
 });
 
 const formAnalyticsSchema = new mongoose.Schema({
-  totalViews: {
+  total_views: {
     type: Number,
     default: 0
   },
-  totalSubmissions: {
+  total_submissions: {
     type: Number,
     default: 0
   },
-  conversionRate: {
+  conversion_rate: {
     type: Number,
     default: 0
   },
-  lastSubmissionAt: Date
+  last_submission_at: Date
 });
 
 const formSchema = new mongoose.Schema({
-  title: {
+  survey_title: {
     type: String,
     required: true,
     trim: true
   },
-  description: {
+  survey_description: {
     type: String,
     trim: true
   },
@@ -193,7 +193,7 @@ const formSchema = new mongoose.Schema({
   },
 
   // Future auth integration
-  userId: {
+  user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }
@@ -202,9 +202,9 @@ const formSchema = new mongoose.Schema({
 });
 
 // Create unique slug before saving
-formSchema.pre('save', function(next) {
-  if (!this.slug && this.title) {
-    const baseSlug = this.title
+formSchema.pre('save', function (next) {
+  if (!this.slug && this.survey_title) {
+    const baseSlug = this.survey_title
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-')
@@ -216,9 +216,9 @@ formSchema.pre('save', function(next) {
 });
 
 // Update conversion rate when analytics change
-formSchema.pre('save', function(next) {
-  if (this.analytics.totalViews > 0) {
-    this.analytics.conversionRate = (this.analytics.totalSubmissions / this.analytics.totalViews) * 100;
+formSchema.pre('save', function (next) {
+  if (this.analytics.total_views > 0) {
+    this.analytics.conversion_rate = (this.analytics.total_submissions / this.analytics.total_views) * 100;
   }
   next();
 });
@@ -226,7 +226,7 @@ formSchema.pre('save', function(next) {
 // Indexes for better query performance
 formSchema.index({ status: 1, createdAt: -1 });
 formSchema.index({ slug: 1 });
-formSchema.index({ userId: 1 });
+formSchema.index({ user_id: 1 });
 
 const Form = mongoose.model('Form', formSchema);
 

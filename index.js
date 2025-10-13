@@ -453,13 +453,13 @@ io.on("connection", async (socket) => {
           message: "Question Like Update Failed"
         }
       }
-      const userId = payload.user_id ?? generateRandomUserId()
+      const user_id = payload.user_id ?? generateRandomUserId()
 
       // Check if user has already liked the answer
-      const userIndex = question.liked_by.indexOf(userId);
+      const userIndex = question.liked_by.indexOf(user_id);
       if (userIndex === -1) {
         // User hasn't liked the question, add like
-        question.liked_by.push(userId);
+        question.liked_by.push(user_id);
       } else {
         // User has already liked the question, remove like
         question.liked_by.splice(userIndex, 1);

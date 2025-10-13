@@ -107,8 +107,8 @@ router.post('/', authenticateToken, uploadLimit, upload.array('files', 5), async
           encoding: file.encoding,
           fieldName: file.fieldname,
           formId: req.body.formId || null,
-          uploadedBy: req.user.userId, // Associate file with authenticated user
-          isPublic: false
+          uploadedBy: req.user.user_id, // Associate file with authenticated user
+          is_public: false
         });
 
         // Generate thumbnail for images
@@ -306,7 +306,7 @@ router.delete('/files/:id', [
     }
 
     // Check if user owns the file
-    if (file.uploadedBy && file.uploadedBy.toString() !== req.user.userId) {
+    if (file.uploadedBy && file.uploadedBy.toString() !== req.user.user_id) {
       return res.status(403).json({
         success: false,
         error: 'Access denied. You can only delete your own files.'
@@ -354,7 +354,7 @@ router.get('/files', authenticateToken, async (req, res) => {
     const skip = (page - 1) * limit;
 
     const filter = {
-      uploadedBy: req.user.userId // Only show files belonging to the authenticated user
+      uploadedBy: req.user.user_id // Only show files belonging to the authenticated user
     };
     if (req.query.formId) {
       filter.formId = req.query.formId;

@@ -97,8 +97,8 @@ async function searchUsersByEmail(email) {
 // Example 4: Check User Encryption Status
 // ============================================================================
 
-async function checkUserEncryptionStatus(userId) {
-  const user = await User.findById(userId);
+async function checkUserEncryptionStatus(user_id) {
+  const user = await User.findById(user_id);
 
   if (!user) {
     throw new Error('User not found');
@@ -269,9 +269,9 @@ async function findUserByEncryptedEmail(email) {
 // Example 10: Error Handling with Backward Compatibility
 // ============================================================================
 
-async function robustDataRetrieval(userId) {
+async function robustDataRetrieval(user_id) {
   try {
-    const user = await User.findById(userId);
+    const user = await User.findById(user_id);
 
     if (!user) {
       return { success: false, error: 'User not found' };

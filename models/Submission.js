@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const attachmentSchema = new mongoose.Schema({
-  fieldId: {
+  field_id: {
     type: String,
     required: true
   },
@@ -72,7 +72,7 @@ const submissionSchema = new mongoose.Schema({
   },
 
   // Future user association
-  userId: {
+  user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
@@ -96,14 +96,14 @@ submissionSchema.index({ formId: 1, isSpam: 1 });
 submissionSchema.index({ sessionId: 1 });
 
 // Update form analytics after submission
-submissionSchema.post('save', async function(doc) {
+submissionSchema.post('save', async function (doc) {
   try {
     const Form = mongoose.model('Form');
     await Form.findByIdAndUpdate(
       doc.formId,
       {
-        $inc: { 'analytics.totalSubmissions': 1 },
-        $set: { 'analytics.lastSubmissionAt': new Date() }
+        $inc: { 'analytics.total_submissions': 1 },
+        $set: { 'analytics.last_submission_at': new Date() }
       }
     );
   } catch (error) {

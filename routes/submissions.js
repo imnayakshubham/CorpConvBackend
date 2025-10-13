@@ -63,7 +63,7 @@ router.get('/:formId', [
       {
         $group: {
           _id: null,
-          totalSubmissions: { $sum: 1 },
+          total_submissions: { $sum: 1 },
           validSubmissions: {
             $sum: { $cond: [{ $eq: ['$isValid', true] }, 1, 0] }
           },
@@ -88,7 +88,7 @@ router.get('/:formId', [
           hasPrev: page > 1
         },
         statistics: stats[0] || {
-          totalSubmissions: 0,
+          total_submissions: 0,
           validSubmissions: 0,
           spamSubmissions: 0,
           avgCompletionTime: 0
@@ -153,7 +153,7 @@ router.delete('/single/:id', [
     // Update form analytics
     await Form.findByIdAndUpdate(
       submission.formId,
-      { $inc: { 'analytics.totalSubmissions': -1 } }
+      { $inc: { 'analytics.total_submissions': -1 } }
     );
 
     res.json({

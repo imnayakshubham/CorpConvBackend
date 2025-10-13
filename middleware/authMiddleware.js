@@ -28,7 +28,7 @@ const clearAuthCookies = (res) => {
  * Authentication Middleware - Protects routes requiring authentication
  *
  * SECURITY FLOW:
- * 1. Extract minimal JWT token (contains only user ID: { id: userId })
+ * 1. Extract minimal JWT token (contains only user ID: { id: user_id })
  * 2. Verify token signature and expiration
  * 3. Fetch complete user data from MongoDB database (trusted source)
  * 4. Attach user object to req.user for use in route handlers

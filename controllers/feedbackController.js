@@ -115,7 +115,7 @@ const createFeedback = asyncHandler(async (req, res) => {
 
     // Add user ID if authenticated
     if (req.user && req.user._id) {
-      feedbackData.userId = req.user._id;
+      feedbackData.user_id = req.user._id;
     }
 
     // Create feedback
@@ -123,7 +123,7 @@ const createFeedback = asyncHandler(async (req, res) => {
 
     // Populate user data if available
     const populatedFeedback = await Feedback.findById(feedback._id)
-      .populate('userId', 'actual_user_name public_user_name email')
+      .populate('user_id', 'actual_user_name public_user_name email')
       .lean();
 
     // Send email notification to admin (async, don't wait for completion)
@@ -190,7 +190,7 @@ const getAllFeedback = asyncHandler(async (req, res) => {
 
   try {
     const feedback = await Feedback.find(filter)
-      .populate('userId', 'actual_user_name public_user_name email')
+      .populate('user_id', 'actual_user_name public_user_name email')
       .populate('assignedTo', 'actual_user_name public_user_name')
       .populate('resolvedBy', 'actual_user_name public_user_name')
       .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
@@ -227,7 +227,7 @@ const getFeedback = asyncHandler(async (req, res) => {
 
   try {
     const feedback = await Feedback.findById(id)
-      .populate('userId', 'actual_user_name public_user_name email')
+      .populate('user_id', 'actual_user_name public_user_name email')
       .populate('assignedTo', 'actual_user_name public_user_name')
       .populate('resolvedBy', 'actual_user_name public_user_name')
       .populate('adminNotes.addedBy', 'actual_user_name public_user_name');
@@ -239,8 +239,8 @@ const getFeedback = asyncHandler(async (req, res) => {
 
     // Check if user can access this feedback
     const canAccess = req.user.isAdmin ||
-                      (feedback.userId && feedback.userId._id.toString() === req.user._id.toString()) ||
-                      feedback.isPublic;
+      (feedback.user_id && feedback.user_id._id.toString() === req.user._id.toString()) ||
+      feedback.is_public;
 
     if (!canAccess) {
       res.status(403);
@@ -271,7 +271,7 @@ const updateFeedback = asyncHandler(async (req, res) => {
     priority,
     assignedTo,
     tags,
-    isPublic,
+    is_public,
     adminNote,
     resolution
   } = req.body;
@@ -290,7 +290,7 @@ const updateFeedback = asyncHandler(async (req, res) => {
     if (priority) feedback.priority = priority;
     if (assignedTo !== undefined) feedback.assignedTo = assignedTo;
     if (tags) feedback.tags = tags;
-    if (isPublic !== undefined) feedback.isPublic = isPublic;
+    if (is_public !== undefined) feedback.is_public = is_public;
 
     // Add admin note if provided
     if (adminNote) {
@@ -306,7 +306,7 @@ const updateFeedback = asyncHandler(async (req, res) => {
 
     // Fetch updated feedback with populated fields
     const updatedFeedback = await Feedback.findById(id)
-      .populate('userId', 'actual_user_name public_user_name')
+      .populate('user_id', 'actual_user_name public_user_name')
       .populate('assignedTo', 'actual_user_name public_user_name')
       .populate('resolvedBy', 'actual_user_name public_user_name');
 
@@ -408,7 +408,7 @@ const voteFeedback = asyncHandler(async (req, res) => {
       throw new Error("Feedback not found");
     }
 
-    if (!feedback.isPublic) {
+    if (!feedback.is_public) {
       res.status(403);
       throw new Error("Cannot vote on private feedback");
     }
@@ -448,7 +448,7 @@ const getMyFeedback = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, status, type } = req.query;
 
   // Build filter
-  const filter = { userId: req.user._id };
+  const filter = { user_id: req.user._id };
   if (status) filter.status = status;
   if (type) filter.type = type;
 

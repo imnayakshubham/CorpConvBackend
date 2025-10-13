@@ -110,7 +110,7 @@ The JSON schema must follow this exact structure:
     }
   ],
   "settings": {
-    "submitButtonText": "Submit",
+    "submit_button_text": "Submit",
     "successMessage": "Thank you for your submission!"
   }
 }
@@ -213,7 +213,7 @@ const generateFormWithAI = async (messages) => {
           }
         ],
         settings: {
-          submitButtonText: "Send Message",
+          submit_button_text: "Send Message",
           successMessage: "Thank you for your message! We'll get back to you soon."
         }
       };
@@ -233,7 +233,7 @@ const generateFormWithAI = async (messages) => {
         }
       ],
       settings: {
-        submitButtonText: "Submit",
+        submit_button_text: "Submit",
         successMessage: "Thank you for your submission!"
       }
     };

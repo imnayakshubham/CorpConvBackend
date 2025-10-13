@@ -100,16 +100,16 @@ router.get('/recommendation/:user_id?', async (req, res) => {
         // Serve cached recommendations
         const items = recDoc.items || [];
         const startIdx = cursor
-            ? items.findIndex(i => i.userId.toString() === cursor) + 1
+            ? items.findIndex(i => i.user_id.toString() === cursor) + 1
             : 0;
 
         const pageItems = items.slice(startIdx, startIdx + limit);
         const nextCursorRec = pageItems.length === limit
-            ? pageItems[pageItems.length - 1].userId.toString()
+            ? pageItems[pageItems.length - 1].user_id.toString()
             : null;
 
         const users = pageItems.length
-            ? await User.find({ _id: { $in: pageItems.map(p => p.userId) } }).lean()
+            ? await User.find({ _id: { $in: pageItems.map(p => p.user_id) } }).lean()
             : [];
 
         const byId = users.reduce((acc, u) => {
@@ -118,9 +118,9 @@ router.get('/recommendation/:user_id?', async (req, res) => {
         }, {});
 
         const enriched = pageItems.map(p => ({
-            id: p.userId,
+            id: p.user_id,
             recommendation_value: p.recommendation_value,
-            profile: byId[p.userId.toString()] || null
+            profile: byId[p.user_id.toString()] || null
         }));
 
         return res.success({

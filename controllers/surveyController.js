@@ -5,18 +5,24 @@ const { Survey, Submission } = require("../models/surveyModel");
 const createSurvey = async (req, res) => {
     try {
         const payload = req.body;
+
+        // Accept BOTH naming conventions for backward compatibility:
+        // - Old: survey_title, survey_description (existing code)
+        // - New: title, description (new wizard)
+        const title = payload.survey_title || payload.title || '';
+        const description = payload.survey_description || payload.description || '';
+
         const updatedPayload = {
-            survey_title: payload.survey_title.trim(),
-            survey_description: payload.survey_description.trim(),
+            survey_title: title.trim(),
+            survey_description: description.trim(),
             created_by: req.user._id
         }
 
         // Validation
         if (updatedPayload.survey_title.length < 3) {
-            return res.status(400).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey title must be at least 3 characters long',
-                data: null
+                code: 400
             });
         }
 
@@ -24,20 +30,19 @@ const createSurvey = async (req, res) => {
             ...updatedPayload,
         });
 
-
         const savedSurvey = await newSurvey.save();
 
-        return res.status(201).json({
-            status: 'Success',
-            data: savedSurvey,
-            message: 'Survey created successfully'
+        // Use responseFormatter helper for consistent format
+        return res.status(201).success({
+            message: 'Survey created successfully',
+            data: savedSurvey
         });
     } catch (error) {
-        console.log({ error })
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Create survey error:', error);
+        return res.error({
             message: 'Server Error: Survey not created',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 }
@@ -84,24 +89,17 @@ const listSurveys = async (req, res) => {
         const total = await Survey.countDocuments(filter);
         const totalPages = Math.ceil(total / limit);
 
-        return res.status(200).json({
-            status: 'Success',
-            data: surveys,  // Direct array for legacy frontend compatibility
+        // Use responseFormatter helper for consistent format
+        return res.success({
             message: 'Surveys retrieved successfully',
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages,
-                hasMore: page < totalPages
-            }
+            data: surveys  // Direct array for frontend compatibility
         });
     } catch (error) {
         console.error('List surveys error:', error);
-        return res.status(500).json({
-            status: 'Failed',
+        return res.error({
             message: 'Unable to fetch surveys',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 }
@@ -113,10 +111,9 @@ const archiveSurvey = async (req, res) => {
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey not found',
-                data: null
+                code: 404
             });
         }
 
@@ -125,16 +122,16 @@ const archiveSurvey = async (req, res) => {
 
         await survey.save();
 
-        return res.status(200).json({
-            status: 'Success',
-            data: null,
-            message: 'Survey Deleted successfully'
+        return res.success({
+            message: 'Survey Deleted successfully',
+            data: null
         });
     } catch (error) {
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Archive survey error:', error);
+        return res.error({
             message: 'Server Error: Unable to archive survey',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 }
@@ -147,10 +144,9 @@ const editSurvey = async (req, res) => {
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey not found',
-                data: null
+                code: 404
             });
         }
         let updatedPayload = req.body;
@@ -162,29 +158,25 @@ const editSurvey = async (req, res) => {
                 ...updatedPayload
             }
             if (updatedPayload.survey_title.length < 3) {
-                return res.status(400).json({
-                    status: 'Failed',
+                return res.error({
                     message: 'Survey title must be at least 3 characters long',
-                    data: null
+                    code: 400
                 });
             }
         }
 
-
-
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, { ...updatedPayload }, { new: true })
 
-        return res.status(200).json({
-            status: 'Success',
-            data: updatedSurvey,
-            message: 'Survey updated successfully'
+        return res.success({
+            message: 'Survey updated successfully',
+            data: updatedSurvey
         });
     } catch (error) {
-        console.log({ error })
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Edit survey error:', error);
+        return res.error({
             message: 'Server Error: Unable to update survey',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 };
@@ -196,24 +188,22 @@ const getSurvey = async (req, res) => {
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey not found',
-                data: null
+                code: 404
             });
         }
 
-
-        return res.status(200).json({
-            status: 'Success',
-            data: survey,
-            message: 'Survey Fetch successfully'
+        return res.success({
+            message: 'Survey Fetch successfully',
+            data: survey
         });
     } catch (error) {
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Get survey error:', error);
+        return res.error({
             message: 'Server Error: Unable to Fetch survey',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 };
@@ -225,10 +215,9 @@ const surveySubmission = async (req, res) => {
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey not found',
-                data: null
+                code: 404
             });
         }
 
@@ -253,25 +242,23 @@ const surveySubmission = async (req, res) => {
         );
 
         if (!updatedSurvey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Survey not found',
-                data: null
+                code: 404
             });
         }
 
-        return res.status(200).json({
+        return res.success({
             message: 'Submission Submitted',
-            data: newSubmission,
-            status: 'Success',
+            data: newSubmission
         });
 
     } catch (error) {
-        console.log({ error })
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Survey submission error:', error);
+        return res.error({
             message: 'Server Error: Unable to Submit',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 };
@@ -289,28 +276,25 @@ const getSurveySubmission = async (req, res) => {
         const surveySubmission = await Submission.find({ survey_id: surveyId });
 
         if (!surveySubmission || !survey) {
-            return res.status(404).json({
-                status: 'Failed',
+            return res.error({
                 message: 'Submission not found for the Survey',
-                data: null
+                code: 404
             });
         }
 
-
-        return res.status(200).json({
-            status: 'Success',
+        return res.success({
+            message: 'Submission Fetch successfully',
             data: {
                 ...survey,
                 submissions: surveySubmission
-            },
-            message: 'Submission Fetch successfully'
+            }
         });
     } catch (error) {
-        console.log({ error })
-        return res.status(500).json({
-            status: 'Failed',
+        console.error('Get survey submission error:', error);
+        return res.error({
             message: 'Server Error: Unable to Fetch Submission',
-            data: null
+            error: error.message,
+            code: 500
         });
     }
 };
