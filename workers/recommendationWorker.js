@@ -39,7 +39,7 @@ async function start() {
     const worker = new Worker(
         'recommendation',
         async (job) => {
-            logger.info(`[Worker] Start processing job id=${job.id}, data=`, job.data);
+            logger.info(`[Worker] Start processing job id=${job._id}, data=`, job.data);
 
             const { user_id, limit = defaultLimit } = job.data || {};
 
@@ -174,7 +174,7 @@ async function start() {
             );
 
 
-            logger.info(`[Worker] Job ${job.id} completed — ${items.length} recommendations stored`);
+            logger.info(`[Worker] Job ${job._id} completed — ${items.length} recommendations stored`);
             return { itemsCount: items.length };
         },
         {
@@ -184,9 +184,9 @@ async function start() {
     );
 
     // 3. Log worker-level events
-    worker.on('completed', (job) => logger.info(`[Worker Event] Job ${job.id} completed`));
+    worker.on('completed', (job) => logger.info(`[Worker Event] Job ${job._id} completed`));
     worker.on('failed', (job, err) =>
-        logger.error(`[Worker Event] Job ${job?.id} failed:`, err)
+        logger.error(`[Worker Event] Job ${job?._id} failed:`, err)
     );
     worker.on('error', (err) => logger.error('[Worker Error]', err));
 

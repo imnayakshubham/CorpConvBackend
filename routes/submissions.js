@@ -110,7 +110,7 @@ router.get('/single/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id)
+    const submission = await Submission.findById(req.params._id)
       .populate('formId', 'title fields')
       .populate('attachments.fileId', 'originalName fileName mimeType size')
       .select('-__v');
@@ -141,7 +141,7 @@ router.delete('/single/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const submission = await Submission.findByIdAndDelete(req.params.id);
+    const submission = await Submission.findByIdAndDelete(req.params._id);
 
     if (!submission) {
       return res.status(404).json({
@@ -176,7 +176,7 @@ router.post('/single/:id/mark-spam', [
 ], async (req, res) => {
   try {
     const submission = await Submission.findByIdAndUpdate(
-      req.params.id,
+      req.params._id,
       {
         isSpam: true,
         spamScore: 100
@@ -212,7 +212,7 @@ router.post('/single/:id/unmark-spam', [
 ], async (req, res) => {
   try {
     const submission = await Submission.findByIdAndUpdate(
-      req.params.id,
+      req.params._id,
       {
         isSpam: false,
         spamScore: 0

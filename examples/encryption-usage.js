@@ -21,7 +21,7 @@ const {
 
 async function getUserRoute(req, res) {
   try {
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params._id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -46,7 +46,7 @@ async function getUserRoute(req, res) {
 
 async function updateUserRoute(req, res) {
   try {
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params._id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -212,7 +212,7 @@ function startupChecks() {
 async function handleMixedDataDuringMigration(req, res) {
   try {
     // Fetch user
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params._id);
 
     // Check if data is encrypted
     const encryptionStatus = user.isDataEncrypted();

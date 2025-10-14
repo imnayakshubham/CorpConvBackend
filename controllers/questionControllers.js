@@ -56,7 +56,7 @@ const getquestions = async (req, res) => {
 
 const deletequestion = async (req, res) => {
     try {
-        const _id = req.params.id
+        const _id = req.params._id
         const updatedQuestion = await QuestionModel.findByIdAndUpdate(_id, { access: false }, { new: true })
         if (updatedQuestion) {
             return res.status(201).json({

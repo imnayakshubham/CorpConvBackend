@@ -11,7 +11,7 @@ const listData = async (req, res) => {
         const users = await User.find({ access: true }).select("_id")
         const questions = await QuestionModel.find({ access: true }).select("_id")
 
-        const allSurveys = surveys.map((survey) => `survey/${survey._id}`)
+        const allSurveys = surveys.map((survey) => `survey/${survey?._id}`)
         const allUsers = users.map((user) => `user/${user._id}`)
         const allQuestions = questions.map((question) => `answerlink/question/${question._id}`)
 

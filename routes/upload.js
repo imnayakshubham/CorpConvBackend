@@ -296,7 +296,7 @@ router.delete('/files/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const file = await FileUpload.findById(req.params.id);
+    const file = await FileUpload.findById(req.params._id);
 
     if (!file) {
       return res.status(404).json({
@@ -330,7 +330,7 @@ router.delete('/files/:id', [
     }
 
     // Delete from database
-    await FileUpload.findByIdAndDelete(req.params.id);
+    await FileUpload.findByIdAndDelete(req.params._id);
 
     res.json({
       success: true,

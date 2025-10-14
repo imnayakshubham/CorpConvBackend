@@ -20,7 +20,7 @@ function initializeSocket(server) {
         // Handle disconnection
         socket.on('disconnect', () => {
             console.log('User disconnected');
-            socket.leave(socket.id);
+            socket.leave(socket._id);
 
 
         });

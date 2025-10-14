@@ -23,10 +23,10 @@ async function validateJwtAndGetUser(token) {
 
   // Fetch user with projection and access check
   // This ensures user data is always fresh and access can be revoked
-  const user = await User.findOne({ _id: decoded.id, access: true }, projection);
+  const user = await User.findOne({ _id: decoded._id, access: true }, projection);
 
   if (!user) {
-    logger.warn(`User validation failed for ID: ${decoded.id}`);
+    logger.warn(`User validation failed for ID: ${decoded._id}`);
     throw new Error('USER_NOT_FOUND');
   }
 

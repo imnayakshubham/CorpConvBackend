@@ -37,8 +37,8 @@ async function start() {
         console.warn(`Job ${jobId} has stalled`);
     });
 
-    worker.on('completed', job => console.log('emb job completed', job.id));
-    worker.on('failed', (job, err) => console.error('emb job failed', job.id, err));
+    worker.on('completed', job => console.log('emb job completed', job._id));
+    worker.on('failed', (job, err) => console.error('emb job failed', job._id, err));
 }
 
 start().catch(err => {

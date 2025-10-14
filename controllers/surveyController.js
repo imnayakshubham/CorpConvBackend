@@ -1,5 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const { Survey, Submission } = require("../models/surveyModel");
+const { createDefaultFormSchema } = require("../utils/utils");
 
 // CREATE Survey API
 const createSurvey = async (req, res) => {
@@ -12,11 +13,12 @@ const createSurvey = async (req, res) => {
         const title = payload.survey_title || payload.title || '';
         const description = payload.survey_description || payload.description || '';
 
-        const updatedPayload = {
+        const updatedPayload = createDefaultFormSchema({
+            ...req.body,
             survey_title: title.trim(),
             survey_description: description.trim(),
             created_by: req.user._id
-        }
+        })
 
         // Validation
         if (updatedPayload.survey_title.length < 3) {
@@ -107,7 +109,7 @@ const listSurveys = async (req, res) => {
 // SOFT DELETE Survey (change status)
 const archiveSurvey = async (req, res) => {
     try {
-        const surveyId = req.params.id;
+        const surveyId = req.params._id;
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
@@ -139,7 +141,7 @@ const archiveSurvey = async (req, res) => {
 // EDIT Survey API
 const editSurvey = async (req, res) => {
     try {
-        const surveyId = req.params.id;
+        const surveyId = req.params._id;
 
         const survey = await Survey.findById(surveyId);
 
@@ -183,7 +185,7 @@ const editSurvey = async (req, res) => {
 
 const getSurvey = async (req, res) => {
     try {
-        const surveyId = req.params.id;
+        const surveyId = req.params._id;
 
         const survey = await Survey.findById(surveyId);
 
@@ -210,7 +212,7 @@ const getSurvey = async (req, res) => {
 
 const surveySubmission = async (req, res) => {
     try {
-        const surveyId = req.params.id;
+        const surveyId = req.params._id;
 
         const survey = await Survey.findById(surveyId);
 
@@ -265,15 +267,25 @@ const surveySubmission = async (req, res) => {
 
 const getSurveySubmission = async (req, res) => {
     try {
-        const surveyId = req.params.id;
+        const surveyId = req.params._id;
+
+        // Add pagination support
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+
         const survey = await Survey.findById(surveyId, {
             survey_title: 1,
             survey_description: 1,
             view_count: 1
-
         }).lean().exec()
 
-        const surveySubmission = await Submission.find({ survey_id: surveyId });
+        const surveySubmission = await Submission.find({ survey_id: surveyId })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        const total = await Submission.countDocuments({ survey_id: surveyId });
 
         if (!surveySubmission || !survey) {
             return res.error({
@@ -286,7 +298,13 @@ const getSurveySubmission = async (req, res) => {
             message: 'Submission Fetch successfully',
             data: {
                 ...survey,
-                submissions: surveySubmission
+                submissions: surveySubmission,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit)
+                }
             }
         });
     } catch (error) {
@@ -299,6 +317,224 @@ const getSurveySubmission = async (req, res) => {
     }
 };
 
+// DUPLICATE Survey
+const duplicateSurvey = async (req, res) => {
+    try {
+        const surveyId = req.params._id;
+        const survey = await Survey.findOne({
+            _id: surveyId,
+            $or: [
+                { created_by: req.user._id },
+                { userId: req.user._id }
+            ]
+        });
+
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found or you do not have permission',
+                code: 404
+            });
+        }
+
+        // Create a copy of the survey
+        const surveyData = survey.toObject();
+        delete surveyData._id;
+        delete surveyData.submissions;
+        delete surveyData.createdAt;
+        delete surveyData.updatedAt;
+        delete surveyData.slug;
+
+        // Update title to indicate it's a copy
+        surveyData.survey_title = `${surveyData.survey_title} (Copy)`;
+        surveyData.status = 'draft';
+        surveyData.view_count = 0;
+        if (surveyData.analytics) {
+            surveyData.analytics = {
+                total_views: 0,
+                total_submissions: 0,
+                conversion_rate: 0
+            };
+        }
+
+        const newSurvey = new Survey(surveyData);
+        await newSurvey.save();
+
+        return res.success({
+            message: 'Survey duplicated successfully',
+            data: newSurvey
+        });
+    } catch (error) {
+        console.error('Duplicate survey error:', error);
+        return res.error({
+            message: 'Server Error: Unable to duplicate survey',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// TOGGLE Publish Status
+const togglePublishStatus = async (req, res) => {
+    try {
+        const surveyId = req.params._id;
+        const { isPublished } = req.body;
+
+        const survey = await Survey.findOne({
+            _id: surveyId,
+            $or: [
+                { created_by: req.user._id },
+                { userId: req.user._id }
+            ]
+        });
+
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found or you do not have permission',
+                code: 404
+            });
+        }
+
+        survey.status = isPublished ? 'published' : 'draft';
+        survey.access = isPublished;
+        await survey.save();
+
+        return res.success({
+            message: `Survey ${isPublished ? 'published' : 'unpublished'} successfully`,
+            data: survey
+        });
+    } catch (error) {
+        console.error('Toggle publish status error:', error);
+        return res.error({
+            message: 'Server Error: Unable to update publish status',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// GET Survey Analytics
+const getSurveyAnalytics = async (req, res) => {
+    try {
+        const surveyId = req.params._id;
+
+        const survey = await Survey.findOne({
+            _id: surveyId,
+            $or: [
+                { created_by: req.user._id },
+                { userId: req.user._id }
+            ]
+        });
+
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found or you do not have permission',
+                code: 404
+            });
+        }
+
+        const submissions = await Submission.find({ survey_id: surveyId });
+
+        // Calculate analytics
+        const analytics = {
+            total_views: survey.view_count || survey.analytics?.total_views || 0,
+            total_submissions: submissions.length,
+            conversion_rate: 0,
+            submissionsByDay: {},
+            recentSubmissions: submissions.slice(-10).map(s => ({
+                id: s._id,
+                submittedAt: s.createdAt || s.submittedAt,
+                answeredBy: s.survey_answered_by
+            }))
+        };
+
+        if (analytics.total_views > 0) {
+            analytics.conversion_rate = (analytics.total_submissions / analytics.total_views * 100).toFixed(2);
+        }
+
+        // Group submissions by day
+        submissions.forEach(submission => {
+            const date = new Date(submission.createdAt || submission.submittedAt).toISOString().split('T')[0];
+            analytics.submissionsByDay[date] = (analytics.submissionsByDay[date] || 0) + 1;
+        });
+
+        return res.success({
+            message: 'Analytics fetched successfully',
+            data: {
+                survey: {
+                    id: survey?._id,
+                    title: survey.survey_title,
+                    status: survey.status
+                },
+                analytics
+            }
+        });
+    } catch (error) {
+        console.error('Get survey analytics error:', error);
+        return res.error({
+            message: 'Server Error: Unable to fetch analytics',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Rate limiting middleware for form creation
+const createFormLimit = async (req, res, next) => {
+    try {
+        // Get user's survey count created in last 24 hours
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentSurveys = await Survey.countDocuments({
+            $or: [
+                { created_by: req.user._id },
+                { userId: req.user._id }
+            ],
+            createdAt: { $gte: oneDayAgo }
+        });
+
+        // Limit to 50 surveys per day (configurable)
+        const MAX_SURVEYS_PER_DAY = process.env.MAX_SURVEYS_PER_DAY || 50;
+
+        if (recentSurveys >= MAX_SURVEYS_PER_DAY) {
+            return res.error({
+                message: `Rate limit exceeded. Maximum ${MAX_SURVEYS_PER_DAY} surveys per day.`,
+                code: 429
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Create form limit error:', error);
+        next();
+    }
+};
+
+// Rate limiting middleware for form submission
+const submitFormLimit = async (req, res, next) => {
+    try {
+        const surveyId = req.params._id;
+
+        // Check if user already submitted this survey in last hour
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        const recentSubmission = await Submission.findOne({
+            survey_id: surveyId,
+            survey_answered_by: req.user?._id,
+            createdAt: { $gte: oneHourAgo }
+        });
+
+        if (recentSubmission) {
+            return res.error({
+                message: 'You have already submitted this survey recently. Please try again later.',
+                code: 429
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Submit form limit error:', error);
+        next();
+    }
+};
+
 
 module.exports = {
     createSurvey,
@@ -307,5 +543,10 @@ module.exports = {
     editSurvey,
     getSurvey,
     surveySubmission,
-    getSurveySubmission
+    getSurveySubmission,
+    duplicateSurvey,
+    togglePublishStatus,
+    getSurveyAnalytics,
+    createFormLimit,
+    submitFormLimit
 }

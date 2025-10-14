@@ -76,8 +76,8 @@ async function getFormAnalyticsForAI(formId, user_id) {
     // Prepare field analysis
     const fieldData = {};
     form.schema.fields.forEach(field => {
-      fieldData[field.id] = {
-        name: field.label || field.id,
+      fieldData[field._id] = {
+        name: field.label || field._id,
         type: field.type,
         values: [],
         completionRate: 0

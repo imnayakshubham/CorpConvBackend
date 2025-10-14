@@ -30,7 +30,7 @@ function formRateLimitMiddleware(settings) {
 
     try {
       // Get form ID from params
-      const formId = req.params.id;
+      const formId = req.params._id;
       if (!formId) {
         logger.warn("Form rate limit middleware: No form ID in request params");
         return next();

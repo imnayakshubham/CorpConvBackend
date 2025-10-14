@@ -226,7 +226,7 @@ const deletePost = async (req, res) => {
 
 const getPost = async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified").populate({
+        const post = await Post.findById(req.params._id).populate("posted_by", "public_user_name is_email_verified").populate({
             path: 'comments',
             match: { access: { $ne: false } },
         });

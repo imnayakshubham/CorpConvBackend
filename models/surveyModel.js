@@ -340,8 +340,8 @@ surveySchema.methods.migrateFieldFormat = function () {
                 field.type = field.input_type;
             }
 
-            if (!field.id) {
-                field.id = `field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            if (!field._id) {
+                field._id = `field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             }
 
             if (field.user_select_options && !field.options) {

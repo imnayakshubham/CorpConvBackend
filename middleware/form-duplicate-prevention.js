@@ -47,7 +47,7 @@ function duplicatePreventionMiddleware(settings) {
 
     try {
       // Get form ID from params
-      const formId = req.params.id;
+      const formId = req.params._id;
       if (!formId) {
         logger.warn(
           "Duplicate prevention middleware: No form ID in request params"

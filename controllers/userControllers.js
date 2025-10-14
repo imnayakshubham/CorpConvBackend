@@ -396,7 +396,7 @@ const updateUserProfileDetails = async (req, res) => {
 const getUserInfo = async (req, res) => {
   try {
     logger.info("req.params", req.params)
-    const user_id = req.params?.id
+    const user_id = req.params?._id
     if (!user_id) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
     }
@@ -800,7 +800,7 @@ const deleteProfileItem = async (req, res) => {
       if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
 
       // soft delete
-      const item = profile.items.id(item_id);
+      const item = profile.items._id(item_id);
       if (!item) throw Object.assign(new Error('Item not found'), { status: 404 });
       item.access = false;
 
@@ -1219,7 +1219,7 @@ const refreshToken = asyncHandler(async (req, res) => {
     const decoded = jwt.verify(refreshTokenCookie, process.env.JWT_SECRET_KEY);
 
     // Check if user still exists and has access
-    const user = await User.findOne({ _id: decoded.id, access: true });
+    const user = await User.findOne({ _id: decoded._id, access: true });
 
     if (!user) {
       clearAuthCookies(res);
