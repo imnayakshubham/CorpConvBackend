@@ -16,7 +16,6 @@ const {
   getProfile,
   updateLayouts,
   getUserRecommendations,
-  firebaseGoogleAuth,
   refreshToken,
   getCurrentUser,
   sendMagicLink,
@@ -35,12 +34,6 @@ const emailService = require("../services/emailService");
 
 const router = express.Router();
 
-// IMPORTANT: Custom auth routes moved outside /auth/* namespace
-// to prevent conflict with Better Auth handler at /api/auth/*
-
-// Firebase Google Authentication (custom implementation)
-// Changed path from /auth/firebase-google to /user/firebase-google to avoid conflict
-router.post("/user/firebase-google", firebaseGoogleAuth);
 router.post("/auth/refresh", refreshToken);
 router.get("/auth/me", protect, getCurrentUser);
 router.post("/auth/logout", protect, logout);

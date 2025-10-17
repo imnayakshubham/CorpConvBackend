@@ -16,7 +16,6 @@ const { recommendationQueue } = require("../queues/index.js");
 const Recommendation = require("../models/Recommendation.js");
 const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 const logger = require("../utils/logger.js");
-const { verifyFirebaseToken, getFirebaseUser } = require("../services/firebaseAdmin");
 const { decryptUserData } = require("../utils/encryption");
 const { getAuth } = require("../config/auth.js");
 
@@ -1047,160 +1046,6 @@ const clearAuthCookies = (res) => {
 }
 
 /**
- * Firebase Google Authentication
- * POST /api/user/firebase-google
- *
- * SECURITY: This endpoint only uses Firebase token for UID verification.
- * User data is fetched from Firebase Admin SDK (not from the token payload)
- * to prevent client-side tampering and ensure data integrity.
- *
- * NOTE: Route moved from /api/auth/firebase-google to /api/user/firebase-google
- * to avoid conflict with Better Auth handler at /api/auth/*
- */
-const firebaseGoogleAuth = asyncHandler(async (req, res) => {
-  const { idToken } = req.body;
-
-  if (!idToken) {
-    return res.status(400).json({
-      success: false,
-      error: "Firebase ID token is required"
-    });
-  }
-
-  try {
-    // SECURITY: Verify Firebase token and extract ONLY uid
-    const firebaseResult = await verifyFirebaseToken(idToken);
-
-    if (!firebaseResult.success) {
-      return res.status(401).json({
-        success: false,
-        error: "Invalid Firebase token",
-        detail: firebaseResult.error
-      });
-    }
-
-    const firebase_uid = firebaseResult.uid;
-
-    // SECURITY: Fetch user data from Firebase Admin SDK (server-side, trusted source)
-    // Instead of using data from the ID token (which contains user info from client)
-    const firebaseUserResult = await getFirebaseUser(firebase_uid);
-
-    if (!firebaseUserResult.success) {
-      return res.status(401).json({
-        success: false,
-        error: "Failed to fetch user data from Firebase",
-        detail: firebaseUserResult.error
-      });
-    }
-
-    const firebaseUserRecord = firebaseUserResult.user;
-    const firebaseEmail = firebaseUserRecord.email;
-    const firebaseDisplayName = firebaseUserRecord.displayName;
-
-    // Check if user exists in our database
-    let userData = await User.findOne({
-      $or: [
-        { user_email_id: firebaseEmail },
-        { secondary_email_id: firebaseEmail },
-        { firebase_uid: firebase_uid }
-      ]
-    });
-
-    if (userData) {
-      // Update existing user with Firebase UID if not set
-      if (!userData.firebase_uid) {
-        userData.firebase_uid = firebase_uid;
-        await userData.save();
-      }
-
-      // Generate minimal JWT tokens (only contains user ID)
-      const { accessToken, refreshToken } = generateTokens(userData._id);
-      setAuthCookies(res, accessToken, refreshToken);
-
-
-      return res.status(200).json({
-        success: true,
-        message: "Login successful",
-        data: {
-          user: responseFormatterForAuth(userData._doc),
-          token: accessToken  // JWT contains only { id: user_id }
-        }
-      });
-
-    } else {
-      // Create new user from Firebase Admin SDK data (trusted source)
-      const emailSplit = firebaseEmail.split("@");
-      const domain = emailSplit[1].split(".")[0];
-      const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
-      const companyId = companyExist?.company_id || new mongoose.Types.ObjectId();
-      const companyName = companyExist?.company_name || toTitleCase(domain);
-
-      // Create company if it doesn't exist
-      if (!companyExist) {
-        const company = new Company({
-          company_id: companyId,
-          company_name: companyName
-        });
-        await company.save();
-      }
-
-      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain)
-        ? toTitleCase(domain)
-        : "Somewhere";
-
-      const newUserData = {
-        user_email_id: firebaseEmail,
-        actual_user_name: firebaseUserResult?.displayName || firebaseDisplayName || firebaseEmail.split('@')[0],
-        public_user_name: firebaseDisplayName || firebaseEmail.split('@')[0],
-        user_current_company_name,
-        user_company_id: companyId,
-        user_past_company_history: [companyId],
-        primary_email_domain: emailSplit[1],
-        is_email_verified: firebaseUserResult?.emailVerified,
-        is_anonymous: true,
-        user_phone_number: firebaseUserResult?.phoneNumber,
-        actual_profile_pic: firebaseUserResult?.photoURL,
-        user_public_profile_pic: firebaseUserResult?.photoURL || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
-        provider: "google",
-        provider_id: firebase_uid,
-        meta_data: firebaseUserResult?.metadata,
-        firebase_uid: firebase_uid,
-        access: true,
-        is_admin: false,
-      };
-
-      console.log({ newUserData })
-
-      const newUser = new User(newUserData);
-      await newUser.save();
-
-      // Generate minimal JWT tokens (only contains user ID)
-      const { accessToken, refreshToken } = generateTokens(newUser._id);
-      setAuthCookies(res, accessToken, refreshToken);
-
-      logger.info(`New user created: ${newUser.user_email_id} (Data from Firebase Admin SDK)`);
-
-      return res.status(201).json({
-        success: true,
-        message: "User created and logged in successfully",
-        data: {
-          user: responseFormatterForAuth(newUser._doc),
-          token: accessToken  // JWT contains only { id: user_id }
-        }
-      });
-    }
-
-  } catch (error) {
-    logger.error("Firebase Google auth error:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Authentication failed",
-      detail: error.message
-    });
-  }
-});
-
-/**
  * Token Refresh
  * POST /api/auth/refresh
  */
@@ -1549,7 +1394,7 @@ const updatePremiumStatus = asyncHandler(async (req, res) => {
 
 
 module.exports = {
-  allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations, firebaseGoogleAuth,
+  allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations,
   refreshToken,
   getCurrentUser,
   updatePremiumStatus,

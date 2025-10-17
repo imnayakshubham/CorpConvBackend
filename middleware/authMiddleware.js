@@ -13,7 +13,7 @@ const clearAuthCookies = (res) => {
     ...cookieOptions,
     maxAge: 0
   };
-
+  auth.clearCookie()
   res.clearCookie(tokenkeyName, clearOptions);
   res.clearCookie(`${tokenkeyName}:refresh`, clearOptions);
   res.clearCookie('isAuthenticated', {
