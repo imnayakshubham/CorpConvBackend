@@ -89,7 +89,7 @@ const userSchema = mongoose.Schema({
   },
   provider: {
     type: String,
-    required: true,
+    default: null
   },
   provider_id: {
     type: String,
@@ -110,13 +110,6 @@ const userSchema = mongoose.Schema({
     trim: true,
     unique: true,
     required: [true, "Email is required"],
-  },
-  firebase_uid: {
-    type: String,
-    trim: true,
-    sparse: true, // Allows multiple null values
-    unique: true, // But unique when not null
-    default: null
   },
   is_email_verified: {
     type: Boolean,
@@ -212,7 +205,6 @@ const userSchema = mongoose.Schema({
   profession: {
     type: String,
     enum: ["student", "employed", "self-employed", "unemployed", "retired", "homemaker", "other"],
-    required: true,
     default: null
   },
   profile_details: {
@@ -338,7 +330,7 @@ const userSchema = mongoose.Schema({
     default: "free",
     required: true
   }
-}, { timestaps: true });
+}, { timestamps: true });
 
 
 
@@ -418,13 +410,13 @@ userSchema.pre('save', async function (next) {
 
 // Virtual method to get decrypted user data (backward compatible)
 // This automatically handles both encrypted and plain text data
-userSchema.methods.getDecryptedData = function() {
+userSchema.methods.getDecryptedData = function () {
   const { getSafeUserData } = require('../utils/encryption');
   return getSafeUserData(this);
 };
 
 // Helper method to check if user's sensitive data is properly encrypted
-userSchema.methods.isDataEncrypted = function() {
+userSchema.methods.isDataEncrypted = function () {
   const { isEncrypted } = require('../utils/encryption');
 
   const sensitiveFields = [

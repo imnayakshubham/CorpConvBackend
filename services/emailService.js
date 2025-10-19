@@ -27,7 +27,7 @@ class EmailService {
         refresh_token: process.env.REFRESH_TOKEN
       });
 
-      await this.createTransporter();
+      // await this.createTransporter();
     } catch (error) {
       console.error('Failed to initialize Gmail OAuth:', error);
     }
@@ -56,7 +56,7 @@ class EmailService {
 
   async refreshTransporter() {
     try {
-      await this.createTransporter();
+      // await this.createTransporter();
     } catch (error) {
       console.error('Failed to refresh Gmail transporter:', error);
       throw error;

@@ -43,14 +43,6 @@ const createAuth = () => {
     secret: process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET_KEY,
     baseURL,
     appName: "hushwork",
-
-    /**
-     * User Configuration - Only Store Public Information
-     *
-     * SECURITY: Better Auth sessions should ONLY contain publicly available user data.
-     * Sensitive information (email, actual_name, phone_number) is encrypted in the database
-     * and should NEVER be included in the session.
-     */
     user: {
       additionalFields: {
         // Public profile fields only
@@ -164,17 +156,6 @@ const createAuth = () => {
         origin: allowedOrgins
       }),
 
-      customSession(async ({ user, session }, ctx) => {
-
-        const userInfo = await getOrAdduser(user)
-        console.log({ user, session, userInfo })
-        return {
-          user: {
-            ...userInfo,
-          },
-          session
-        };
-      }),
     ],
 
     // Rate limiting

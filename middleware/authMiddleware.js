@@ -56,7 +56,7 @@ const clearAuthCookies = (res) => {
  */
 const protect = asyncHandler(async (req, res, next) => {
   // Try Better Auth session first (primary auth method)
-  const betterAuthSession = req.cookies?.[betterAuthSessionCookie];
+  const betterAuthSession = req.cookies?.['better-auth.session_token'];
 
   if (betterAuthSession) {
     try {
