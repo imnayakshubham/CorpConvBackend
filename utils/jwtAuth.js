@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const { tokenkeyName, projection, betterAuthSessionCookie } = require("../constants");
 const logger = require("./logger");
 

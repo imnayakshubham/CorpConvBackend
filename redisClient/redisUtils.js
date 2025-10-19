@@ -1,5 +1,5 @@
 const getRedisInstance = require("./redisClient")
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const logger = require("../utils/logger");
 
 const redis = getRedisInstance()

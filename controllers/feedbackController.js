@@ -1,6 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const Feedback = require("../models/feedbackModel");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const emailService = require("../services/emailService");
 
 // Rate limiting storage (in production, use Redis)

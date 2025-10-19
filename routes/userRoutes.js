@@ -160,7 +160,7 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
 
       if (result.success) {
         // Find or create user
-        const User = require("../models/userModel");
+        const { User } = require("../models/userModel");
         let user = await User.findOne({ user_email_id: email });
 
         if (!user) {
@@ -242,7 +242,7 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
 
     if (result.success) {
       // Find or create user (similar to magic link logic)
-      const User = require("../models/userModel");
+      const { User } = require("../models/userModel");
       let user = await User.findOne({ user_email_id: email });
 
       if (!user) {

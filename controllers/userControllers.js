@@ -1,5 +1,5 @@
 const asyncHandler = require("express-async-handler");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const ProfileDetails = require("../models/profileDetailsModel.js");
 
 const Company = require("../models/companySchema");
@@ -144,7 +144,7 @@ const authUser = async (req, res) => {
         { user_email_id },
         { secondary_email_id: user_email_id }
       ]
-    });
+    }, projection);
 
     if (userData) {
 

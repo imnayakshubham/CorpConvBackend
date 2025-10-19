@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const avatarSchema = new mongoose.Schema({
+const avatarSchemaConfig = {
   style: {
     type: String,
     required: [true, "Avatar style is required"],
@@ -31,17 +31,20 @@ const avatarSchema = new mongoose.Schema({
     },
     default: []
   }
-}, { _id: false });
+}
 
-const CredentialSchema = new mongoose.Schema({
+const avatarSchema = new mongoose.Schema(avatarSchemaConfig, { _id: false });
+
+const credentialSchemaConfig = {
   credentialID: { type: String, required: true },
   publicKey: { type: Buffer, required: true },
   counter: { type: Number, required: true },
   transports: [{ type: String }],
   nickname: { type: String, default: '', trim: true }, // Device label
-}, { timestaps: true });
+}
+const CredentialSchema = new mongoose.Schema(credentialSchemaConfig, { timestaps: true });
 
-const userSchema = mongoose.Schema({
+const userSchemaConfig = {
   actual_user_name: {
     type: String,
     default: null,
@@ -116,7 +119,6 @@ const userSchema = mongoose.Schema({
     default: false,
     required: [true, "Email Verfication key is required"],
   },
-  access: { type: Boolean, required: true, default: true },
   meta_data: {
     type: Object,
     default: {}
@@ -217,13 +219,6 @@ const userSchema = mongoose.Schema({
   // Legacy credentials (deprecated - use Better-auth PasskeyCredential model instead)
   credentials: [CredentialSchema],
 
-  // BetterAuth compatibility fields
-  better_auth_id: {
-    type: String,
-    sparse: true,
-    unique: true,
-    default: null
-  },
   email_verified_at: {
     type: Date,
     default: null
@@ -233,11 +228,6 @@ const userSchema = mongoose.Schema({
     default: null
   },
 
-  // Password hash for BetterAuth email/password auth
-  hashed_password: {
-    type: String,
-    default: null
-  },
 
   // Magic link and OTP tracking
   verification_tokens: [{
@@ -329,8 +319,12 @@ const userSchema = mongoose.Schema({
     enum: ["free", "monthly", "yearly", "lifetime"],
     default: "free",
     required: true
-  }
-}, { timestamps: true });
+  },
+  access: { type: Boolean, required: true, default: true },
+
+}
+
+const userSchema = mongoose.Schema(userSchemaConfig, { timestamps: true });
 
 
 
@@ -448,4 +442,10 @@ userSchema.methods.isDataEncrypted = function () {
 
 const User = mongoose.model("User", userSchema);
 
-module.exports = User;
+
+module.exports = {
+  userSchemaConfig,
+  avatarSchemaConfig,
+  credentialSchemaConfig,
+  User
+}

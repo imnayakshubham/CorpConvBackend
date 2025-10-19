@@ -62,7 +62,8 @@ app.use(cors({
   },
   methods: ["GET", "POST", "DELETE", "PUT", "OPTIONS"],
   credentials: true,
-  transports: ['websocket']
+  transports: ['websocket'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 

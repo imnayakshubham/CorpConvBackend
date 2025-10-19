@@ -1,13 +1,13 @@
 const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const { passkey } = require("better-auth/plugins/passkey");
-const { customSession } = require("better-auth/plugins");
+const { customSession, admin, organizationRoleSchema, organization } = require("better-auth/plugins");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 const emailService = require("../services/emailService");
 const { betterAuthSessionCookie, projection } = require("../constants");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const { getOrAddDataInRedis } = require("../redisClient/redisUtils");
 const { decryptUserData } = require("../utils/encryption");
 const Company = require("../models/companySchema");
@@ -44,65 +44,301 @@ const createAuth = () => {
     baseURL,
     appName: "hushwork",
     user: {
+      modelName: "users",
+
+      fields: {
+        userId: "_id",
+        email: "user_email_id",
+        username: "actual_user_name",
+        name: "actual_user_name",
+        phone: "user_phone_number",
+        image: "actual_profile_pic"
+      },
       additionalFields: {
-        // Public profile fields only
+        actual_user_name: {
+          type: String,
+          default: null,
+          required: [true, "User Name is required"],
+        },
         public_user_name: {
-          type: "string",
-          required: false,
-        },
-        user_public_profile_pic: {
-          type: "string",
-          required: false,
-        },
-        is_anonymous: {
-          type: "boolean",
-          required: false,
-          defaultValue: true,
-        },
-        user_bio: {
-          type: "string",
-          required: false,
-        },
-        user_job_role: {
-          type: "string",
-          required: false,
-        },
-        user_job_experience: {
-          type: "number",
-          required: false,
-        },
-        user_current_company_name: {
-          type: "string",
-          required: false,
+          type: String,
+          default: null
         },
         is_email_verified: {
-          type: "boolean",
-          required: false,
-          defaultValue: false,
+          type: Boolean,
+          default: false,
+          required: [true, "is_email_verified is required"],
         },
-        has_premium: {
-          type: "boolean",
-          required: false,
-          defaultValue: false,
+        user_location: {
+          type: String,
+          default: null
         },
-        premium_plan: {
-          type: "string",
-          required: false,
-          defaultValue: "free",
+        user_job_role: {
+          type: String,
+          default: null
+        },
+        user_job_experience: {
+          type: Number,
+          default: null
+        },
+        user_bio: {
+          type: String,
+          default: null
         },
         is_admin: {
-          type: "boolean",
-          required: false,
-          defaultValue: false,
+          type: Boolean,
+          required: true,
+          default: false,
         },
-      },
+        actual_profile_pic: {
+          type: String,
+          required: false,
+          default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        },
+        user_public_profile_pic: {
+          type: String,
+          required: true,
+          default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        },
+        provider: {
+          type: String,
+          default: null
+        },
+        provider_id: {
+          type: String,
+          required: false,
+          default: null
+        },
+        user_phone_number: {
+          type: Number,
+          required: false,
+          default: null
+        },
+        is_anonymous: {
+          type: Boolean,
+          default: false,
+        },
+        user_email_id: {
+          type: String,
+          trim: true,
+          unique: true,
+          required: [true, "Email is required"],
+        },
+        is_email_verified: {
+          type: Boolean,
+          default: false,
+          required: [true, "Email Verfication key is required"],
+        },
+        access: { type: Boolean, required: true, default: true },
+        meta_data: {
+          type: Object,
+          default: {}
+        },
+        user_current_company_name: {
+          type: String,
+          trim: true,
+          required: [true, "User Company Name is required"],
+        },
+        user_company_id: {
+          type: String,
+          trim: true,
+          required: [true, "User Company Id is required"],
+        },
+        user_past_company_history: {
+          type: Object,
+          default: []
+        },
+        token: {
+          default: null,
+          type: String,
+        },
+        followers: [{
+          type: String,
+          ref: 'User',
+          default: [],
+        }],
+        followings: [{
+          type: String,
+          ref: 'User',
+          default: [],
+        }],
+        pending_followings: [{
+          type: String,
+          ref: 'User',
+          default: []
+        }],
+        secondary_email_id: {
+          type: String,
+          trim: true,
+          lowercase: true,
+          default: null,
+        },
+        is_secondary_email_id_verified: {
+          default: false,
+          type: Boolean,
+        },
+        primary_email_domain: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        secondary_email_domain: {
+          type: String,
+          trim: true,
+        },
+        avatar: {
+          type: User.avatarSchemaConfig,
+          required: false
+        },
+        academic_level: {
+          type: String,
+          default: null
+        },
+
+        field_of_study: {
+          type: String,
+          default: null
+        },
+
+        hobbies: {
+          type: [{ type: String, trim: true }],
+          validate: {
+            validator: arr => Array.isArray(arr) && arr.length <= 10,
+            message: "Maximum 10 hobbies allowed"
+          },
+          default: []
+        },
+        gender: {
+          type: String,
+          enum: ["male", "female", "prefer-not-to-say"],
+          required: false,
+          default: "prefer-not-to-say"
+        },
+
+        profession: {
+          type: String,
+          enum: ["student", "employed", "self-employed", "unemployed", "retired", "homemaker", "other"],
+          default: null
+        },
+        profile_details: {
+          type: mongoose.Schema.Types.ObjectId, ref: 'ProfileDetails'
+        },
+        embedding: { type: [Number], default: null }, // array of floats
+        embedding_updated_at: Date,
+        last_active_at: { type: Date, default: Date.now },
+
+        // Legacy credentials (deprecated - use Better-auth PasskeyCredential model instead)
+        credentials: [User.credentialSchemaConfig],
+
+
+        email_verified_at: {
+          type: Date,
+          default: null
+        },
+        user_image: {
+          type: String,
+          default: null
+        },
+
+
+        // Magic link and OTP tracking
+        verification_tokens: [{
+          token: String,
+          type: {
+            type: String,
+            enum: ['email_verification', 'magic_link', 'otp', 'password_reset']
+          },
+          expires: Date,
+          used: {
+            type: Boolean,
+            default: false
+          }
+        }],
+
+        // Social auth providers
+        auth_accounts: [{
+          provider: String,
+          provider_id: String,
+          access_token: String,
+          refresh_token: String,
+          expires_at: Date
+        }],
+
+        // Passkey credentials for WebAuthn (deprecated - use Better-auth PasskeyCredential model instead)
+        // Better-auth stores passkeys in separate 'passkeyCredential' collection
+        passkey_credentials: [{
+          public_key: Buffer,
+          counter: Number,
+          transports: [String],
+          created_at: {
+            type: Date,
+            default: Date.now
+          },
+          last_used: Date,
+          nickname: String
+        }],
+
+        // Authentication method preferences
+        auth_methods: {
+          email: {
+            type: Boolean,
+            default: true
+          },
+          google: {
+            type: Boolean,
+            default: true
+          },
+          passkey: {
+            type: Boolean,
+            default: false
+          }
+        },
+
+        // Security settings
+        two_factor_enabled: {
+          type: Boolean,
+          default: false
+        },
+        backup_codes: [{
+          code: String,
+          used: {
+            type: Boolean,
+            default: false
+          }
+        }],
+
+        // Encryption flag - indicates if sensitive data is encrypted
+        is_masked: {
+          type: Boolean,
+          default: false,
+          required: true,
+          index: true  // For querying encrypted vs plain users
+        },
+
+        // Premium subscription fields
+        has_premium: {
+          type: Boolean,
+          default: false,
+          required: true,
+          index: true  // For querying premium users
+        },
+        premium_expires_at: {
+          type: Date,
+          default: null  // null means no expiration (lifetime) or not premium
+        },
+        premium_plan: {
+          type: String,
+          enum: ["free", "monthly", "yearly", "lifetime"],
+          default: "free",
+          required: true
+        }
+      }
     },
 
     advanced: {
       cookies: {
 
         session_token: {
-          name: betterAuthSessionCookie,
 
           attributes: {
             httpOnly: true,
@@ -128,20 +364,6 @@ const createAuth = () => {
         clientSecret: process.env.CLIENT_SECRET,
         prompt: "select_account",
         scope: ["openid", "email", "profile"],
-        mapProfileToUser: (profile) => {
-          return {
-            actual_user_name: profile?.name || `${profile?.given_name || ''} ${profile?.family_name || ''}`.trim(),
-            is_email_verified: Boolean(profile?.email_verified),
-            user_email_id: profile?.email,
-            is_anonymous: true,   // you may want to set this based on some logic instead of always true
-            user_phone_number: profile?.phoneNumber || null,
-            actual_profile_pic: profile?.picture || profile?.photoURL || null,
-            providerId: profile?.providerId || "google",
-            meta_data: profile?.metadata || null,
-            provider: profile?.providerId ?? "google",
-            ...profile
-          };
-        }
       }
     },
 
@@ -155,8 +377,40 @@ const createAuth = () => {
           : "localhost",
         origin: allowedOrgins
       }),
+      admin(),
+      organization(),
+
+      customSession(async ({ user, session }) => {
+        const userInfo = await getOrAdduser(session.userId);
+        return {
+          user: {
+            ...userInfo,
+          },
+          session
+        };
+      }),
 
     ],
+
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (userData) => {
+            const newUser = await createUser(userData)
+            logger.info(`New user signup===>`, newUser);
+            return newUser;
+          }
+        }
+      },
+      session: {
+        create: {
+          before: async (sessionData) => {
+            logger.info(`New session created for user: `, sessionData);
+            return sessionData
+          }
+        }
+      }
+    },
 
     // Rate limiting
     rateLimit: {
@@ -305,6 +559,12 @@ const createUser = async (userData) => {
     const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Somewhere"
     const data = {
       ...userData,
+      actual_user_name: userData?.name || `${userData?.given_name || ''} ${userData?.family_name || ''}`.trim(),
+      user_email_id: userData?.email,
+      actual_profile_pic: userData?.picture || userData?.photoURL || null,
+      providerId: userData?.providerId || "google",
+      meta_data: userData?.metadata || null,
+      provider: userData?.providerId ?? "google",
       is_email_verified: !["example", "gmail", "outlook"].includes(domain) ? true : false,
       is_anonymous: true,
       user_current_company_name,
@@ -319,37 +579,36 @@ const createUser = async (userData) => {
     // add to redis
     const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${result._id}`
     await getOrAddDataInRedis(userInfoRedisKey, userActualData)
-    return userActualData;
+    return user;
   } catch (error) {
     logger.error("Error creating user:", error);
     throw error;
   }
 }
 
-const getOrAdduser = async (user_data) => {
+const getOrAdduser = async (user_id) => {
   try {
 
-    const { email: user_email_id } = user_data;
 
-    if (!user_email_id) {
+    if (!user_id) {
       return null;
     }
+
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
+    const value = await getOrAddDataInRedis(userInfoRedisKey)
+
+    if (value) {
+      return value
+    }
+
+
     const userData = await User.findOne({
       $or: [
-        { user_email_id },
-        { secondary_email_id: user_email_id }
+        { _id: user_id },
       ]
     }, { projection }).exec();
-    console.log({ userData })
 
-    if (userData) {
-      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userData._id}`
-      const value = await getOrAddDataInRedis(userInfoRedisKey, responseFormatterForAuth(userData))
-      return value;
-    } else {
-      const newUser = await createUser(user_data);
-      return newUser;
-    }
+    return userData ? responseFormatterForAuth(userData) : null;
 
   } catch (error) {
     logger.error("Error in getOrAdduser:", error);

@@ -1,8 +1,8 @@
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions, authCookieNames, betterAuthSessionCookie } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, authCookieNames, betterAuthSessionCookie, projection } = require("../constants/index.js");
 const { validateJwtAndGetUser, extractTokenFromExpress } = require("../utils/jwtAuth");
 const { getAuth } = require("../config/auth.js");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 
 const isProd = process.env.APP_ENV === 'PROD';
 
@@ -57,16 +57,18 @@ const clearAuthCookies = (res) => {
 const protect = asyncHandler(async (req, res, next) => {
   // Try Better Auth session first (primary auth method)
   const betterAuthSession = req.cookies?.['better-auth.session_token'];
-
   if (betterAuthSession) {
     try {
       const auth = getAuth();
       const session = await auth.api.getSession({ headers: req.headers });
-
       if (session && session.user) {
-        // Fetch full user data from database
-        const user = await User.findOne({ _id: session.user.id, access: true });
 
+        // Fetch full user data from database
+        const user = await User.findOne(
+          { _id: session.user._id, access: true },
+          projection
+        );
+        console.log(!!user, user?.access)
         if (!user) {
           clearAuthCookies(res);
           return res.status(401).send({ error: 'Unauthorized', message: 'User not found or access revoked' });
@@ -77,34 +79,13 @@ const protect = asyncHandler(async (req, res, next) => {
       }
     } catch (error) {
       console.log('Better Auth validation error:', error);
-      // Fall through to JWT check
+      return res.error({
+        status: 401,
+        message: 'Unauthorized: Invalid Better Auth session'
+      })
     }
   }
 
-  // Fallback: Try JWT token (legacy auth for backward compatibility)
-  const jwtToken = extractTokenFromExpress(req);
-
-  if (!jwtToken) {
-    clearAuthCookies(res);
-    return res.status(401).send({ error: 'Unauthorized', message: 'No valid session found' });
-  }
-
-  try {
-    // Validate JWT and fetch user from database
-    const { user } = await validateJwtAndGetUser(jwtToken);
-    req.user = user;
-    next();
-
-  } catch (error) {
-    console.log('JWT validation error:', error);
-    clearAuthCookies(res);
-
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
-    }
-
-    return res.status(401).send({ error: 'Invalid token' });
-  }
 });
 
 // Admin middleware - checks if user has admin privileges
