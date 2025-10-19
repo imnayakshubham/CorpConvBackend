@@ -34,7 +34,9 @@ const emailService = require("../services/emailService");
 
 const router = express.Router();
 
-router.post("/auth/refresh", refreshToken);
+// DEPRECATED: JWT refresh endpoint - Better Auth handles session refresh automatically
+// router.post("/auth/refresh", refreshToken);
+
 router.get("/auth/me", protect, getCurrentUser);
 router.post("/auth/logout", protect, logout);
 
@@ -319,9 +321,14 @@ router.route("/user").get(protect, allUsers);
 router.route('/user/recommend/:user_id?').get(getUserRecommendations);
 router.route("/user/:id").get(getUserInfo)
 router.route("/followers").get(protect, getfollowersList);
-router.post("/auth", authUser);
+
+// DEPRECATED: Legacy JWT auth endpoint - Use Better Auth instead (/api/auth/*)
+// router.post("/auth", authUser);
+
 router.route("/users").post(fetchUsers);
-router.route("/logout").post(protect, logout)
+
+// DEPRECATED: Use Better Auth signOut instead
+// router.route("/logout").post(protect, logout)
 router.route("/update-profile").post(protect, updateUserProfile);
 router.route("/update-profile-details").post(protect, updateUserProfileDetails);
 

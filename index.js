@@ -20,7 +20,6 @@ const aiRoutes = require('./routes/ai');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const { getAuth } = require('./config/auth');
 
-
 const cors = require("cors");
 
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
@@ -35,6 +34,7 @@ const { responseFormatter } = require("./middleware/responseFormatter");
 const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
 const logger = require("./utils/logger.js");
 const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
+const { protect } = require("./middleware/authMiddleware.js");
 
 dotenv.config();
 
@@ -65,7 +65,8 @@ app.use(cors({
   transports: ['websocket']
 }));
 
-// Placeholder for better-auth - will be initialized after DB connection
+
+// Middleware to handle better-auth routes (deferred initialization)
 let authHandler = null;
 
 // Middleware to handle better-auth routes (deferred initialization)
@@ -82,43 +83,14 @@ app.all("/api/auth/*", async (req, res, next) => {
   }
   return authHandler(req, res, next);
 });
-
-// Connect to database (auth will initialize on first request)
 connectDB();
+
 
 app.use(express.json());
 app.use(responseFormatter);
 
 app.use(express.urlencoded({ extended: true }));
-if (APP_ENV !== "PROD") {
-  const swaggerUi = require('swagger-ui-express');
 
-  const swaggerAutogen = require('swagger-autogen')()
-
-  const outputFile = './swagger_output.json'
-  const endpointsFiles = ["index.js"]
-
-  swaggerAutogen(outputFile, endpointsFiles, {})
-  const swaggerFile = require(outputFile)
-
-  const swaggerOptions = {
-    swaggerOptions: {
-      docExpansion: 'none',          // Collapse endpoints by default
-      deepLinking: true,             // Enable deep linking to sections
-      displayRequestDuration: true,  // Show request duration
-      defaultModelsExpandDepth: -1,  // Hide schema models by default
-      syntaxHighlight: {
-        theme: 'agate'               // Syntax highlight theme similar to FastAPI
-      }
-    },
-    customCss: `
-    .swagger-ui .topbar { display: none }  /* Hide default Swagger topbar like FastAPI */
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-  `
-  }
-
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerFile, swaggerOptions));
-}
 require('./workers/recommendationWorker.js')
 
 
@@ -159,8 +131,6 @@ app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/feedback', feedbackRoutes);
 
-// Better-auth handler - handles all better-auth authentication endpoints
-// Must come before custom auth routes to handle better-auth specific paths
 
 
 app.get("/api/me", async (req, res) => {

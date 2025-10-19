@@ -25,6 +25,7 @@ const connectDB = async () => {
       logger.info('🔐 Encryption configured correctly'.green);
     }
 
+    return db
   } catch (error) {
     logger.error(`Error: ${error.message}`);
     process.exit(1);

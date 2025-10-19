@@ -8,7 +8,7 @@ const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
-const { tokenkeyName, cookieOptions, isProd } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, isProd, authCookieNames } = require("../constants/index.js");
 const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob } = require("../redisClient/redisUtils.js");
 const Item = require("../models/Item.js");
 const userEmbedding = require("../models/userEmbedding.js");
@@ -242,7 +242,22 @@ const logout = async (req, res) => {
     const updatedData = await User.updateOne({ token: req.user.token }, updateOperation)
 
     if (updatedData) {
-      res.clearCookie(tokenkeyName);
+      // Clear all authentication cookies (JWT tokens, Better Auth session, etc.)
+      const clearOptions = {
+        ...cookieOptions,
+        maxAge: 0
+      };
+
+      res.clearCookie(authCookieNames.token, clearOptions);
+      res.clearCookie(authCookieNames.refreshToken, clearOptions);
+      res.clearCookie(authCookieNames.betterAuthSession, clearOptions);
+      res.clearCookie(authCookieNames.isAuthenticated, {
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/',
+        domain: isProd ? undefined : 'localhost'
+      });
+
       return res.status(200).json({ message: "Logged Out", status: "Success" })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })

@@ -194,6 +194,18 @@ const cookieOptions = {
 const tokenkeyName = `${process.env.APP_ENV}:hushwork-root`;
 const guestKey = `${tokenkeyName}:guest_id`;
 
+// Better Auth session cookie name (separate from JWT to avoid conflicts)
+const betterAuthSessionCookie = `${process.env.APP_ENV}:hushwork-session`;
+
+// All authentication-related cookie names
+const authCookieNames = {
+  token: tokenkeyName,
+  refreshToken: `${tokenkeyName}:refresh`,
+  betterAuthSession: betterAuthSessionCookie,
+  isAuthenticated: 'isAuthenticated',
+  guest: guestKey
+};
+
 
 const projection = {
     user_job_role: 1,
@@ -220,4 +232,13 @@ const projection = {
     is_admin: 1
 };
 
-module.exports = { jobPostSites, tokenkeyName, cookieOptions, isProd, guestKey, projection }
+module.exports = {
+  jobPostSites,
+  tokenkeyName,
+  cookieOptions,
+  isProd,
+  guestKey,
+  projection,
+  betterAuthSessionCookie,
+  authCookieNames
+}

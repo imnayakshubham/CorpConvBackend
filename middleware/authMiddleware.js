@@ -1,11 +1,17 @@
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, authCookieNames, betterAuthSessionCookie } = require("../constants/index.js");
 const { validateJwtAndGetUser, extractTokenFromExpress } = require("../utils/jwtAuth");
+const { getAuth } = require("../config/auth.js");
+const User = require("../models/userModel");
 
 const isProd = process.env.APP_ENV === 'PROD';
 
 /**
- * Clear all authentication cookies (access token, refresh token, isAuthenticated flag)
+ * Clear all authentication cookies
+ *
+ * Primary: Better Auth session cookie
+ * Legacy: JWT tokens (for backward compatibility)
+ *
  * @param {Object} res - Express response object
  */
 const clearAuthCookies = (res) => {
@@ -13,10 +19,16 @@ const clearAuthCookies = (res) => {
     ...cookieOptions,
     maxAge: 0
   };
-  auth.clearCookie()
-  res.clearCookie(tokenkeyName, clearOptions);
-  res.clearCookie(`${tokenkeyName}:refresh`, clearOptions);
-  res.clearCookie('isAuthenticated', {
+
+  // Clear Better Auth session (primary authentication)
+  res.clearCookie(authCookieNames.betterAuthSession, clearOptions);
+
+  // Clear legacy JWT cookies (for backward compatibility)
+  res.clearCookie(authCookieNames.token, clearOptions);
+  res.clearCookie(authCookieNames.refreshToken, clearOptions);
+
+  // Clear authentication flag
+  res.clearCookie(authCookieNames.isAuthenticated, {
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
     path: '/',
@@ -27,36 +39,64 @@ const clearAuthCookies = (res) => {
 /**
  * Authentication Middleware - Protects routes requiring authentication
  *
- * SECURITY FLOW:
- * 1. Extract minimal JWT token (contains only user ID: { id: user_id })
- * 2. Verify token signature and expiration
- * 3. Fetch complete user data from MongoDB database (trusted source)
- * 4. Attach user object to req.user for use in route handlers
+ * AUTHENTICATION FLOW (Better Auth - Primary):
+ * 1. Check for Better Auth session cookie
+ * 2. Validate session with Better Auth
+ * 3. Extract user ID from session
+ * 4. Fetch user data from MongoDB
+ * 5. Attach user to req.user
  *
- * This ensures that:
- * - Tokens are minimal (only user ID, no sensitive data)
+ * FALLBACK (Legacy JWT - for backward compatibility):
+ * If Better Auth session not found, try JWT validation
+ *
+ * This ensures:
+ * - Better Auth is the primary authentication system
  * - User data is always fresh from database
  * - Revoked users are immediately blocked
- * - No sensitive data is exposed in the token payload
  */
 const protect = asyncHandler(async (req, res, next) => {
-  const token = extractTokenFromExpress(req);
+  // Try Better Auth session first (primary auth method)
+  const betterAuthSession = req.cookies?.[betterAuthSessionCookie];
 
-  if (!token) {
+  if (betterAuthSession) {
+    try {
+      const auth = getAuth();
+      const session = await auth.api.getSession({ headers: req.headers });
+
+      if (session && session.user) {
+        // Fetch full user data from database
+        const user = await User.findOne({ _id: session.user.id, access: true });
+
+        if (!user) {
+          clearAuthCookies(res);
+          return res.status(401).send({ error: 'Unauthorized', message: 'User not found or access revoked' });
+        }
+
+        req.user = user;
+        return next();
+      }
+    } catch (error) {
+      console.log('Better Auth validation error:', error);
+      // Fall through to JWT check
+    }
+  }
+
+  // Fallback: Try JWT token (legacy auth for backward compatibility)
+  const jwtToken = extractTokenFromExpress(req);
+
+  if (!jwtToken) {
     clearAuthCookies(res);
-    return res.status(401).send({ error: 'Unauthorized', message: 'No token provided' });
+    return res.status(401).send({ error: 'Unauthorized', message: 'No valid session found' });
   }
 
   try {
-    // Validate JWT and fetch user from database using shared utility
-    // This ensures user data is always current and access can be revoked
-    const { user } = await validateJwtAndGetUser(token);
-
+    // Validate JWT and fetch user from database
+    const { user } = await validateJwtAndGetUser(jwtToken);
     req.user = user;
     next();
 
   } catch (error) {
-    console.log(error);
+    console.log('JWT validation error:', error);
     clearAuthCookies(res);
 
     if (error.name === 'TokenExpiredError') {
