@@ -12,9 +12,13 @@ const addOrUpdateCachedDataInRedis = async (key, updatedData, time = 21600) => {
     await redis.set(key, JSON.stringify(updatedData), 'EX', time);
 }
 
-const getDataInRedis = async (key) => {
+const getOrAddDataInRedis = async (key, value = null, time = 21600) => {
     const data = await redis.get(key);
-    if (!data) return null;
+    if (!data && !!value) {
+        await redis.set(key, JSON.stringify(value), 'EX', time);
+        return value;
+    }
+
     try {
         return JSON.parse(data);
     } catch (err) {
@@ -83,4 +87,4 @@ const syncOnlineStatusToDB = async () => {
     }
 };
 
-module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, syncOnlineStatusToDB }
+module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, syncOnlineStatusToDB }

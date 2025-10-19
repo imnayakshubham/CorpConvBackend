@@ -325,7 +325,7 @@ const duplicateSurvey = async (req, res) => {
             _id: surveyId,
             $or: [
                 { created_by: req.user._id },
-                { userId: req.user._id }
+                { user_id: req.user._id }
             ]
         });
 
@@ -383,7 +383,7 @@ const togglePublishStatus = async (req, res) => {
             _id: surveyId,
             $or: [
                 { created_by: req.user._id },
-                { userId: req.user._id }
+                { user_id: req.user._id }
             ]
         });
 
@@ -421,7 +421,7 @@ const getSurveyAnalytics = async (req, res) => {
             _id: surveyId,
             $or: [
                 { created_by: req.user._id },
-                { userId: req.user._id }
+                { user_id: req.user._id }
             ]
         });
 
@@ -486,7 +486,7 @@ const createFormLimit = async (req, res, next) => {
         const recentSurveys = await Survey.countDocuments({
             $or: [
                 { created_by: req.user._id },
-                { userId: req.user._id }
+                { user_id: req.user._id }
             ],
             createdAt: { $gte: oneDayAgo }
         });

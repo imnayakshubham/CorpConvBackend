@@ -284,7 +284,7 @@ router.get('/:id/verify-ownership',
                 _id: req.params._id,
                 $or: [
                     { created_by: req.user._id },
-                    { userId: req.user._id }
+                    { user_id: req.user._id }
                 ]
             }).select('_id');
 
@@ -325,7 +325,7 @@ router.post('/bulk/delete',
                     _id: { $in: surveyIds },
                     $or: [
                         { created_by: req.user._id },
-                        { userId: req.user._id }
+                        { user_id: req.user._id }
                     ]
                 },
                 {
@@ -378,7 +378,7 @@ router.post('/bulk/update-status',
                     _id: { $in: surveyIds },
                     $or: [
                         { created_by: req.user._id },
-                        { userId: req.user._id }
+                        { user_id: req.user._id }
                     ]
                 },
                 updateData
@@ -421,7 +421,7 @@ router.get('/:id/export',
                 _id: req.params._id,
                 $or: [
                     { created_by: req.user._id },
-                    { userId: req.user._id }
+                    { user_id: req.user._id }
                 ]
             });
 
@@ -440,7 +440,7 @@ router.get('/:id/export',
                 delete exportData._id;
                 delete exportData.submissions;
                 delete exportData.created_by;
-                delete exportData.userId;
+                delete exportData.user_id;
                 delete exportData.__v;
 
                 res.setHeader('Content-Type', 'application/json');
@@ -487,7 +487,7 @@ router.post('/import',
 
             // Add user ownership
             importData.created_by = req.user._id;
-            importData.userId = req.user._id;
+            importData.user_id = req.user._id;
 
             // Reset some fields
             delete importData._id;

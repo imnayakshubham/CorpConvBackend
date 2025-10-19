@@ -1,12 +1,17 @@
 const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const { passkey } = require("better-auth/plugins/passkey");
-const { emailOTP } = require("better-auth/plugins/email-otp");
+const { customSession } = require("better-auth/plugins");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 const emailService = require("../services/emailService");
-const { betterAuthSessionCookie } = require("../constants");
+const { betterAuthSessionCookie, projection } = require("../constants");
+const User = require("../models/userModel");
+const { getOrAddDataInRedis } = require("../redisClient/redisUtils");
+const { decryptUserData } = require("../utils/encryption");
+const Company = require("../models/companySchema");
+const { toTitleCase } = require("../utils/utils");
 
 
 // Generate OTP
@@ -129,10 +134,22 @@ const createAuth = () => {
       google: {
         clientId: process.env.CLIENT_ID,
         clientSecret: process.env.CLIENT_SECRET,
+        prompt: "select_account",
         scope: ["openid", "email", "profile"],
-        mapProfile: (profile) => ({
-          user_id: profile.sub
-        })
+        mapProfileToUser: (profile) => {
+          return {
+            actual_user_name: profile?.name || `${profile?.given_name || ''} ${profile?.family_name || ''}`.trim(),
+            is_email_verified: Boolean(profile?.email_verified),
+            user_email_id: profile?.email,
+            is_anonymous: true,   // you may want to set this based on some logic instead of always true
+            user_phone_number: profile?.phoneNumber || null,
+            actual_profile_pic: profile?.picture || profile?.photoURL || null,
+            providerId: profile?.providerId || "google",
+            meta_data: profile?.metadata || null,
+            provider: profile?.providerId ?? "google",
+            ...profile
+          };
+        }
       }
     },
 
@@ -147,6 +164,17 @@ const createAuth = () => {
         origin: allowedOrgins
       }),
 
+      customSession(async ({ user, session }, ctx) => {
+
+        const userInfo = await getOrAdduser(user)
+        console.log({ user, session, userInfo })
+        return {
+          user: {
+            ...userInfo,
+          },
+          session
+        };
+      }),
     ],
 
     // Rate limiting
@@ -249,11 +277,114 @@ const verifyMagicToken = (email, token) => {
 };
 
 
+const responseFormatterForAuth = (result) => {
+  // For anonymous app - only send public, non-sensitive data to frontend
+  // Sensitive data (email, actual name, phone) stays on backend only
+  const decrypted = decryptUserData(result);
+
+  return {
+    // Core identity (non-sensitive)
+    _id: decrypted._id,
+    public_user_name: decrypted.public_user_name,  // Public display name only
+    user_public_profile_pic: decrypted.user_public_profile_pic,
+    is_anonymous: decrypted.is_anonymous,
+
+    // Public profile information
+    user_bio: decrypted.user_bio,
+    user_job_role: decrypted.user_job_role,
+    user_job_experience: decrypted.user_job_experience,
+    user_current_company_name: decrypted.user_current_company_name,
+
+    // Account status flags
+    is_email_verified: decrypted.is_email_verified,
+    isAdmin: decrypted.isAdmin,
+
+    // Premium subscription
+    has_premium: decrypted.has_premium || false,
+    premium_expires_at: decrypted.premium_expires_at || null,
+    premium_plan: decrypted.premium_plan || 'free'
+  }
+}
+
+const createUser = async (userData) => {
+  try {
+
+    const emailSplit = userData.email.split("@")
+    const domain = emailSplit[1].split(".")[0]
+    const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
+    const companyId = companyExist && companyExist?.company_id ? companyExist?.company_id : new mongoose.Types.ObjectId()
+    const companyName = companyExist && companyExist?.company_name ? companyExist?.company_name : toTitleCase(domain)
+    if (!companyExist) {
+      const company = await new Company({
+        company_id: companyId,
+        company_name: companyName
+      })
+      await company.save()
+    }
+    const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Somewhere"
+    const data = {
+      ...userData,
+      is_email_verified: !["example", "gmail", "outlook"].includes(domain) ? true : false,
+      is_anonymous: true,
+      user_current_company_name,
+      user_phone_number: userData?.user_phone_number ? keepOnlyNumbers(userData?.user_phone_number) : null,
+      user_company_id: companyId,
+      user_past_company_history: [companyId],
+      primary_email_domain: emailSplit[1],
+    }
+    const user = await new User(data);
+    const result = await user.save();
+    const userActualData = responseFormatterForAuth(result);
+    // add to redis
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${result._id}`
+    await getOrAddDataInRedis(userInfoRedisKey, userActualData)
+    return userActualData;
+  } catch (error) {
+    logger.error("Error creating user:", error);
+    throw error;
+  }
+}
+
+const getOrAdduser = async (user_data) => {
+  try {
+
+    const { email: user_email_id } = user_data;
+
+    if (!user_email_id) {
+      return null;
+    }
+    const userData = await User.findOne({
+      $or: [
+        { user_email_id },
+        { secondary_email_id: user_email_id }
+      ]
+    }, { projection }).exec();
+    console.log({ userData })
+
+    if (userData) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userData._id}`
+      const value = await getOrAddDataInRedis(userInfoRedisKey, responseFormatterForAuth(userData))
+      return value;
+    } else {
+      const newUser = await createUser(user_data);
+      return newUser;
+    }
+
+  } catch (error) {
+    logger.error("Error in getOrAdduser:", error);
+    return null
+  }
+}
+
+
 module.exports = {
   getAuth,
   createAuth,
   verifyOTP,
   generateMagicLink,
   verifyMagicToken,
-  generateOTP
+  generateOTP,
+  getOrAdduser,
+  responseFormatterForAuth,
+  createUser
 };

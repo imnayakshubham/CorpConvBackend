@@ -17,7 +17,7 @@ const Recommendation = require("../models/Recommendation.js");
 const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 const logger = require("../utils/logger.js");
 const { decryptUserData } = require("../utils/encryption");
-const { getAuth } = require("../config/auth.js");
+const { getAuth, generateMagicLink, verifyMagicToken, verifyOTP, responseFormatterForAuth } = require("../config/auth.js");
 
 
 const projection = {
@@ -130,34 +130,7 @@ const getfollowersList = async (req, res) => {
   }
 };
 
-const responseFormatterForAuth = (result) => {
-  // For anonymous app - only send public, non-sensitive data to frontend
-  // Sensitive data (email, actual name, phone) stays on backend only
-  const decrypted = decryptUserData(result);
 
-  return {
-    // Core identity (non-sensitive)
-    _id: decrypted._id,
-    public_user_name: decrypted.public_user_name,  // Public display name only
-    user_public_profile_pic: decrypted.user_public_profile_pic,
-    is_anonymous: decrypted.is_anonymous,
-
-    // Public profile information
-    user_bio: decrypted.user_bio,
-    user_job_role: decrypted.user_job_role,
-    user_job_experience: decrypted.user_job_experience,
-    user_current_company_name: decrypted.user_current_company_name,
-
-    // Account status flags
-    is_email_verified: decrypted.is_email_verified,
-    isAdmin: decrypted.isAdmin,
-
-    // Premium subscription
-    has_premium: decrypted.has_premium || false,
-    premium_expires_at: decrypted.premium_expires_at || null,
-    premium_plan: decrypted.premium_plan || 'free'
-  }
-}
 
 const authUser = async (req, res) => {
   const { user_email_id } = req.body;
@@ -318,12 +291,12 @@ const updateUserProfile = async (req, res) => {
       addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
 
 
-      const textToEmbed = `Public Name: ${user.public_user_name || ''}
-          Profession: ${user.profession || ''}
-          Hobbies: ${(user.hobbies ?? [])?.join(', ')}
-          Bio: ${user.user_bio || ''}
-          Academic level: ${user.academic_level || ''}
-          Field of study: ${user.field_of_study || ''}
+      const textToEmbed = `Public Name: ${updatedUser.public_user_name || ''}
+          Profession: ${updatedUser.profession || ''}
+          Hobbies: ${(updatedUser.hobbies ?? [])?.join(', ')}
+          Bio: ${updatedUser.user_bio || ''}
+          Academic level: ${updatedUser.academic_level || ''}
+          Field of study: ${updatedUser.field_of_study || ''}
         `
 
       const { embedding } = await generateSingleEmbedding(user_id, textToEmbed)
@@ -1253,7 +1226,7 @@ const verifyAuth = asyncHandler(async (req, res) => {
       verificationResult = verifyMagicToken(email, token);
     } else if (type === 'otp' && otp) {
       // Verify OTP
-      verificationResult = verifyOTPHelper(email, otp);
+      verificationResult = verifyOTP(email, otp);
     } else {
       return res.status(400).json({
         success: false,
@@ -1414,5 +1387,5 @@ module.exports = {
   getCurrentUser,
   updatePremiumStatus,
   sendMagicLink,
-  verifyAuth
-};
+  verifyAuth,
+}; 
