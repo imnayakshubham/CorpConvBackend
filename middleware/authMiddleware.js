@@ -65,11 +65,10 @@ const protect = asyncHandler(async (req, res, next) => {
 
         // Fetch full user data from database
         const user = await User.findOne(
-          { _id: session.user._id, access: true },
+          { _id: session.user._id },
           projection
         );
-        console.log(!!user, user?.access)
-        if (!user) {
+        if (!user || user.access === false) {
           clearAuthCookies(res);
           return res.status(401).send({ error: 'Unauthorized', message: 'User not found or access revoked' });
         }

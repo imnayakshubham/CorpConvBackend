@@ -57,66 +57,66 @@ const createAuth = () => {
       additionalFields: {
         actual_user_name: {
           type: String,
-          default: null,
+          defaultValue: null,
           required: [true, "User Name is required"],
         },
         public_user_name: {
           type: String,
-          default: null
+          defaultValue: null
         },
         is_email_verified: {
           type: Boolean,
-          default: false,
+          defaultValue: false,
           required: [true, "is_email_verified is required"],
         },
         user_location: {
           type: String,
-          default: null
+          defaultValue: null
         },
         user_job_role: {
           type: String,
-          default: null
+          defaultValue: null
         },
         user_job_experience: {
           type: Number,
-          default: null
+          defaultValue: null
         },
         user_bio: {
           type: String,
-          default: null
+          defaultValue: null
         },
         is_admin: {
           type: Boolean,
           required: true,
-          default: false,
+          defaultValue: false,
         },
         actual_profile_pic: {
           type: String,
           required: false,
-          default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+          defaultValue: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
         },
         user_public_profile_pic: {
           type: String,
           required: true,
-          default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+          defaultValue: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
         },
         provider: {
           type: String,
-          default: null
+          defaultValue: null
         },
         provider_id: {
           type: String,
           required: false,
-          default: null
+          defaultValue: null
         },
         user_phone_number: {
           type: Number,
           required: false,
-          default: null
+          defaultValue: null
         },
         is_anonymous: {
           type: Boolean,
-          default: false,
+          defaultValue: false,
         },
         user_email_id: {
           type: String,
@@ -126,13 +126,13 @@ const createAuth = () => {
         },
         is_email_verified: {
           type: Boolean,
-          default: false,
+          defaultValue: false,
           required: [true, "Email Verfication key is required"],
         },
-        access: { type: Boolean, required: true, default: true },
+        access: { type: Boolean, required: true, defaultValue: true },
         meta_data: {
           type: Object,
-          default: {}
+          defaultValue: {}
         },
         user_current_company_name: {
           type: String,
@@ -146,35 +146,35 @@ const createAuth = () => {
         },
         user_past_company_history: {
           type: Object,
-          default: []
+          defaultValue: []
         },
         token: {
-          default: null,
+          defaultValue: null,
           type: String,
         },
         followers: [{
           type: String,
           ref: 'User',
-          default: [],
+          defaultValue: [],
         }],
         followings: [{
           type: String,
           ref: 'User',
-          default: [],
+          defaultValue: [],
         }],
         pending_followings: [{
           type: String,
           ref: 'User',
-          default: []
+          defaultValue: []
         }],
         secondary_email_id: {
           type: String,
           trim: true,
           lowercase: true,
-          default: null,
+          defaultValue: null,
         },
         is_secondary_email_id_verified: {
-          default: false,
+          defaultValue: false,
           type: Boolean,
         },
         primary_email_domain: {
@@ -192,12 +192,12 @@ const createAuth = () => {
         },
         academic_level: {
           type: String,
-          default: null
+          defaultValue: null
         },
 
         field_of_study: {
           type: String,
-          default: null
+          defaultValue: null
         },
 
         hobbies: {
@@ -206,26 +206,26 @@ const createAuth = () => {
             validator: arr => Array.isArray(arr) && arr.length <= 10,
             message: "Maximum 10 hobbies allowed"
           },
-          default: []
+          defaultValue: []
         },
         gender: {
           type: String,
           enum: ["male", "female", "prefer-not-to-say"],
           required: false,
-          default: "prefer-not-to-say"
+          defaultValue: "prefer-not-to-say"
         },
 
         profession: {
           type: String,
           enum: ["student", "employed", "self-employed", "unemployed", "retired", "homemaker", "other"],
-          default: null
+          defaultValue: null
         },
         profile_details: {
           type: mongoose.Schema.Types.ObjectId, ref: 'ProfileDetails'
         },
-        embedding: { type: [Number], default: null }, // array of floats
+        embedding: { type: [Number], defaultValue: null }, // array of floats
         embedding_updated_at: Date,
-        last_active_at: { type: Date, default: Date.now },
+        last_active_at: { type: Date, defaultValue: Date.now },
 
         // Legacy credentials (deprecated - use Better-auth PasskeyCredential model instead)
         credentials: [User.credentialSchemaConfig],
@@ -233,11 +233,11 @@ const createAuth = () => {
 
         email_verified_at: {
           type: Date,
-          default: null
+          defaultValue: null
         },
         user_image: {
           type: String,
-          default: null
+          defaultValue: null
         },
 
 
@@ -251,7 +251,7 @@ const createAuth = () => {
           expires: Date,
           used: {
             type: Boolean,
-            default: false
+            defaultValue: false
           }
         }],
 
@@ -272,7 +272,7 @@ const createAuth = () => {
           transports: [String],
           created_at: {
             type: Date,
-            default: Date.now
+            defaultValue: Date.now
           },
           last_used: Date,
           nickname: String
@@ -282,35 +282,35 @@ const createAuth = () => {
         auth_methods: {
           email: {
             type: Boolean,
-            default: true
+            defaultValue: true
           },
           google: {
             type: Boolean,
-            default: true
+            defaultValue: true
           },
           passkey: {
             type: Boolean,
-            default: false
+            defaultValue: false
           }
         },
 
         // Security settings
         two_factor_enabled: {
           type: Boolean,
-          default: false
+          defaultValue: false
         },
         backup_codes: [{
           code: String,
           used: {
             type: Boolean,
-            default: false
+            defaultValue: false
           }
         }],
 
         // Encryption flag - indicates if sensitive data is encrypted
         is_masked: {
           type: Boolean,
-          default: false,
+          defaultValue: false,
           required: true,
           index: true  // For querying encrypted vs plain users
         },
@@ -318,18 +318,18 @@ const createAuth = () => {
         // Premium subscription fields
         has_premium: {
           type: Boolean,
-          default: false,
+          defaultValue: false,
           required: true,
           index: true  // For querying premium users
         },
         premium_expires_at: {
           type: Date,
-          default: null  // null means no expiration (lifetime) or not premium
+          defaultValue: null  // null means no expiration (lifetime) or not premium
         },
         premium_plan: {
           type: String,
           enum: ["free", "monthly", "yearly", "lifetime"],
-          default: "free",
+          defaultValue: "free",
           required: true
         }
       }
@@ -397,7 +397,6 @@ const createAuth = () => {
         create: {
           before: async (userData) => {
             const newUser = await createUser(userData)
-            logger.info(`New user signup===>`, newUser);
             return newUser;
           }
         }
@@ -405,7 +404,6 @@ const createAuth = () => {
       session: {
         create: {
           before: async (sessionData) => {
-            logger.info(`New session created for user: `, sessionData);
             return sessionData
           }
         }
@@ -482,7 +480,7 @@ const generateMagicLink = async (email) => {
 
     const baseUrl = process.env.BETTER_AUTH_URL || process.env.ALLOW_ORIGIN?.split(',')[0];
     const magicUrl = `${baseUrl}/verify?token=${token}&email=${encodeURIComponent(email)}`;
-    console.log({ baseUrl, magicUrl })
+
     return { success: true, url: magicUrl, token };
   } catch (error) {
     logger.error("Failed to generate magic link:", error);
