@@ -13,23 +13,27 @@ const createSurvey = async (req, res) => {
         const title = payload.survey_title || payload.title || '';
         const description = payload.survey_description || payload.description || '';
 
-        const updatedPayload = createDefaultFormSchema({
-            ...req.body,
-            survey_title: title.trim(),
-            survey_description: description.trim(),
-            created_by: req.user._id
-        })
-
         // Validation
-        if (updatedPayload.survey_title.length < 3) {
+        if (title.trim().length < 3) {
             return res.error({
                 message: 'Survey title must be at least 3 characters long',
                 code: 400
             });
         }
 
+        // Create default form schema with the provided data
+        const formSchema = createDefaultFormSchema({
+            title: title.trim(),
+            publicTitle: payload.publicTitle || title.trim(),
+            description: description.trim(),
+            multiStep: payload.multiStep || false
+        });
+
         const newSurvey = new Survey({
-            ...updatedPayload,
+            ...formSchema,
+            survey_title: title.trim(),
+            survey_description: description.trim(),
+            created_by: req.user._id
         });
 
         const savedSurvey = await newSurvey.save();
