@@ -28,13 +28,14 @@ const { initializeSocket, getIo } = require("./utils/socketManger");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
-const { job } = require("./restartServerCron");
+const { job, restartHf } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
 const { responseFormatter } = require("./middleware/responseFormatter");
 const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
 const logger = require("./utils/logger.js");
 const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
 const { protect } = require("./middleware/authMiddleware.js");
+const { initEmbeddingModel } = require("./services/computeEmbedding.js");
 
 dotenv.config();
 
@@ -181,6 +182,8 @@ initializeSocket(server);
 
 
 const redis = getRedisInstance();
+
+restartHf.start()
 
 if (APP_ENV === "PROD") {
 

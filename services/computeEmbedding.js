@@ -7,8 +7,6 @@ let embeddingModel = null;
 async function initEmbeddingModel() {
     try {
         const res = await fetch(`${process.env.HF_API_END_POINT}health`);
-        const data = await res.json()
-        console.log(data)
         // res.ok is false even on 404/500
     } catch (err) {
         console.error(err);
@@ -22,10 +20,15 @@ async function generateEmbeddings(text) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'token': `Bearer ${process.env.HF_API_KEY}`,
+                'Authorization': `Bearer ${process.env.HF_API_KEY}`,
             },
             body: JSON.stringify({ text }),
         });
+
+        console.log({
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.HF_API_KEY}`,
+        }, text)
 
         if (!res.ok) {
             const errText = await res.text().catch(() => res.statusText);

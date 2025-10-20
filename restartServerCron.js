@@ -16,7 +16,23 @@ const job = new cron.CronJob('*/14 * * * *', () => {
     })
 })
 
+const restartHf = new cron.CronJob('0 0 * * *', () => {
+    const url = `${process.env.HF_API_END_POINT}health`
+    console.log("Cron Running....")
+    https.get(url, (res) => {
+        if (res.statusCode === 200) {
+            console.log("HF Restarted.....")
+        } else {
+            console.error(`failed to restart HF with status code: ${res.statusCode}`)
+        }
+    }).on("error", (error) => {
+        console.error(`Error while Restarting HF : ${error.message}`)
+    })
+})
+
+
 
 module.exports = {
-    job
+    job,
+    restartHf
 }

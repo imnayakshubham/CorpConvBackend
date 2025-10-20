@@ -289,8 +289,6 @@ const updateUserProfile = async (req, res) => {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
 
       addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
-
-
       const textToEmbed = `Public Name: ${updatedUser.public_user_name || ''}
           Profession: ${updatedUser.profession || ''}
           Hobbies: ${(updatedUser.hobbies ?? [])?.join(', ')}
