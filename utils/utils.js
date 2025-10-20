@@ -172,7 +172,7 @@ const DEFAULT_COLOR_SETTINGS = {
  */
 const DEFAULT_TYPOGRAPHY_SETTINGS = {
     fontSize: "base",
-    font_family: "Inter",
+    fontFamily: "Inter",
     fontWeight: "normal",
     lineHeight: "normal",
     letterSpacing: "normal",

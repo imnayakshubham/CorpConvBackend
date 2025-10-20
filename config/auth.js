@@ -116,7 +116,7 @@ const createAuth = () => {
         },
         is_anonymous: {
           type: Boolean,
-          defaultValue: false,
+          defaultValue: true,
         },
         user_email_id: {
           type: String,
@@ -218,7 +218,7 @@ const createAuth = () => {
         profession: {
           type: String,
           enum: ["student", "employed", "self-employed", "unemployed", "retired", "homemaker", "other"],
-          defaultValue: null
+          defaultValue: null,
         },
         profile_details: {
           type: mongoose.Schema.Types.ObjectId, ref: 'ProfileDetails'
@@ -229,8 +229,6 @@ const createAuth = () => {
 
         // Legacy credentials (deprecated - use Better-auth PasskeyCredential model instead)
         credentials: [User.credentialSchemaConfig],
-
-
         email_verified_at: {
           type: Date,
           defaultValue: null
@@ -381,7 +379,7 @@ const createAuth = () => {
       organization(),
 
       customSession(async ({ user, session }) => {
-        const userInfo = await getOrAdduser(session.userId);
+        const userInfo = await getOrAdduser(session);
         return {
           user: {
             ...userInfo,
@@ -396,18 +394,11 @@ const createAuth = () => {
       user: {
         create: {
           before: async (userData) => {
-            const newUser = await createUser(userData)
+            const newUser = await getOrAdduser(userData)
             return newUser;
           }
         }
       },
-      session: {
-        create: {
-          before: async (sessionData) => {
-            return sessionData
-          }
-        }
-      }
     },
 
     // Rate limiting
@@ -541,7 +532,7 @@ const responseFormatterForAuth = (result) => {
 
 const createUser = async (userData) => {
   try {
-
+    console.log({ userData })
     const emailSplit = userData.email.split("@")
     const domain = emailSplit[1].split(".")[0]
     const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
@@ -584,29 +575,50 @@ const createUser = async (userData) => {
   }
 }
 
-const getOrAdduser = async (user_id) => {
+const getOrAdduser = async (userData) => {
   try {
+    let payload = {};
 
-
-    if (!user_id) {
-      return null;
+    if (userData.email) {
+      payload.user_email_id = userData.email;
     }
 
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
-    const value = await getOrAddDataInRedis(userInfoRedisKey)
-
-    if (value) {
-      return value
+    const user_id = userData.userId || userData._id
+    if (user_id) {
+      payload._id = user_id;
     }
 
 
-    const userData = await User.findOne({
+
+    if (user_id) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${payload?._id}`
+      const value = await getOrAddDataInRedis(userInfoRedisKey)
+
+      if (value) {
+        return value
+      }
+    }
+
+    const foundUser = await User.findOne({
       $or: [
-        { _id: user_id },
+        { ...payload },
       ]
-    }, { projection }).exec();
+    }, projection).exec();
 
-    return userData ? responseFormatterForAuth(userData) : null;
+
+    if (foundUser) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${foundUser._id}`
+      const userActualData = responseFormatterForAuth(foundUser);
+      await getOrAddDataInRedis(userInfoRedisKey, userActualData)
+      return userActualData;
+    } else {
+      const newUser = await createUser(userData)
+      const userActualData = responseFormatterForAuth(newUser);
+      // add to redis
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${newUser._id}`
+      await getOrAddDataInRedis(userInfoRedisKey, userActualData)
+      return userActualData;
+    }
 
   } catch (error) {
     logger.error("Error in getOrAdduser:", error);

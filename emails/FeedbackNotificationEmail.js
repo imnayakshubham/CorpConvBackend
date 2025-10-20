@@ -25,7 +25,7 @@ const FeedbackNotificationEmail = ({ feedback }) => {
   return React.createElement(Html, null,
     React.createElement(Head, null,
       React.createElement(Font, {
-        font_family: "Roboto",
+        fontFamily: "Roboto",
         fallbackFontFamily: "Verdana",
         webFont: {
           url: "https://fonts.gstatic.com/s/roboto/v27/KFOmCnqEu92Fr1Mu4mxKKTU1Kg.woff2",
@@ -38,8 +38,8 @@ const FeedbackNotificationEmail = ({ feedback }) => {
     React.createElement(Preview, null, `New ${feedback.type} feedback: ${feedback.title}`),
     React.createElement(Body, {
       style: {
-        background_color: "#f9fafb",
-        font_family: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif",
+        backgroundColor: "#f9fafb",
+        fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif",
       }
     },
       React.createElement(Container, {

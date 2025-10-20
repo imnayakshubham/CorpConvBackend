@@ -1267,7 +1267,7 @@ const verifyAuth = asyncHandler(async (req, res) => {
         user_email_id: email,
         public_user_name: email.split('@')[0],
         is_email_verified: true,
-        is_anonymous: false,
+        is_anonymous: true,
         user_current_company_name,
         user_company_id: companyId,
         user_past_company_history: [companyId],

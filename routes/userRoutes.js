@@ -187,7 +187,7 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
             user_email_id: email,
             public_user_name: email.split('@')[0],
             is_email_verified: true,
-            is_anonymous: false,
+            is_anonymous: true,
             user_current_company_name: !["example", "gmail", "outlook"].includes(domain)
               ? domain.charAt(0).toUpperCase() + domain.slice(1)
               : "Somewhere",
@@ -269,7 +269,7 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
           user_email_id: email,
           public_user_name: email.split('@')[0],
           is_email_verified: true,
-          is_anonymous: false,
+          is_anonymous: true,
           user_current_company_name: !["example", "gmail", "outlook"].includes(domain)
             ? domain.charAt(0).toUpperCase() + domain.slice(1)
             : "Somewhere",
