@@ -1,7 +1,7 @@
 const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const { passkey } = require("better-auth/plugins/passkey");
-const { customSession, admin, organization } = require("better-auth/plugins");
+const { customSession, admin, organization, multiSession } = require("better-auth/plugins");
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
 const { projection } = require("../constants");
@@ -431,6 +431,9 @@ const createAuth = () => {
       }),
 
       admin(),
+      multiSession({
+        maxSessionsPerUser: 2,
+      }),
 
       // Organization plugin with custom configuration
       organization({
