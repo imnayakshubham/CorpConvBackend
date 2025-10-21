@@ -322,6 +322,34 @@ const userSchemaConfig = {
   },
   access: { type: Boolean, required: true, default: true },
 
+  // Admin and moderation fields
+  banned: {
+    type: Boolean,
+    default: false,
+    required: true,
+    index: true  // For querying banned users
+  },
+  banned_at: {
+    type: Date,
+    default: null
+  },
+  banned_by: {
+    type: String,
+    ref: 'User',
+    default: null
+  },
+  banned_reason: {
+    type: String,
+    default: null
+  },
+  role: {
+    type: String,
+    enum: ["user", "admin"],
+    default: "user",
+    required: true,
+    index: true  // For querying by role
+  },
+
 }
 
 const userSchema = mongoose.Schema(userSchemaConfig, { timestamps: true });

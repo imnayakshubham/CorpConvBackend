@@ -59,7 +59,7 @@ class SimpleDBSyncer {
 
     async syncCollection(sourceDb, destDb, collectionName) {
         try {
-            console.log(`  🔄 Syncing: ${collectionName}`);
+            console.log(`🔄 Syncing: ${collectionName}`);
 
             // Create models (flexible schema)
             const flexibleSchema = new mongoose.Schema({}, { strict: false });

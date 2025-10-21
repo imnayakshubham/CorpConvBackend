@@ -87,27 +87,37 @@ const protect = asyncHandler(async (req, res, next) => {
 
 });
 
-// Admin middleware - checks if user has admin privileges
-// Note: This assumes admin status is determined by email or a future isAdmin field
+/**
+ * Admin Middleware - Protects admin-only routes
+ *
+ * Checks if the authenticated user has admin privileges via:
+ * 1. is_admin flag (primary)
+ * 2. role field set to "admin" (secondary)
+ * 3. Email in ADMIN_IDS environment variable (fallback)
+ *
+ * Must be used after protect() middleware
+ */
 const admin = asyncHandler(async (req, res, next) => {
+  // Check if user is authenticated
   if (!req.user) {
     res.status(401);
-    throw new Error("User not authenticated");
+    throw new Error("User not authenticated. Please login first.");
   }
 
-  // For now, we'll check if user email is in admin list
-  // This can be enhanced later with a proper admin role system
-  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(email => email.trim());
+  // Check multiple admin conditions
+  const adminEmails = (process.env.ADMIN_IDS || '').split(',').map(email => email.trim()).filter(Boolean);
 
-  const isAdmin = adminEmails.includes(req.user.user_email_id) ||
-    req.user.is_admin === true ||
-    req.user.role === 'admin';
+  const isAdmin =
+    req.user.is_admin === true ||  // Primary check: is_admin flag
+    req.user.role === 'admin' ||   // Secondary check: role field
+    (req.user.user_email_id && adminEmails.includes(req.user.user_email_id)); // Fallback: email whitelist
 
   if (!isAdmin) {
     res.status(403);
     throw new Error("Access denied. Admin privileges required.");
   }
 
+  // User is admin, proceed
   next();
 });
 

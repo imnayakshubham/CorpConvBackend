@@ -397,7 +397,7 @@ const createAuth = () => {
             httpOnly: true,
             secure: process.env.APP_ENV === 'PROD',
             sameSite: process.env.APP_ENV === 'PROD' ? 'none' : 'lax',
-            maxAge: 60 * 60 * 24 * 7 * 1000, // 7 days in ms
+            maxAge: 60 * 60 * 24 * 7, // 7 days in ms
             path: '/',
           }
         },
