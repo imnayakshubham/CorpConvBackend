@@ -5,7 +5,7 @@
  * with full backward compatibility for mixed encrypted/unencrypted data
  */
 
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const {
   encrypt,
   decrypt,

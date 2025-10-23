@@ -13,7 +13,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const { encrypt, isEncrypted, isEncryptionConfigured } = require('../utils/encryption');
 const logger = require('../utils/logger');
 

@@ -15,7 +15,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const { encrypt } = require('../utils/encryption');
 
 // Check if encryption key is configured

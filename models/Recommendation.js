@@ -8,7 +8,7 @@ const RecommendationSchema = new mongoose.Schema({
         recommendation_value: Number
     }],
     created_at: { type: Date, default: Date.now }
-}, { _id: false });
+}, { _id: false, timestamps: true });
 
 RecommendationSchema.index({ user_id: 1, created_at: -1 });
 

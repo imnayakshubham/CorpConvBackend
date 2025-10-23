@@ -2,7 +2,7 @@
 require('dotenv').config();
 const { Worker } = require('bullmq');
 const mongoose = require('mongoose');
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const { generateEmbeddings } = require('../controllers/aiController');
 const getRedisInstance = require('../redisClient/redisClient');
 

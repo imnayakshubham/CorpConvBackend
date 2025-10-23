@@ -1,7 +1,7 @@
 // routes/recommendation.js (excerpt)
 const express = require('express');
 const Recommendation = require('../models/Recommendation');
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const { recommendationQueue } = require('../queues');
 const router = express.Router();
 

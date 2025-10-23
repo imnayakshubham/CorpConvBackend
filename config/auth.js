@@ -421,13 +421,13 @@ const createAuth = () => {
 
     // Plugin configuration
     plugins: [
-      // Passkey authentication
       passkey({
+
         rpName: process.env.APP_NAME || "Hushwork",
         rpID: process.env.APP_ENV === 'PROD'
           ? new URL(process.env.BETTER_AUTH_URL || '').hostname
           : "localhost",
-        origin: allowedOrgins
+        origin: allowedOrgins,
       }),
 
       admin(),

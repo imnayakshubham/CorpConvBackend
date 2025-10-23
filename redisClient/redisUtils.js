@@ -70,20 +70,36 @@ const markOffline = async (user_id) => {
 
 const syncOnlineStatusToDB = async () => {
     try {
-        // Example: get all userIds with online keys from Redis (using SCAN or Redis sets if maintained)
+        // Get all userIds with online keys from Redis
         const keys = await redis.keys('online:*');
         const onlineUserIds = keys.map(key => key.split(':')[1]);
 
-        // Mark these users online & update last_active_at
+        if (onlineUserIds.length === 0) {
+            return; // No users to sync
+        }
+
+        // Better Auth uses string UUIDs as user IDs, not ObjectIds
+        // We need to query by the string _id field, not cast to ObjectId
+        // Use $toString to convert ObjectId to string for comparison if needed
+        // Or ensure the _id field matches the type being stored (string vs ObjectId)
+
+        // Update using string comparison since Better Auth IDs are strings
         await User.updateMany(
             { _id: { $in: onlineUserIds } },
             { $set: { online: true, last_active_at: new Date() } }
         );
 
-        // Optionally mark users offline in DB who don't have Redis online keys
-        // if this fits the use case
+        logger.info(`Synced online status for ${onlineUserIds.length} users`);
     } catch (err) {
-        console.error('Error syncing online status to DB:', err);
+        // User IDs from Better Auth are UUID strings, not ObjectIds
+        // This error occurs when mixing Better Auth (UUIDs) with Mongoose (ObjectIds)
+        logger.error('Error syncing online status to DB:', err.message);
+
+        // Log the specific issue for debugging
+        if (err.name === 'CastError') {
+            logger.warn('User ID type mismatch: Better Auth uses UUID strings, ensure User model _id type matches');
+            // Silently skip this sync - Better Auth manages its own user sessions
+        }
     }
 };
 

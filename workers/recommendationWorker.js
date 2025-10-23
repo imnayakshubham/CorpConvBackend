@@ -7,7 +7,7 @@ const { connection } = require('../queues'); // removed embeddingQueue import
 const Recommendation = require('../models/Recommendation');
 const { cosine, score } = require('../services/similarity');
 const logger = require('../utils/logger');
-const User = require('../models/userModel');
+const { User } = require('../models/userModel');
 const { generateEmbeddings } = require('../services/computeEmbedding');
 
 const projection = {
@@ -46,6 +46,7 @@ async function start() {
             // Fetch target user if user_id specified
             let target = null;
             if (user_id) {
+                console.log({ user_id })
                 target = await User.findById(user_id, projection).lean();
 
                 // If target user missing, nothing to recommend
@@ -63,8 +64,11 @@ async function start() {
                             Bio: ${target.user_bio || ''}
                             Academic level: ${target.academic_level || ''}
                             Field of study: ${target.field_of_study || ''}`;
+
                     try {
                         const embedding = await generateEmbeddings(textToEmbed);
+
+                        console.log({ textToEmbed, embedding })
                         // Update target embedding in DB
                         await User.findByIdAndUpdate(user_id, {
                             embedding,

@@ -859,13 +859,14 @@ function paginate(list, limit) {
 }
 
 const getUserRecommendations = async (req, res) => {
-  console.log("user_id",)
 
   try {
     const { user_id = null } = req.params;
+
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
     const cursor = req.query.cursor || null;
     const filter = cursor ? { _id: { $gt: new mongoose.Types.ObjectId(cursor) } } : {};
+
 
     // List all users if user_id is "users"
     if (!user_id) {
@@ -891,9 +892,18 @@ const getUserRecommendations = async (req, res) => {
     // Fetch recommendations document for user
     const recDoc = await Recommendation.findOne({ user_id }).lean();
 
+    const updated_at = recDoc ? recDoc.updatedAt ?? recDoc?.updated_at : null;
+    const currentTime = new Date()
+    const timeDiffInHours = updated_at ? Math.abs(currentTime - new Date(updated_at)) / 36e5 : null;
+
+
+    const staleThresholdHours = 24;
+
+    const isDifferenceExceedsThreshold = updated_at ? timeDiffInHours !== null && timeDiffInHours > staleThresholdHours : true;
 
     // If no recommendations exist, enqueue background computation and fallback to users list
-    if (!recDoc || !recDoc.items || recDoc.items.length === 0) {
+    if (!recDoc || !recDoc.items || recDoc.items.length === 0 || isDifferenceExceedsThreshold) {
+      console.log("recommendationQueue Starts")
       // Assuming recommendationQueue is correctly initialized and imported elsewhere
       recommendationQueue.add(
         'compute',
