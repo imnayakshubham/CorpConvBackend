@@ -29,9 +29,7 @@ function getRedisInstance() {
         });
     }
 
-    redis.on("connect", () => {
-        console.log("heree redis",)
-    })
+
 
     redis.on("error", (err) => {
         console.error("Redis error:", err);

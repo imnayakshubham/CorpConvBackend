@@ -31,6 +31,7 @@ const asyncHandler = require("express-async-handler");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 const emailService = require("../services/emailService");
+const { User } = require("../models/userModel");
 
 const router = express.Router();
 
@@ -44,10 +45,8 @@ router.post("/auth/logout", protect, logout);
 router.put("/premium", protect, updatePremiumStatus);
 
 // Account deletion - eligibility check
-router.get("/auth/can-delete-account", protect, asyncHandler(async (req, res) => {
+router.get("/user/can-delete-account", protect, asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const { User } = require("../models/userModel");
-
   try {
     // Check for blocking conditions
     const blockingConditions = [];
@@ -93,7 +92,7 @@ router.get("/auth/can-delete-account", protect, asyncHandler(async (req, res) =>
 }));
 
 // Account deletion - soft delete
-router.post("/auth/soft-delete-account", protect, asyncHandler(async (req, res) => {
+router.post("/user/soft-delete-account", protect, asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { User } = require("../models/userModel");
   const { getAuth } = require('../config/auth');
