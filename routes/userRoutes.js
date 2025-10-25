@@ -43,6 +43,133 @@ router.post("/auth/logout", protect, logout);
 // Premium management
 router.put("/premium", protect, updatePremiumStatus);
 
+// Account deletion - eligibility check
+router.get("/auth/can-delete-account", protect, asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { User } = require("../models/userModel");
+
+  try {
+    // Check for blocking conditions
+    const blockingConditions = [];
+
+    // 1. Check if user owns any active organizations
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    const ownedOrgs = await db.collection('member').find({
+      user_id: userId.toString(),
+      member_role: 'owner',
+      is_active_member: true
+    }).toArray();
+
+    if (ownedOrgs.length > 0) {
+      blockingConditions.push(`You are the owner of ${ownedOrgs.length} organization(s). Please transfer ownership or delete the organizations first.`);
+    }
+
+    // 2. Check for active premium subscription
+    const user = await User.findById(userId);
+    if (user && user.has_premium && user.premium_expires_at && user.premium_expires_at > new Date()) {
+      blockingConditions.push("You have an active premium subscription. Please cancel it first or wait for it to expire.");
+    }
+
+    if (blockingConditions.length > 0) {
+      return res.json({
+        canDelete: false,
+        message: blockingConditions.join(' ')
+      });
+    }
+
+    return res.json({
+      canDelete: true,
+      message: "Your account can be deleted."
+    });
+
+  } catch (error) {
+    logger.error("Error checking account deletion eligibility:", error);
+    return res.status(500).json({
+      canDelete: false,
+      message: "Unable to check eligibility. Please try again later."
+    });
+  }
+}));
+
+// Account deletion - soft delete
+router.post("/auth/soft-delete-account", protect, asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { User } = require("../models/userModel");
+  const { getAuth } = require('../config/auth');
+
+  try {
+    // 1. Double-check eligibility
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    const ownedOrgs = await db.collection('member').find({
+      user_id: userId.toString(),
+      member_role: 'owner',
+      is_active_member: true
+    }).toArray();
+
+    if (ownedOrgs.length > 0) {
+      return res.status(400).json({
+        status: "Failed",
+        message: "Cannot delete account while owning active organizations."
+      });
+    }
+
+    // 2. Soft delete user (set access to false)
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          access: false,
+          banned: false,  // Not banned, just deactivated
+          deleted_at: new Date(),
+          deleted_by: userId.toString(),
+          deleted_reason: 'User requested account deletion'
+        }
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        status: "Failed",
+        message: "User not found."
+      });
+    }
+
+    // 3. Revoke all Better Auth sessions
+    try {
+      const auth = getAuth();
+      await auth.api.revokeUserSessions({
+        headers: req.headers,
+        body: { userId: userId.toString() }
+      });
+      logger.info(`Revoked all sessions for user ${userId}`);
+    } catch (sessionError) {
+      logger.warn("Could not revoke sessions via Better Auth:", sessionError.message);
+      // Continue anyway - user is soft deleted
+    }
+
+    // 4. Log deletion for audit
+    logger.info(`User account soft deleted: ${userId} - ${user.user_email_id}`);
+
+    return res.json({
+      status: "Success",
+      message: "Account successfully disabled. Your data will be retained for 30 days.",
+      data: {
+        deletedAt: user.deleted_at
+      }
+    });
+
+  } catch (error) {
+    logger.error("Error soft deleting account:", error);
+    return res.status(500).json({
+      status: "Failed",
+      message: "Failed to delete account. Please try again later."
+    });
+  }
+}));
+
 // Better-auth handler - handles all remaining better-auth routes
 // This must come AFTER custom auth routes to avoid conflicts
 

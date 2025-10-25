@@ -350,6 +350,22 @@ const userSchemaConfig = {
     index: true  // For querying by role
   },
 
+  // Soft delete tracking
+  deleted_at: {
+    type: Date,
+    default: null,
+    index: true  // For querying deleted users
+  },
+  deleted_by: {
+    type: String,
+    ref: 'User',
+    default: null
+  },
+  deleted_reason: {
+    type: String,
+    default: null
+  },
+
 }
 
 const userSchema = mongoose.Schema(userSchemaConfig, { timestamps: true });
