@@ -4,7 +4,7 @@ const { passkey } = require("better-auth/plugins/passkey");
 const { customSession, admin, organization, multiSession } = require("better-auth/plugins");
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
-const { projection } = require("../constants");
+const { projection, betterAuthSessionCookie } = require("../constants");
 const { User } = require("../models/userModel");
 const { getOrAddDataInRedis } = require("../redisClient/redisUtils");
 const { decryptUserData } = require("../utils/encryption");
@@ -391,6 +391,7 @@ const createAuth = () => {
     },
 
     advanced: {
+      cookiePrefix: "hushwork",
       cookies: {
         session_token: {
           attributes: {
