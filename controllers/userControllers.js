@@ -919,7 +919,7 @@ const getUserRecommendations = async (req, res) => {
 
       const { results, nextCursor } = paginate(fallbackUsers, limit);
 
-      return res.json({
+      return res.success({
         status: "Success",
         message: "Fallback users fetched",
         result: { data: results, nextCursor }
@@ -960,7 +960,7 @@ const getUserRecommendations = async (req, res) => {
     // Determine nextCursor for pagination
     const nextCursor = limitedItems.length > limit ? limitedItems[limit].user_id.toString() : null;
 
-    return res.json({
+    return res.sucess({
       status: 'Success',
       message: 'Recommendations fetched',
       result: {
