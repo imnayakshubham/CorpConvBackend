@@ -707,6 +707,7 @@ const createAuth = (connection) => {
       // Custom session with active organization
       customSession(async ({ user, session }) => {
         const userInfo = await getOrAdduser(user);
+
         return {
           user: {
             ...userInfo,
@@ -860,22 +861,7 @@ const verifyMagicToken = (email, token) => {
 
 const responseFormatterForAuth = (result) => {
   const decrypted = decryptUserData(result);
-
-  return {
-    _id: decrypted._id,
-    public_user_name: decrypted.public_user_name,
-    user_public_profile_pic: decrypted.user_public_profile_pic,
-    is_anonymous: decrypted.is_anonymous,
-    user_bio: decrypted.user_bio,
-    user_job_role: decrypted.user_job_role,
-    user_job_experience: decrypted.user_job_experience,
-    user_current_company_name: decrypted.user_current_company_name,
-    is_email_verified: decrypted.is_email_verified,
-    isAdmin: decrypted.isAdmin,
-    has_premium: decrypted.has_premium || false,
-    premium_expires_at: decrypted.premium_expires_at || null,
-    premium_plan: decrypted.premium_plan || 'free'
-  };
+  return decrypted
 };
 
 const createUser = async (userData) => {
@@ -1037,7 +1023,6 @@ const getOrAdduser = async (userData) => {
         { ...payload },
       ]
     }, projection).exec();
-
     if (foundUser) {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${foundUser._id}`;
       const userActualData = responseFormatterForAuth(foundUser);

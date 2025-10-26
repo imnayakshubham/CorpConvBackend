@@ -47,6 +47,11 @@ const validateSurveyCreate = [
         .trim()
         .isLength({ min: 3, max: 100 })
         .withMessage('Title must be between 3 and 100 characters'),
+    body('internal_title')
+        .optional()
+        .trim()
+        .isLength({ min: 3, max: 100 })
+        .withMessage('Internal title must be between 3 and 100 characters'),
     body(['survey_description', 'description'])
         .optional()
         .trim()

@@ -9,7 +9,7 @@ const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
 const { tokenkeyName, cookieOptions, isProd, authCookieNames } = require("../constants/index.js");
-const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob } = require("../redisClient/redisUtils.js");
+const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob, isUserOnline } = require("../redisClient/redisUtils.js");
 const Item = require("../models/Item.js");
 const userEmbedding = require("../models/userEmbedding.js");
 const { recommendationQueue } = require("../queues/index.js");
@@ -196,7 +196,6 @@ const authUser = async (req, res) => {
       }
     }
   } catch (error) {
-    console.log({ error })
     return res.status(200).json({ message: error, status: "Failed" });
   }
 };
@@ -695,7 +694,6 @@ const addProfileItem = async (req, res) => {
   try {
     assertSelf(user_id, authedId);
     const sanitized = sanitizeItemPayload(req.body, authedId);
-    console.log({ sanitized })
 
     const session = await mongoose.startSession();
     let createdItem;
@@ -703,11 +701,9 @@ const addProfileItem = async (req, res) => {
       // ensure user & profile
       let user = await User.findOne({ _id: user_id, access: true }).select(projection).session(session);
       if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
-      console.log({ user })
       let profile;
       if (!user.profile_details) {
         profile = await ProfileDetails.create([{ created_by: authedId, layouts: {}, items: [] }], { session });
-        console.log({ profile })
         user.profile_details = profile[0]._id;
         await user.save({ session });
         profile = profile[0];
@@ -913,7 +909,6 @@ const getUserRecommendations = async (req, res) => {
 
     // If no recommendations exist, enqueue background computation and fallback to users list
     if (!recDoc || !recDoc.items || recDoc.items.length === 0 || isDifferenceExceedsThreshold) {
-      console.log("recommendationQueue Starts")
       // Assuming recommendationQueue is correctly initialized and imported elsewhere
       recommendationQueue.add(
         'compute',
@@ -1149,7 +1144,6 @@ const sendMagicLink = asyncHandler(async (req, res) => {
     });
   }
 
-  console.log({ email })
   try {
     // Check if email credentials are configured
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -1163,7 +1157,6 @@ const sendMagicLink = asyncHandler(async (req, res) => {
     // Use better-auth's email OTP functionality
     // This will trigger the sendOTP function configured in config/auth.js
     const result = await generateMagicLink(email);
-    console.log({ result })
     if (!result.success) {
       return res.status(400).json({
         success: false,
@@ -1399,6 +1392,75 @@ const updatePremiumStatus = asyncHandler(async (req, res) => {
 });
 
 
+/**
+ * Get Online Status for Connected Users
+ * GET /api/users/connected-online-status
+ * Returns online status ONLY for users that are following each other (connected)
+ */
+const getConnectedUsersOnlineStatus = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get current user with followers and followings
+    // Better Auth uses string UUIDs, not ObjectIds
+    const user = await User.findOne({ _id: userId }).select('followers followings').lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Get connected users (intersection of followers and followings)
+    const followers = user.followers || [];
+    const followings = user.followings || [];
+    const connectedUserIds = followers.filter(id => followings.includes(id));
+
+    if (connectedUserIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          onlineUsers: []
+        }
+      });
+    }
+
+    // Check online status from Redis for each connected user using redisUtils helper
+    const onlineStatuses = await Promise.all(
+      connectedUserIds.map(async (connectedUserId) => {
+        const online = await isUserOnline(connectedUserId);
+        return {
+          userId: connectedUserId,
+          isOnline: online
+        };
+      })
+    );
+
+    // Filter to return only users who are online
+    const onlineUsers = onlineStatuses
+      .filter(status => status.isOnline)
+      .map(status => status.userId);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        onlineUsers,
+        totalConnected: connectedUserIds.length,
+        totalOnline: onlineUsers.length
+      }
+    });
+
+  } catch (error) {
+    logger.error("Get connected users online status error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to get online status"
+    });
+  }
+});
+
+
 module.exports = {
   allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations,
   refreshToken,
@@ -1406,4 +1468,5 @@ module.exports = {
   updatePremiumStatus,
   sendMagicLink,
   verifyAuth,
+  getConnectedUsersOnlineStatus,
 }; 

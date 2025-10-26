@@ -38,6 +38,7 @@ const logger = require("./utils/logger.js");
 const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
 const { protect } = require("./middleware/authMiddleware.js");
 const { initEmbeddingModel } = require("./services/computeEmbedding.js");
+const { User } = require('./models/userModel');
 
 dotenv.config();
 
@@ -224,6 +225,25 @@ io.on("connection", async (socket) => {
 
       socket.user_id = user_id
       await markOnline(user_id)
+
+      // Broadcast online status to connected users (mutual followers)
+      try {
+        // Better Auth uses string UUIDs, not ObjectIds
+        const user = await User.findOne({ _id: user_id }).select('followers followings').lean();
+        if (user) {
+          // Get connected users (intersection of followers and followings)
+          const followers = user.followers || [];
+          const followings = user.followings || [];
+          const connectedUserIds = followers.filter(id => followings.includes(id));
+
+          // Emit online event to each connected user
+          connectedUserIds.forEach(connectedUserId => {
+            io.to(connectedUserId).emit("user_online", { user_id: user_id });
+          });
+        }
+      } catch (error) {
+        logger.error("Error broadcasting online status:", error);
+      }
 
     }
   });
@@ -472,8 +492,39 @@ io.on("connection", async (socket) => {
     socket.leave(id);
   });
 
+  socket.on("disconnect", async () => {
+    if (socket.user_id) {
+      await markOffline(socket.user_id);
+
+      // Broadcast offline status to connected users
+      try {
+        // Better Auth uses string UUIDs, not ObjectIds
+        const user = await User.findOne({ _id: socket.user_id }).select('followers followings').lean();
+
+        if (user) {
+          const followers = user.followers || [];
+          const followings = user.followings || [];
+          const connectedUserIds = followers.filter(id => followings.includes(id));
+
+          // Emit offline event to each connected user
+          connectedUserIds.forEach(connectedUserId => {
+            io.to(connectedUserId).emit("user_offline", { userId: socket.user_id });
+          });
+        }
+      } catch (error) {
+        logger.error("Error broadcasting offline status:", error);
+      }
+
+      socket.leave(socket.user_id);
+    }
+  });
+
   socket.off("setup", async () => {
-    await markOffline(user_id)
-    socket.leave(user_id);
+    if (socket?.user_id) {
+      await markOffline(socket.user_id);
+      socket.leave(socket.user_id);
+    } else {
+      console.log("elese user_id")
+    }
   });
 });

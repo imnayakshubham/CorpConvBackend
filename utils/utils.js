@@ -200,8 +200,8 @@ function createDefaultFormSchema(options) {
             ],
         fields: [],
         settings: {
-            title: options.title || "Untitled Survey",
-            publicTitle: options.publicTitle || "",
+            // Removed deprecated title and publicTitle fields
+            // Use survey_title and internal_title at the root level instead
             description: options.description || "",
             submitText: "Submit",
             successMessage: "Thank you for your submission!",

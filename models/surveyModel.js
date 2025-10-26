@@ -224,6 +224,14 @@ const surveySchema = new mongoose.Schema({
         minlength: 3,
         maxlength: 100
     },
+    internal_title: {
+        type: String,
+        required: false,
+        trim: true,
+        minlength: 3,
+        maxlength: 100,
+        default: null
+    },
     view_count: {
         type: Number,
         default: 0,
@@ -294,9 +302,11 @@ const surveySchema = new mongoose.Schema({
 // Original pre-save hook
 surveySchema.pre('save', function (next) {
     try {
-        console.log("Pre-save hook triggered");
         if (this.survey_title) {
             this.survey_title = this.survey_title.trim();
+        }
+        if (this.internal_title) {
+            this.internal_title = this.internal_title.trim();
         }
         if (this.survey_description) {
             this.survey_description = this.survey_description.trim();

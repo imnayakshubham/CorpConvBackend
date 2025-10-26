@@ -20,11 +20,20 @@ const createSurvey = async (req, res) => {
         // - New: title, description (new wizard)
         const title = payload.survey_title || payload.title || '';
         const description = payload.survey_description || payload.description || '';
+        const internalTitle = payload.internal_title || null;
 
         // Validation
         if (title.trim().length < 3) {
             return res.error({
                 message: 'Survey title must be at least 3 characters long',
+                code: 400
+            });
+        }
+
+        // Validate internal_title if provided
+        if (internalTitle && internalTitle.trim().length < 3) {
+            return res.error({
+                message: 'Internal title must be at least 3 characters long',
                 code: 400
             });
         }
@@ -40,6 +49,7 @@ const createSurvey = async (req, res) => {
         const newSurvey = new Survey({
             ...formSchema,
             survey_title: title.trim(),
+            internal_title: internalTitle ? internalTitle.trim() : null,
             survey_description: description.trim(),
             created_by: req.user._id
         });
@@ -251,17 +261,35 @@ const editSurvey = async (req, res) => {
         }
         let updatedPayload = req.body;
         const payloadKeys = Object.keys(updatedPayload)
-        if (payloadKeys.includes("survey_title") && payloadKeys.includes("survey_description")) {
-            updatedPayload = {
-                survey_title: updatedPayload.survey_title.trim(),
-                survey_description: updatedPayload.survey_description.trim(),
-                ...updatedPayload
-            }
+
+        // Handle survey_title validation and trimming
+        if (payloadKeys.includes("survey_title")) {
+            updatedPayload.survey_title = updatedPayload.survey_title.trim();
             if (updatedPayload.survey_title.length < 3) {
                 return res.error({
                     message: 'Survey title must be at least 3 characters long',
                     code: 400
                 });
+            }
+        }
+
+        // Handle survey_description trimming
+        if (payloadKeys.includes("survey_description")) {
+            updatedPayload.survey_description = updatedPayload.survey_description.trim();
+        }
+
+        // Handle internal_title validation and trimming
+        if (payloadKeys.includes("internal_title")) {
+            if (updatedPayload.internal_title) {
+                updatedPayload.internal_title = updatedPayload.internal_title.trim();
+                if (updatedPayload.internal_title.length < 3) {
+                    return res.error({
+                        message: 'Internal title must be at least 3 characters long',
+                        code: 400
+                    });
+                }
+            } else {
+                updatedPayload.internal_title = null;
             }
         }
 

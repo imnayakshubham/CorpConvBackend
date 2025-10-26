@@ -21,6 +21,7 @@ const {
   sendMagicLink,
   verifyAuth,
   updatePremiumStatus,
+  getConnectedUsersOnlineStatus,
 
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
@@ -183,7 +184,6 @@ router.post("/send-magic-link", asyncHandler(async (req, res) => {
       error: "Email is required"
     });
   }
-  console.log({ email })
 
   try {
     // Generate both magic link and OTP
@@ -447,6 +447,7 @@ router.route("/user").get(protect, allUsers);
 router.route('/user/recommend/:user_id?').get(getUserRecommendations);
 router.route("/user/:id").get(getUserInfo)
 router.route("/followers").get(protect, getfollowersList);
+router.route("/users/connected-online-status").get(protect, getConnectedUsersOnlineStatus);
 
 // DEPRECATED: Legacy JWT auth endpoint - Use Better Auth instead (/api/auth/*)
 // router.post("/auth", authUser);

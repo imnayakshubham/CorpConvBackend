@@ -365,7 +365,6 @@ const userSchemaConfig = {
     type: String,
     default: null
   },
-
 }
 
 const userSchema = mongoose.Schema(userSchemaConfig, { timestamps: true });

@@ -55,17 +55,26 @@ async function markUserCompletedInJob(key, job, completedUserId) {
 
 const markOnline = async (user_id) => {
     if (!user_id) return;
+    logger.info("markOnline==>", user_id)
+
     // Set Redis key with TTL (e.g., 60 seconds)
     await redis.set(`online:${user_id}`, '1', 'EX', 60);
 };
 
 const markOffline = async (user_id) => {
     if (!user_id) return;
-    logger.info("login===> ", user_id)
+    logger.info("markOffline===> ", user_id)
     // Remove Redis key immediately
     await redis.del(`online:${user_id}`);
     // Update MongoDB on explicit offline only
-    await User.findByIdAndUpdate(user_id, { online: false, last_active_at: new Date() });
+    // Better Auth uses string UUIDs, not ObjectIds
+    await User.findOneAndUpdate({ _id: user_id }, { online: false, last_active_at: new Date() });
+};
+
+const isUserOnline = async (user_id) => {
+    if (!user_id) return false;
+    const exists = await redis.exists(`online:${user_id}`);
+    return exists === 1;
 };
 
 const syncOnlineStatusToDB = async () => {
@@ -84,7 +93,6 @@ const syncOnlineStatusToDB = async () => {
         // Or ensure the _id field matches the type being stored (string vs ObjectId)
 
         // Update using string comparison since Better Auth IDs are strings
-        console.log({ onlineUserIds })
         await User.updateMany(
             { _id: { $in: onlineUserIds } },
             { $set: { online: true, last_active_at: new Date() } }
@@ -104,4 +112,4 @@ const syncOnlineStatusToDB = async () => {
     }
 };
 
-module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, syncOnlineStatusToDB }
+module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, isUserOnline, syncOnlineStatusToDB }
