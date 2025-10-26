@@ -1049,7 +1049,9 @@ router.post('/from-template',
 // ============ DYNAMIC :id ROUTES (Must come after specific routes) ============
 
 // GET /api/survey/:id - Get specific survey (RESTful)
+// Uses optionalAuth to allow public viewing with optional user context
 router.get("/:id",
+    optionalAuth,
     getSurvey
 );
 
