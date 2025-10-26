@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { User } = require("../models/userModel");
-const { tokenkeyName, projection, betterAuthSessionCookie } = require("../constants");
+const { tokenkeyName, projection, getAllBetterAuthSessionCookieNames } = require("../constants");
 const logger = require("./logger");
 
 /**
@@ -47,6 +47,7 @@ function extractTokenFromExpress(req) {
 /**
  * Extract Better Auth session token from Better-auth context
  * Parses cookie header to find the Better Auth session token
+ * Supports multiSession plugin (checks .1, .2, etc.)
  *
  * @param {Object} ctx - Better-auth context object
  * @returns {string|null} Better Auth session token or null if not found
@@ -55,10 +56,18 @@ function extractTokenFromBetterAuth(ctx) {
   const cookieHeader = ctx.request.headers.get("cookie");
   if (!cookieHeader) return null;
 
-  return cookieHeader
-    .split("; ")
-    .find(c => c.startsWith(`${betterAuthSessionCookie}=`))
-    ?.split("=")[1];
+  const cookies = cookieHeader.split("; ");
+  const allSessionCookieNames = getAllBetterAuthSessionCookieNames();
+
+  // Check for any session cookie (primary or multiSession)
+  for (const sessionCookieName of allSessionCookieNames) {
+    const cookie = cookies.find(c => c.startsWith(`${sessionCookieName}=`));
+    if (cookie) {
+      return cookie.split("=")[1];
+    }
+  }
+
+  return null;
 }
 
 module.exports = {

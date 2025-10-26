@@ -195,13 +195,61 @@ const tokenkeyName = `${process.env.APP_ENV}:hushwork-root`;
 const guestKey = `${tokenkeyName}:guest_id`;
 
 // Better Auth session cookie name (separate from JWT to avoid conflicts)
-const betterAuthSessionCookie = `${process.env.APP_ENV}:hushwork-session`;
+const betterAuthSessionCookiePrefix = `${process.env.APP_ENV}.hushwork`;
+
+// Primary Better Auth session cookie name
+const betterAuthSessionCookie = `${betterAuthSessionCookiePrefix}.session_token`;
+
+/**
+ * Get all possible Better Auth session cookie names
+ * Includes primary session and multiSession plugin sessions (.1, .2, etc.)
+ *
+ * @param {number} maxSessions - Maximum number of sessions per user (default: 2)
+ * @returns {string[]} Array of session cookie names
+ */
+const getAllBetterAuthSessionCookieNames = (maxSessions = 2) => {
+  const cookieNames = [betterAuthSessionCookie]; // Primary session
+
+  // Add multiSession cookies (.1, .2, etc.)
+  for (let i = 1; i < maxSessions; i++) {
+    cookieNames.push(`${betterAuthSessionCookie}.${i}`);
+  }
+
+  return cookieNames;
+};
+
+/**
+ * Find Better Auth session cookie from request cookies
+ * Checks primary and multiSession cookies
+ *
+ * @param {Object} cookies - Request cookies object
+ * @returns {string|null} Session token value or null if not found
+ */
+const findBetterAuthSessionCookie = (cookies) => {
+  if (!cookies) return null;
+
+  // Check primary session first
+  if (cookies[betterAuthSessionCookie]) {
+    return cookies[betterAuthSessionCookie];
+  }
+
+  // Check multiSession cookies (.1, .2, etc.)
+  for (let i = 1; i <= 2; i++) {
+    const sessionKey = `${betterAuthSessionCookie}.${i}`;
+    if (cookies[sessionKey]) {
+      return cookies[sessionKey];
+    }
+  }
+
+  return null;
+};
 
 // All authentication-related cookie names
 const authCookieNames = {
   token: tokenkeyName,
-  refreshToken: `${tokenkeyName}:refresh`,
-  betterAuthSession: betterAuthSessionCookie,
+  refreshToken: `${tokenkeyName}: refresh`,
+  betterAuthSession: betterAuthSessionCookie, // Full primary session cookie name
+  betterAuthSessionCookiePrefix,
   isAuthenticated: 'isAuthenticated',
   guest: guestKey
 };
@@ -240,6 +288,9 @@ module.exports = {
   isProd,
   guestKey,
   projection,
+  betterAuthSessionCookiePrefix,
   betterAuthSessionCookie,
+  getAllBetterAuthSessionCookieNames,
+  findBetterAuthSessionCookie,
   authCookieNames
 }

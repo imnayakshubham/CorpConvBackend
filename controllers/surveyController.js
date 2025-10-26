@@ -2,6 +2,14 @@ const { default: mongoose } = require("mongoose");
 const { Survey, Submission } = require("../models/surveyModel");
 const { createDefaultFormSchema } = require("../utils/utils");
 
+// Import service layer
+const conditionalLogicService = require("../services/conditionalLogicService");
+const fieldTransformService = require("../services/fieldTransformService");
+const formValidationService = require("../services/formValidationService");
+const surveyService = require("../services/surveyService");
+const submissionService = require("../services/submissionService");
+const analyticsService = require("../services/analyticsService");
+
 // CREATE Survey API
 const createSurvey = async (req, res) => {
     try {
@@ -54,14 +62,53 @@ const createSurvey = async (req, res) => {
 }
 
 // LIST Surveys API
+/**
+ * List Surveys - Optimized for TanStack useInfiniteQuery
+ *
+ * Query Parameters:
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 12, max: 100)
+ * - showAll: Include all surveys or just user's (default: false)
+ * - status: Filter by status (draft, published, archived)
+ * - search: Search in title and description
+ * - sortBy: Sort field (createdAt, updatedAt, view_count, survey_title)
+ * - sortOrder: Sort direction (asc, desc) - default: desc
+ *
+ * Response Structure (optimized for useInfiniteQuery):
+ * {
+ *   status: "Success",
+ *   message: "Surveys retrieved successfully",
+ *   data: [...surveys...],
+ *   pagination: {
+ *     page: 1,
+ *     limit: 12,
+ *     total: 100,
+ *     totalPages: 9,
+ *     hasMore: true,        // Key for getNextPageParam
+ *     hasPrevious: false,   // Key for getPreviousPageParam
+ *     count: 12,
+ *     nextPage: 2,          // Explicit next page number
+ *     previousPage: null
+ *   }
+ * }
+ */
 const listSurveys = async (req, res) => {
     try {
-        //Get pagination parameters
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 50;
+        // === PAGINATION PARAMETERS ===
+        const page = Math.max(1, parseInt(req.query.page) || 1); // Ensure page >= 1
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 12)); // Default 12, max 100
         const skip = (page - 1) * limit;
 
-        // Build filter object
+        // === SORTING PARAMETERS ===
+        const sortBy = req.query.sortBy || 'updatedAt';
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
+        // Validate sortBy field (prevent NoSQL injection)
+        const allowedSortFields = ['createdAt', 'updatedAt', 'view_count', 'survey_title', 'status'];
+        const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'updatedAt';
+        const sortOptions = { [sortField]: sortOrder };
+
+        // === BUILD FILTER OBJECT ===
         const filter = {
             access: true
         };
@@ -73,38 +120,77 @@ const listSurveys = async (req, res) => {
 
         // Add status filter if provided
         if (req.query.status) {
-            filter.status = req.query.status;
+            const validStatuses = ['draft', 'published', 'archived'];
+            if (validStatuses.includes(req.query.status)) {
+                filter.status = req.query.status;
+            }
         }
 
-        // Add search functionality
-        if (req.query.search) {
-            const searchRegex = { $regex: req.query.search, $options: 'i' };
+        // Add search functionality (case-insensitive)
+        if (req.query.search && req.query.search.trim()) {
+            const searchRegex = { $regex: req.query.search.trim(), $options: 'i' };
             filter.$or = [
                 { survey_title: searchRegex },
-                { survey_description: searchRegex }
+                { survey_description: searchRegex },
+                { slug: searchRegex }
             ];
         }
 
-        const surveys = await Survey.find(filter)
-            .populate('created_by', 'public_user_name user_public_profile_pic _id')
-            .sort({ updatedAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .select('survey_title survey_description status submissions view_count createdAt updatedAt created_by');
+        // === EXECUTE QUERIES IN PARALLEL ===
+        const [surveys, total] = await Promise.all([
+            Survey.find(filter)
+                .populate('created_by', 'public_user_name user_public_profile_pic _id')
+                .sort(sortOptions)
+                .skip(skip)
+                .limit(limit)
+                .select('survey_title survey_description status submissions view_count createdAt updatedAt created_by slug')
+                .lean(), // Use lean for better performance
+            Survey.countDocuments(filter)
+        ]);
 
-        const total = await Survey.countDocuments(filter);
+        // === CALCULATE PAGINATION METADATA ===
         const totalPages = Math.ceil(total / limit);
+        const hasMore = page < totalPages;
+        const hasPrevious = page > 1;
+        const nextPage = hasMore ? page + 1 : null;
+        const previousPage = hasPrevious ? page - 1 : null;
 
-        // Use responseFormatter helper for consistent format
+        // === RESPONSE (Optimized for TanStack useInfiniteQuery) ===
         return res.success({
-            message: 'Surveys retrieved successfully',
-            data: surveys  // Direct array for frontend compatibility
+            message: total === 0
+                ? 'No surveys found'
+                : `Surveys retrieved successfully (page ${page} of ${totalPages})`,
+            data: surveys,
+            pagination: {
+                // Current page info
+                page: page,
+                limit: limit,
+                count: surveys.length,
+
+                // Total counts
+                total: total,
+                totalPages: totalPages,
+
+                // Navigation flags (for useInfiniteQuery)
+                hasMore: hasMore,           // Primary flag for getNextPageParam
+                hasPrevious: hasPrevious,   // For getPreviousPageParam (if needed)
+
+                // Explicit page numbers (alternative to calculating in frontend)
+                nextPage: nextPage,
+                previousPage: previousPage,
+
+                // Metadata for debugging
+                isFirstPage: page === 1,
+                isLastPage: !hasMore,
+                totalFetched: skip + surveys.length,
+                remaining: Math.max(0, total - (skip + surveys.length))
+            }
         });
     } catch (error) {
         console.error('List surveys error:', error);
         return res.error({
             message: 'Unable to fetch surveys',
-            error: error.message,
+            error: process.env.NODE_ENV === 'production' ? undefined : error.message,
             code: 500
         });
     }
@@ -539,6 +625,250 @@ const submitFormLimit = async (req, res, next) => {
     }
 };
 
+// ============ NEW CONTROLLER METHODS USING SERVICE LAYER ============
+
+// Evaluate Conditional Logic
+const evaluateConditionalLogic = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const formData = req.body.formData || {};
+
+        const survey = await Survey.findById(surveyId);
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found',
+                code: 404
+            });
+        }
+
+        // Use service to evaluate logic
+        const fieldStates = conditionalLogicService.getFieldStates(survey, formData);
+        const visibleFields = conditionalLogicService.getVisibleFields(survey, formData);
+        const requiredFields = conditionalLogicService.getRequiredFields(survey, formData);
+
+        return res.success({
+            message: 'Conditional logic evaluated successfully',
+            data: {
+                fieldStates,
+                visibleFields,
+                requiredFields
+            }
+        });
+    } catch (error) {
+        console.error('Evaluate conditional logic error:', error);
+        return res.error({
+            message: 'Failed to evaluate conditional logic',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Transform Field Data
+const transformFieldData = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const { fieldId, value } = req.body;
+
+        const survey = await Survey.findById(surveyId);
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found',
+                code: 404
+            });
+        }
+
+        const field = survey.survey_form.find(f =>
+            (f._id && f._id.toString() === fieldId) || f.id === fieldId
+        );
+
+        if (!field) {
+            return res.error({
+                message: 'Field not found',
+                code: 404
+            });
+        }
+
+        const fieldType = field.type || field.input_type;
+        const transformedValue = fieldTransformService.transformByType(fieldType, value, field);
+
+        return res.success({
+            message: 'Field data transformed successfully',
+            data: {
+                fieldId,
+                originalValue: value,
+                transformedValue,
+                fieldType
+            }
+        });
+    } catch (error) {
+        console.error('Transform field data error:', error);
+        return res.error({
+            message: 'Failed to transform field data',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Validate Form Schema
+const validateFormSchema = async (req, res) => {
+    try {
+        const schema = req.body;
+
+        const validation = formValidationService.validateFormSchema(schema);
+
+        if (!validation.valid) {
+            return res.status(400).error({
+                message: 'Form schema validation failed',
+                errors: validation.errors,
+                code: 400
+            });
+        }
+
+        return res.success({
+            message: 'Form schema is valid',
+            data: { valid: true }
+        });
+    } catch (error) {
+        console.error('Validate form schema error:', error);
+        return res.error({
+            message: 'Failed to validate form schema',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Enhanced Submission with Service Layer
+const submitSurveyWithServices = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const submissionData = req.body.submissions || req.body.data;
+
+        const survey = await Survey.findById(surveyId);
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found',
+                code: 404
+            });
+        }
+
+        // Prepare metadata
+        const metadata = {
+            userId: req.user?._id,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent'),
+            sessionId: req.body.sessionId,
+            source: req.body.source || 'web'
+        };
+
+        // Use submission service to process
+        const submission = await submissionService.processSubmission(
+            survey,
+            submissionData,
+            metadata
+        );
+
+        // Check for spam
+        const spamCheck = await submissionService.detectSpam(submission);
+        if (spamCheck.isSpam) {
+            submission.isSpam = true;
+            submission.spamScore = spamCheck.spamScore;
+            await submission.save();
+        }
+
+        return res.success({
+            message: 'Submission processed successfully',
+            data: submission
+        });
+    } catch (error) {
+        console.error('Submit survey with services error:', error);
+        return res.error({
+            message: 'Failed to process submission',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Get Enhanced Analytics
+const getEnhancedAnalytics = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const options = {
+            startDate: req.query.startDate,
+            endDate: req.query.endDate
+        };
+
+        const analytics = await analyticsService.getAnalytics(surveyId, options);
+        if (!analytics) {
+            return res.error({
+                message: 'Survey not found',
+                code: 404
+            });
+        }
+
+        // Get field-level analytics
+        const fieldAnalytics = await analyticsService.getFieldAnalytics(surveyId);
+
+        return res.success({
+            message: 'Analytics retrieved successfully',
+            data: {
+                ...analytics,
+                fieldAnalytics
+            }
+        });
+    } catch (error) {
+        console.error('Get enhanced analytics error:', error);
+        return res.error({
+            message: 'Failed to retrieve analytics',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+// Export Submissions
+const exportSubmissions = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const format = req.query.format || 'json';
+        const includeSpam = req.query.includeSpam === 'true';
+
+        // Verify ownership
+        const isOwner = await surveyService.checkOwnership(surveyId, req.user._id);
+        if (!isOwner) {
+            return res.error({
+                message: 'Unauthorized: You do not own this survey',
+                code: 403
+            });
+        }
+
+        const data = await submissionService.exportSubmissions(surveyId, format, {
+            includeSpam
+        });
+
+        if (format === 'csv') {
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename="survey-${surveyId}-submissions.csv"`);
+            return res.send(data);
+        }
+
+        return res.success({
+            message: 'Submissions exported successfully',
+            data: data
+        });
+    } catch (error) {
+        console.error('Export submissions error:', error);
+        return res.error({
+            message: 'Failed to export submissions',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
 
 module.exports = {
     createSurvey,
@@ -552,5 +882,12 @@ module.exports = {
     togglePublishStatus,
     getSurveyAnalytics,
     createFormLimit,
-    submitFormLimit
+    submitFormLimit,
+    // New methods using service layer
+    evaluateConditionalLogic,
+    transformFieldData,
+    validateFormSchema,
+    submitSurveyWithServices,
+    getEnhancedAnalytics,
+    exportSubmissions
 }

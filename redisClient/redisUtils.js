@@ -75,6 +75,7 @@ const syncOnlineStatusToDB = async () => {
         const onlineUserIds = keys.map(key => key.split(':')[1]);
 
         if (onlineUserIds.length === 0) {
+            console.log("herrerl")
             return; // No users to sync
         }
 
@@ -84,6 +85,7 @@ const syncOnlineStatusToDB = async () => {
         // Or ensure the _id field matches the type being stored (string vs ObjectId)
 
         // Update using string comparison since Better Auth IDs are strings
+        console.log({ onlineUserIds })
         await User.updateMany(
             { _id: { $in: onlineUserIds } },
             { $set: { online: true, last_active_at: new Date() } }

@@ -21,8 +21,6 @@ function initializeSocket(server) {
         socket.on('disconnect', () => {
             console.log('User disconnected');
             socket.leave(socket._id);
-
-
         });
     });
 }

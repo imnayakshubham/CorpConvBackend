@@ -15,6 +15,9 @@ const connectDB = async () => {
 
     logger.info(`Connected`);
 
+    // Better Auth is initialized lazily on first /api/auth/* request
+    // See index.js line 77-89 for lazy initialization pattern
+
     // Validate encryption configuration
     const { isEncryptionConfigured } = require("../utils/encryption");
     if (!isEncryptionConfigured()) {

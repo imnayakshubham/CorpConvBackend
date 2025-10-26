@@ -3,18 +3,17 @@ const logger = require("../utils/logger.js");
 
 // middleware/responseFormatter.js
 function responseFormatter(req, res, next) {
-    // Success response helper - supports both 'result' and 'data' for backward compatibility
+    // Success response helper - preserves all properties (data, pagination, etc.)
     res.success = ({
         status = 'Success',
         message = 'Success',
-        result = null,
-        data = null  // Accept both result and data
+        ...rest  // Capture all other properties (data, pagination, result, etc.)
     } = {}) => {
         return res.json({
             success: true,           // Frontend expects this flag
             status,
             message,
-            result: data || result     // Use data if provided, fallback to result
+            ...rest                   // Spread all properties to preserve them
         });
     };
 

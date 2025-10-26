@@ -217,13 +217,23 @@ const logout = async (req, res) => {
     if (updatedData) {
       // Clear all authentication cookies (JWT tokens, Better Auth session, etc.)
       const clearOptions = {
-        ...cookieOptions,
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/',
+        domain: isProd ? undefined : 'localhost',
         maxAge: 0
       };
 
+      // Clear legacy JWT tokens
       res.clearCookie(authCookieNames.token, clearOptions);
       res.clearCookie(authCookieNames.refreshToken, clearOptions);
-      res.clearCookie(authCookieNames.betterAuthSession, clearOptions);
+
+      // Clear Better Auth session cookie (format: {prefix}.session_token)
+      const betterAuthSessionCookie = `${authCookieNames.betterAuthSessionCookiePrefix}.session_token`;
+      res.clearCookie(betterAuthSessionCookie, clearOptions);
+
+      // Clear isAuthenticated flag cookie
       res.clearCookie(authCookieNames.isAuthenticated, {
         secure: isProd,
         sameSite: isProd ? 'none' : 'lax',
@@ -960,7 +970,7 @@ const getUserRecommendations = async (req, res) => {
     // Determine nextCursor for pagination
     const nextCursor = limitedItems.length > limit ? limitedItems[limit].user_id.toString() : null;
 
-    return res.sucess({
+    return res.success({
       status: 'Success',
       message: 'Recommendations fetched',
       result: {

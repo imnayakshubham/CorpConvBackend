@@ -4,7 +4,7 @@ const { passkey } = require("better-auth/plugins/passkey");
 const { customSession, admin, organization, multiSession } = require("better-auth/plugins");
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
-const { projection, betterAuthSessionCookie } = require("../constants");
+const { projection, betterAuthSessionCookiePrefix } = require("../constants");
 const { User } = require("../models/userModel");
 const { getOrAddDataInRedis } = require("../redisClient/redisUtils");
 const { decryptUserData } = require("../utils/encryption");
@@ -104,14 +104,15 @@ const addUserToOrganization = async (userId, organizationId, role = "member") =>
 };
 
 // Factory function to create auth instance after DB connection
-const createAuth = () => {
+const createAuth = (connection) => {
+  const connectionConfig = connection ?? mongoose.connection.db
   // Ensure mongoose is connected
-  if (!mongoose.connection.db) {
+  if (!connectionConfig) {
     throw new Error("MongoDB must be connected before initializing better-auth");
   }
 
   return betterAuth({
-    database: mongodbAdapter(mongoose.connection.db),
+    database: mongodbAdapter(connectionConfig),
     secret: process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET_KEY,
     baseURL,
     appName: "hushwork",
@@ -391,7 +392,7 @@ const createAuth = () => {
     },
 
     advanced: {
-      cookiePrefix: "hushwork",
+      cookiePrefix: betterAuthSessionCookiePrefix,
       cookies: {
         session_token: {
           attributes: {

@@ -70,16 +70,22 @@ app.use(cors({
 }));
 
 
-// Middleware to handle better-auth routes (deferred initialization)
+// Middleware to handle better-auth routes (lazy initialization)
+// Better Auth is initialized on first /api/auth/* request to ensure MongoDB is connected
 let authHandler = null;
+let authInitialized = false;
 
-// Middleware to handle better-auth routes (deferred initialization)
 app.all("/api/auth/*", async (req, res, next) => {
   if (!authHandler) {
     try {
       const auth = getAuth();
       authHandler = toNodeHandler(auth);
-      logger.info("Better-auth initialized with MongoDB adapter");
+
+      // Only log once on first initialization
+      if (!authInitialized) {
+        logger.info("✓ Better-auth initialized with MongoDB adapter");
+        authInitialized = true;
+      }
     } catch (error) {
       logger.error("Failed to initialize better-auth:", error);
       return res.status(500).json({ error: "Auth service not available" });

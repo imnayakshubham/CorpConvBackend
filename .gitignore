@@ -6,3 +6,4 @@ node_modules
 .env.*
 swagger_output.json
 CLAUDE.md
+docs

@@ -1,5 +1,13 @@
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions, authCookieNames, betterAuthSessionCookie, projection } = require("../constants/index.js");
+const {
+  tokenkeyName,
+  cookieOptions,
+  authCookieNames,
+  betterAuthSessionCookie,
+  getAllBetterAuthSessionCookieNames,
+  findBetterAuthSessionCookie,
+  projection
+} = require("../constants/index.js");
 const { validateJwtAndGetUser, extractTokenFromExpress } = require("../utils/jwtAuth");
 const { getAuth } = require("../config/auth.js");
 const { User } = require("../models/userModel");
@@ -10,6 +18,7 @@ const isProd = process.env.APP_ENV === 'PROD';
  * Clear all authentication cookies
  *
  * Primary: Better Auth session cookie
+ * MultiSession: All additional session cookies (.1, .2, etc.)
  * Legacy: JWT tokens (for backward compatibility)
  *
  * @param {Object} res - Express response object
@@ -20,8 +29,11 @@ const clearAuthCookies = (res) => {
     maxAge: 0
   };
 
-  // Clear Better Auth session (primary authentication)
-  res.clearCookie(authCookieNames.betterAuthSession, clearOptions);
+  // Clear all Better Auth session cookies (primary + multiSession)
+  const allSessionCookies = getAllBetterAuthSessionCookieNames();
+  allSessionCookies.forEach(cookieName => {
+    res.clearCookie(cookieName, clearOptions);
+  });
 
   // Clear legacy JWT cookies (for backward compatibility)
   res.clearCookie(authCookieNames.token, clearOptions);
@@ -56,8 +68,10 @@ const clearAuthCookies = (res) => {
  */
 const protect = asyncHandler(async (req, res, next) => {
   // Try Better Auth session first (primary auth method)
-  const betterAuthSession = req.cookies?.['better-auth.session_token'];
-  if (betterAuthSession) {
+  // Check for any session cookie (primary or multiSession .1, .2, etc.)
+  const sessionToken = findBetterAuthSessionCookie(req.cookies);
+
+  if (sessionToken) {
     try {
       const auth = getAuth();
       const session = await auth.api.getSession({ headers: req.headers });
@@ -85,6 +99,8 @@ const protect = asyncHandler(async (req, res, next) => {
     }
   }
 
+  // No valid session found
+  return res.status(401).send({ error: 'Unauthorized', message: 'No valid session found' });
 });
 
 /**

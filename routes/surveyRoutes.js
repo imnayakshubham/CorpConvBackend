@@ -16,7 +16,13 @@ const {
     togglePublishStatus,
     getSurveyAnalytics,
     createFormLimit,
-    submitFormLimit
+    submitFormLimit,
+    evaluateConditionalLogic,
+    transformFieldData,
+    validateFormSchema,
+    submitSurveyWithServices,
+    getEnhancedAnalytics,
+    exportSubmissions
 } = require("../controllers/surveyController");
 
 // ============ VALIDATION MIDDLEWARE ============
@@ -268,6 +274,408 @@ router.get('/:id/analytics',
         handleValidationErrors
     ],
     getSurveyAnalytics
+);
+
+// ============ SERVICE-BASED ENHANCED FEATURES ============
+
+// POST /api/survey/:id/evaluate-logic - Evaluate conditional logic for a form
+router.post('/:id/evaluate-logic',
+    optionalAuth,  // Optional auth for public forms
+    [
+        param('id').isMongoId().withMessage('Invalid survey ID'),
+        body('formData').isObject().withMessage('Form data must be an object'),
+        handleValidationErrors
+    ],
+    evaluateConditionalLogic
+);
+
+// POST /api/survey/:id/transform-field - Transform a field value
+router.post('/:id/transform-field',
+    optionalAuth,
+    [
+        param('id').isMongoId().withMessage('Invalid survey ID'),
+        body('fieldType').isString().withMessage('Field type is required'),
+        body('value').exists().withMessage('Value is required'),
+        body('fieldConfig').optional().isObject(),
+        handleValidationErrors
+    ],
+    transformFieldData
+);
+
+// POST /api/survey/validate-schema - Validate form schema
+router.post('/validate-schema',
+    authenticateToken,
+    [
+        body('schema').isObject().withMessage('Schema must be an object'),
+        handleValidationErrors
+    ],
+    validateFormSchema
+);
+
+// POST /api/survey/:id/submit-enhanced - Submit with spam detection and services
+router.post('/:id/submit-enhanced',
+    optionalAuth,
+    submitFormLimit,
+    [
+        param('id').isMongoId().withMessage('Invalid survey ID'),
+        body('submissionData').isObject().withMessage('Submission data is required'),
+        body('metadata').optional().isObject(),
+        handleValidationErrors
+    ],
+    submitSurveyWithServices
+);
+
+// GET /api/survey/:id/analytics-enhanced - Get enhanced analytics with field-level data
+router.get('/:id/analytics-enhanced',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid survey ID'),
+        query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+        query('endDate').optional().isISO8601().withMessage('Invalid end date'),
+        handleValidationErrors
+    ],
+    getEnhancedAnalytics
+);
+
+// GET /api/survey/:id/export-submissions - Export submissions in various formats
+router.get('/:id/export-submissions',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid survey ID'),
+        query('format').optional().isIn(['json', 'csv']).withMessage('Invalid format (json or csv)'),
+        query('includeSpam').optional().isBoolean().withMessage('includeSpam must be boolean'),
+        handleValidationErrors
+    ],
+    exportSubmissions
+);
+
+// ============ SUBMISSION MANAGEMENT (Consolidated from submissions.js) ============
+
+// Note: These routes provide detailed submission management capabilities.
+// They complement the basic submission endpoints above with advanced features like
+// spam management, individual submission operations, and detailed statistics.
+
+// GET /api/survey/submissions/:formId/detailed - Get detailed submissions with stats
+router.get('/submissions/:formId/detailed',
+    authenticateToken,
+    [
+        param('formId').isMongoId().withMessage('Invalid form ID'),
+        query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+        query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+        query('includeSpam').optional().isBoolean().withMessage('includeSpam must be a boolean'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        try {
+            const Submission = require('../models/Submission');
+            const { Survey } = require('../models/surveyModel');
+
+            const { formId } = req.params;
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 20;
+            const skip = (page - 1) * limit;
+            const includeSpam = req.query.includeSpam === 'true';
+
+            // Check if survey exists and user owns it
+            const survey = await Survey.findOne({
+                _id: formId,
+                $or: [
+                    { created_by: req.user._id },
+                    { user_id: req.user._id }
+                ]
+            });
+
+            if (!survey) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Survey not found or access denied'
+                });
+            }
+
+            // Build filter
+            const filter = {
+                $or: [{ survey_id: formId }, { formId }]
+            };
+            if (!includeSpam) {
+                filter.isSpam = { $ne: true };
+            }
+
+            const submissions = await Submission.find(filter)
+                .sort({ submittedAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .select('-__v');
+
+            const total = await Submission.countDocuments(filter);
+            const totalPages = Math.ceil(total / limit);
+
+            // Get submission statistics
+            const stats = await Submission.aggregate([
+                { $match: filter },
+                {
+                    $group: {
+                        _id: null,
+                        total_submissions: { $sum: 1 },
+                        validSubmissions: {
+                            $sum: { $cond: [{ $eq: ['$isValid', true] }, 1, 0] }
+                        },
+                        spamSubmissions: {
+                            $sum: { $cond: [{ $eq: ['$isSpam', true] }, 1, 0] }
+                        },
+                        avgCompletionTime: { $avg: '$completionTime' }
+                    }
+                }
+            ]);
+
+            res.json({
+                success: true,
+                data: {
+                    submissions,
+                    pagination: {
+                        page,
+                        limit,
+                        total,
+                        totalPages,
+                        hasNext: page < totalPages,
+                        hasPrev: page > 1
+                    },
+                    statistics: stats[0] || {
+                        total_submissions: 0,
+                        validSubmissions: 0,
+                        spamSubmissions: 0,
+                        avgCompletionTime: 0
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching detailed submissions:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch submissions'
+            });
+        }
+    }
+);
+
+// GET /api/survey/submission/single/:id - Get a specific submission by ID
+router.get('/submission/single/:id',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid submission ID'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        try {
+            const Submission = require('../models/Submission');
+            const { Survey } = require('../models/surveyModel');
+
+            const submission = await Submission.findById(req.params.id)
+                .select('-__v');
+
+            if (!submission) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Submission not found'
+                });
+            }
+
+            // Verify ownership
+            const surveyId = submission.survey_id || submission.formId;
+            const survey = await Survey.findOne({
+                _id: surveyId,
+                $or: [
+                    { created_by: req.user._id },
+                    { user_id: req.user._id }
+                ]
+            });
+
+            if (!survey) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+
+            res.json({
+                success: true,
+                data: submission
+            });
+        } catch (error) {
+            console.error('Error fetching submission:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch submission'
+            });
+        }
+    }
+);
+
+// DELETE /api/survey/submission/single/:id - Delete a specific submission
+router.delete('/submission/single/:id',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid submission ID'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        try {
+            const Submission = require('../models/Submission');
+            const { Survey } = require('../models/surveyModel');
+
+            const submission = await Submission.findById(req.params.id);
+
+            if (!submission) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Submission not found'
+                });
+            }
+
+            // Verify ownership
+            const surveyId = submission.survey_id || submission.formId;
+            const survey = await Survey.findOne({
+                _id: surveyId,
+                $or: [
+                    { created_by: req.user._id },
+                    { user_id: req.user._id }
+                ]
+            });
+
+            if (!survey) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+
+            await submission.deleteOne();
+
+            res.json({
+                success: true,
+                message: 'Submission deleted successfully'
+            });
+        } catch (error) {
+            console.error('Error deleting submission:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to delete submission'
+            });
+        }
+    }
+);
+
+// POST /api/survey/submission/single/:id/mark-spam - Mark submission as spam
+router.post('/submission/single/:id/mark-spam',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid submission ID'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        try {
+            const Submission = require('../models/Submission');
+            const { Survey } = require('../models/surveyModel');
+
+            const submission = await Submission.findById(req.params.id);
+
+            if (!submission) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Submission not found'
+                });
+            }
+
+            // Verify ownership
+            const surveyId = submission.survey_id || submission.formId;
+            const survey = await Survey.findOne({
+                _id: surveyId,
+                $or: [
+                    { created_by: req.user._id },
+                    { user_id: req.user._id }
+                ]
+            });
+
+            if (!survey) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+
+            submission.isSpam = true;
+            submission.spamScore = 100;
+            await submission.save();
+
+            res.json({
+                success: true,
+                data: submission,
+                message: 'Submission marked as spam'
+            });
+        } catch (error) {
+            console.error('Error marking submission as spam:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to mark submission as spam'
+            });
+        }
+    }
+);
+
+// POST /api/survey/submission/single/:id/unmark-spam - Unmark submission as spam
+router.post('/submission/single/:id/unmark-spam',
+    authenticateToken,
+    [
+        param('id').isMongoId().withMessage('Invalid submission ID'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        try {
+            const Submission = require('../models/Submission');
+            const { Survey } = require('../models/surveyModel');
+
+            const submission = await Submission.findById(req.params.id);
+
+            if (!submission) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Submission not found'
+                });
+            }
+
+            // Verify ownership
+            const surveyId = submission.survey_id || submission.formId;
+            const survey = await Survey.findOne({
+                _id: surveyId,
+                $or: [
+                    { created_by: req.user._id },
+                    { user_id: req.user._id }
+                ]
+            });
+
+            if (!survey) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+
+            submission.isSpam = false;
+            submission.spamScore = 0;
+            await submission.save();
+
+            res.json({
+                success: true,
+                data: submission,
+                message: 'Submission unmarked as spam'
+            });
+        } catch (error) {
+            console.error('Error unmarking submission as spam:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to unmark submission as spam'
+            });
+        }
+    }
 );
 
 // GET /api/survey/:id/verify-ownership - Verify survey ownership
