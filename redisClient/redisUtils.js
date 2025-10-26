@@ -75,7 +75,6 @@ const syncOnlineStatusToDB = async () => {
         const onlineUserIds = keys.map(key => key.split(':')[1]);
 
         if (onlineUserIds.length === 0) {
-            console.log("herrerl")
             return; // No users to sync
         }
 
