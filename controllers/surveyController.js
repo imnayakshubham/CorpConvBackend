@@ -115,6 +115,14 @@ const listSurveys = async (req, res) => {
 
         // Only filter by user if not showing all surveys
         if (req.query.showAll !== 'true') {
+            // If user is not authenticated, return error for non-showAll requests
+            if (!req.user || !req.user._id) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Unauthorized',
+                    message: 'Authentication required to view your surveys. Use showAll=true for public surveys.'
+                });
+            }
             filter.created_by = req.user._id;  // Only get surveys created by the authenticated user
         }
 

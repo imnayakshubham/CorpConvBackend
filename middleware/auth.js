@@ -18,17 +18,41 @@ const authenticateToken = protect;
  * Attempts to authenticate user if token is present, but doesn't block if absent
  */
 const optionalAuth = async (req, res, next) => {
+  const { findBetterAuthSessionCookie, projection } = require('../constants');
+  const { getAuth } = require("../config/auth.js");
+  const { User } = require('../models/userModel');
+
   try {
-    // Try to authenticate, but don't block if it fails
-    await protect(req, res, (err) => {
-      if (err) {
-        // Clear any error and continue without authentication
-        req.user = null;
+    // Check for session cookie
+    const sessionToken = findBetterAuthSessionCookie(req.cookies);
+
+    if (sessionToken) {
+      try {
+        const auth = getAuth();
+        const session = await auth.api.getSession({ headers: req.headers });
+
+        if (session && session.user) {
+          // Fetch full user data from database
+          const user = await User.findOne(
+            { _id: session.user._id },
+            projection // Use same projection as protect middleware
+          );
+
+          if (user && user.access !== false) {
+            req.user = user; // Attach user to request
+          }
+        }
+      } catch (authError) {
+        // Authentication failed, but that's OK for optional auth
+        console.log('Optional auth - session validation failed:', authError.message);
       }
-      next();
-    });
+    }
+
+    // Always continue, even if authentication failed
+    next();
   } catch (error) {
-    // Authentication failed but that's OK for optional auth
+    // Unexpected error, but still continue for optional auth
+    console.error('Optional auth middleware error:', error);
     req.user = null;
     next();
   }

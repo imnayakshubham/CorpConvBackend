@@ -94,8 +94,9 @@ router.post("/create-survey",
 );
 
 // LIST Surveys - Legacy endpoint
+// Uses optionalAuth to allow public access when showAll=true
 router.get("/survey-list",
-    protect,
+    optionalAuth,
     listSurveys
 );
 
@@ -134,8 +135,9 @@ router.post('/create',
 );
 
 // LIST Surveys - enhanced with optional pagination info
+// Uses optionalAuth to allow public access when showAll=true
 router.get('/list',
-    authenticateToken,
+    optionalAuth,
     [
         query('page').optional().isInt({ min: 1 }),
         query('limit').optional().isInt({ min: 1, max: 100 }),
