@@ -14,7 +14,7 @@ function responseFormatter(req, res, next) {
             success: true,           // Frontend expects this flag
             status,
             message,
-            data: data || result     // Use data if provided, fallback to result
+            result: data || result     // Use data if provided, fallback to result
         });
     };
 
@@ -31,7 +31,7 @@ function responseFormatter(req, res, next) {
             status,
             message,
             error,
-            data: null               // Consistent with frontend expectations
+            result: null               // Consistent with frontend expectations
         });
     };
 

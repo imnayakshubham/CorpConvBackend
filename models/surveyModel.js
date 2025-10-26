@@ -1,51 +1,54 @@
 const mongoose = require('mongoose');
 
-const submissionSchema = new mongoose.Schema({
-    survey_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Survey',
-        required: true
-    },
-    survey_answered_by: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    survey_created_by: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    submissions: [{
-        type: mongoose.Schema.Types.Mixed,
-        required: true
-    }],
-    access: { type: Boolean, default: true }
-}, { timestamps: true });
+// Import Submission model from separate file
+// Note: Submission schema is now defined in ./Submission.js for better modularity
+const Submission = require('./Submission');
 
-// New schemas for enhanced features
+// Enhanced conditional logic schema with support for nested AND/OR groups
 const conditionalLogicSchema = new mongoose.Schema({
-    field_id: {
+    // Type of logic group
+    type: {
         type: String,
-        required: true
+        enum: ['AND', 'OR', 'CONDITION'],
+        default: 'CONDITION'
     },
-    condition: {
-        field_id: {
-            type: String,
-            required: true
-        },
-        operator: {
-            type: String,
-            enum: ['equals', 'contains', 'greater_than', 'less_than', 'not_equals'],
-            required: true
-        },
-        value: mongoose.Schema.Types.Mixed
+
+    // For simple conditions (when type is 'CONDITION')
+    field_id: String,
+    operator: {
+        type: String,
+        enum: [
+            'equals', 'not_equals',
+            'contains', 'not_contains',
+            'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal',
+            'is_empty', 'is_not_empty',
+            'starts_with', 'ends_with'
+        ]
     },
+    value: mongoose.Schema.Types.Mixed,
     action: {
         type: String,
-        enum: ['show', 'hide', 'require', 'disable'],
-        required: true
-    }
+        enum: ['show', 'hide', 'require', 'disable', 'enable']
+    },
+
+    // For complex conditions (when type is 'AND' or 'OR')
+    conditions: [{
+        field_id: String,
+        operator: {
+            type: String,
+            enum: [
+                'equals', 'not_equals',
+                'contains', 'not_contains',
+                'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal',
+                'is_empty', 'is_not_empty',
+                'starts_with', 'ends_with'
+            ]
+        },
+        value: mongoose.Schema.Types.Mixed
+    }],
+
+    // Support for nested groups (recursive structure)
+    groups: [this]
 });
 
 const fieldValidationSchema = new mongoose.Schema({
@@ -142,7 +145,17 @@ const surveyFormFieldSchema = new mongoose.Schema({
 
     type: {
         type: String,
-        enum: ['text', 'email', 'number', 'select', 'checkbox', 'radio', 'textarea', 'file', 'date', 'phone', 'url'],
+        enum: [
+            // Basic input types
+            'text', 'email', 'number', 'textarea', 'url', 'phone', 'date', 'time',
+            // Selection types
+            'select', 'checkbox', 'radio',
+            // File types
+            'file',
+            // Advanced input types (previously missing from enum)
+            'rating', 'slider', 'tags', 'scheduler', 'address', 'social',
+            'signature', 'statement', 'banner', 'poll'
+        ],
         // Map from input_type if type is not provided
         default: function () {
             if (this.input_type) {
@@ -157,9 +170,21 @@ const surveyFormFieldSchema = new mongoose.Schema({
                     'textarea': 'textarea',
                     'file': 'file',
                     'date': 'date',
+                    'time': 'time',
                     'tel': 'phone',
                     'phone': 'phone',
-                    'url': 'url'
+                    'url': 'url',
+                    // Map new types
+                    'rating': 'rating',
+                    'slider': 'slider',
+                    'tags': 'tags',
+                    'scheduler': 'scheduler',
+                    'address': 'address',
+                    'social': 'social',
+                    'signature': 'signature',
+                    'statement': 'statement',
+                    'banner': 'banner',
+                    'poll': 'poll'
                 };
                 return typeMap[this.input_type] || 'text';
             }
@@ -378,7 +403,9 @@ surveySchema.methods.incrementViewCount = function () {
     return this.save();
 };
 
+// Export Survey model
+// Note: Submission is now exported from ./Submission.js
 module.exports = {
     Survey: mongoose.model('Survey', surveySchema),
-    Submission: mongoose.model('Submission', submissionSchema)
+    Submission: Submission // Re-export for backward compatibility
 };

@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const attachmentSchema = new mongoose.Schema({
   field_id: {
@@ -25,17 +25,50 @@ const attachmentSchema = new mongoose.Schema({
 });
 
 const submissionSchema = new mongoose.Schema({
+  // Support both formId (new) and survey_id (old) for backward compatibility
   formId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Form',
-    required: true
+    ref: 'Survey',
+    required: function() {
+      return !this.survey_id;
+    }
+  },
+  survey_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Survey',
+    required: function() {
+      return !this.formId;
+    }
   },
 
   // Response data - flexible structure to handle any form fields
+  // Supports both 'data' (new Map format) and 'submissions' (old array format)
   data: {
     type: Map,
     of: mongoose.Schema.Types.Mixed,
-    required: true
+    required: function() {
+      return !this.submissions;
+    }
+  },
+  submissions: [{
+    type: mongoose.Schema.Types.Mixed,
+    required: function() {
+      return !this.data;
+    }
+  }],
+
+  // User references - support both formats
+  survey_answered_by: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  survey_created_by: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  user_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
 
   // Metadata
@@ -71,12 +104,6 @@ const submissionSchema = new mongoose.Schema({
     default: 'web'
   },
 
-  // Future user association
-  user_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-
   // Spam detection
   isSpam: {
     type: Boolean,
@@ -85,6 +112,12 @@ const submissionSchema = new mongoose.Schema({
   spamScore: {
     type: Number,
     default: 0
+  },
+
+  // Backward compatibility
+  access: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true
@@ -92,25 +125,61 @@ const submissionSchema = new mongoose.Schema({
 
 // Indexes for better query performance
 submissionSchema.index({ formId: 1, submittedAt: -1 });
+submissionSchema.index({ survey_id: 1, createdAt: -1 }); // Old format
 submissionSchema.index({ formId: 1, isSpam: 1 });
 submissionSchema.index({ sessionId: 1 });
+submissionSchema.index({ survey_answered_by: 1 });
 
-// Update form analytics after submission
-submissionSchema.post('save', async function (doc) {
+// Virtual to unify formId and survey_id
+submissionSchema.virtual('unifiedFormId').get(function() {
+  return this.formId || this.survey_id;
+});
+
+// Virtual to unify data and submissions
+submissionSchema.virtual('unifiedData').get(function() {
+  if (this.data) {
+    return this.data instanceof Map ? Object.fromEntries(this.data) : this.data;
+  }
+  return this.submissions;
+});
+
+// Pre-save hook to sync formId and survey_id
+submissionSchema.pre('save', function(next) {
+  // Sync formId <-> survey_id
+  if (this.formId && !this.survey_id) {
+    this.survey_id = this.formId;
+  } else if (this.survey_id && !this.formId) {
+    this.formId = this.survey_id;
+  }
+
+  // Sync user_id if set
+  if (this.survey_answered_by && !this.user_id) {
+    this.user_id = this.survey_answered_by;
+  }
+
+  next();
+});
+
+// Update form/survey analytics after submission
+submissionSchema.post('save', async function(doc) {
   try {
-    const Form = mongoose.model('Form');
-    await Form.findByIdAndUpdate(
-      doc.formId,
-      {
-        $inc: { 'analytics.total_submissions': 1 },
-        $set: { 'analytics.last_submission_at': new Date() }
-      }
-    );
+    const Survey = mongoose.model('Survey');
+    const targetId = doc.formId || doc.survey_id;
+
+    if (targetId) {
+      await Survey.findByIdAndUpdate(
+        targetId,
+        {
+          $inc: { 'analytics.total_submissions': 1 },
+          $set: { 'analytics.last_submission_at': new Date() }
+        }
+      );
+    }
   } catch (error) {
-    console.error('Error updating form analytics:', error);
+    console.error('Error updating survey analytics:', error);
   }
 });
 
 const Submission = mongoose.model('Submission', submissionSchema);
 
-export default Submission;
+module.exports = Submission;
