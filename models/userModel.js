@@ -117,7 +117,7 @@ const userSchemaConfig = {
   is_email_verified: {
     type: Boolean,
     default: false,
-    required: [true, "Email Verfication key is required"],
+    required: [true, "Email Verification key is required"],
   },
   meta_data: {
     type: Object,
@@ -298,7 +298,7 @@ const userSchemaConfig = {
   // Encryption flag - indicates if sensitive data is encrypted
   is_masked: {
     type: Boolean,
-    default: true,
+    default: false,
     required: true,
     index: true  // For querying encrypted vs plain users
   },

@@ -46,7 +46,6 @@ async function start() {
             // Fetch target user if user_id specified
             let target = null;
             if (user_id) {
-                console.log({ user_id })
                 target = await User.findById(user_id, projection).lean();
 
                 // If target user missing, nothing to recommend

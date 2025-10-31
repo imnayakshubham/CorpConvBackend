@@ -390,7 +390,6 @@ const updateUserProfileDetails = async (req, res) => {
 
 const getUserInfo = async (req, res) => {
   try {
-    logger.info("req.params", req.params)
     const user_id = req.params?._id
     if (!user_id) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
