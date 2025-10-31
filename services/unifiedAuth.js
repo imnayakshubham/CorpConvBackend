@@ -43,7 +43,7 @@ async function sendUnifiedAuthEmail(email) {
     });
 
     // Generate magic link URL
-    const baseUrl = process.env.BETTER_AUTH_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || 'http://localhost:3005';
+    const baseUrl = process.env.FRONTEND_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || 'http://localhost:3005';
     const magicUrl = `${baseUrl}/verify?token=${token}&email=${encodeURIComponent(email)}&type=magic-link`;
 
     logger.info(`Generated auth credentials for ${email}`);

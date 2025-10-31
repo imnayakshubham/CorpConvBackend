@@ -278,7 +278,7 @@ const projection = {
   hobbies: 1,
   last_active_at: 1,
   is_admin: 1,
-  access: 1
+  access: 1,
 };
 
 module.exports = {

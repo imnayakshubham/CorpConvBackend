@@ -7,7 +7,8 @@ const logger = require("../utils/logger");
 const { projection, betterAuthSessionCookiePrefix } = require("../constants");
 const { User } = require("../models/userModel");
 const { getOrAddDataInRedis } = require("../redisClient/redisUtils");
-const { decryptUserData } = require("../utils/encryption");
+const { decryptUserData, encrypt } = require("../utils/encryption");
+const { findUserByEmail, emailExists } = require("../utils/emailComparison");
 const Company = require("../models/companySchema");
 const { toTitleCase, keepOnlyNumbers } = require("../utils/utils");
 
@@ -20,9 +21,9 @@ const generateOTP = () => {
 const otpStore = new Map();
 
 // Validate and provide fallback for baseURL
-const baseURL = process.env.BETTER_AUTH_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || "http://localhost:5000";
-if (!process.env.BETTER_AUTH_URL && !process.env.ALLOW_ORIGIN) {
-  logger.warn(`BETTER_AUTH_URL not configured - using fallback: ${baseURL}`);
+const baseURL = process.env.FRONTEND_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || "http://localhost:5000";
+if (!process.env.FRONTEND_URL && !process.env.ALLOW_ORIGIN) {
+  logger.warn(`FRONTEND_URL not configured - using fallback: ${baseURL}`);
 }
 
 const allowedOrgins = process.env.ALLOW_ORIGIN ? process.env.ALLOW_ORIGIN.split(",").map(o => o.trim()) : [];
@@ -427,7 +428,7 @@ const createAuth = (connection) => {
 
         rpName: process.env.APP_NAME || "Hushwork",
         rpID: process.env.APP_ENV === 'PROD'
-          ? new URL(process.env.BETTER_AUTH_URL || '').hostname
+          ? new URL(process.env.FRONTEND_URL || '').hostname
           : "localhost",
         origin: allowedOrgins,
       }),
@@ -828,7 +829,7 @@ const generateMagicLink = async (email) => {
       type: 'magic-link'
     });
 
-    const baseUrl = process.env.BETTER_AUTH_URL || process.env.ALLOW_ORIGIN?.split(',')[0];
+    const baseUrl = process.env.FRONTEND_URL || process.env.ALLOW_ORIGIN?.split(',')[0];
     const magicUrl = `${baseUrl}/verify?token=${token}&email=${encodeURIComponent(email)}`;
 
     return { success: true, url: magicUrl, token };
@@ -866,6 +867,14 @@ const responseFormatterForAuth = (result) => {
 
 const createUser = async (userData) => {
   try {
+    // Check for duplicate email using encryption-aware comparison
+    const isDuplicate = await emailExists(userData.email);
+    if (isDuplicate) {
+      const error = new Error('Email already registered');
+      error.code = 'DUPLICATE_EMAIL';
+      throw error;
+    }
+
     const emailSplit = userData.email.split("@");
     const domain = emailSplit[1].split(".")[0];
     const fullDomain = emailSplit[1];
@@ -1001,7 +1010,7 @@ const getOrAdduser = async (userData) => {
     let payload = {};
 
     if (userData.email) {
-      payload.user_email_id = userData.email;
+      payload.user_email_id = encrypt(userData.email);
     }
 
     const user_id = userData.userId || userData._id;
@@ -1018,11 +1027,13 @@ const getOrAdduser = async (userData) => {
       }
     }
 
+
     const foundUser = await User.findOne({
       $or: [
-        { ...payload },
+        { ...payload, user_email_id: userData.email },
       ]
     }, projection).exec();
+
     if (foundUser) {
       const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${foundUser._id}`;
       const userActualData = responseFormatterForAuth(foundUser);

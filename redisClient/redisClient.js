@@ -32,7 +32,7 @@ function getRedisInstance() {
 
 
     redis.on("error", (err) => {
-        console.error("Redis error:", err);
+        // console.error("Redis error:", err);
         // Optionally you might not want to throw here in dev, but rather handle gracefully
         if (isProd) {
             throw err;

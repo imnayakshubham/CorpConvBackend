@@ -17,6 +17,7 @@ const Recommendation = require("../models/Recommendation.js");
 const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
 const logger = require("../utils/logger.js");
 const { decryptUserData } = require("../utils/encryption");
+const { findUserByEmail } = require("../utils/emailComparison");
 const { getAuth, generateMagicLink, verifyMagicToken, verifyOTP, responseFormatterForAuth } = require("../config/auth.js");
 
 
@@ -139,12 +140,12 @@ const authUser = async (req, res) => {
     if (!user_email_id) {
       return res.status(200).json({ message: "Please Fill all the details", status: "Failed" });
     }
-    const userData = await User.findOne({
-      $or: [
-        { user_email_id },
-        { secondary_email_id: user_email_id }
-      ]
-    }, projection);
+
+    // Use encryption-aware email comparison
+    const userData = await findUserByEmail(user_email_id, {
+      projection,
+      includeSecondary: true
+    });
 
     if (userData) {
 
@@ -1252,8 +1253,8 @@ const verifyAuth = asyncHandler(async (req, res) => {
       });
     }
 
-    // Find or create user
-    let user = await User.findOne({ user_email_id: email });
+    // Find or create user using encryption-aware email comparison
+    let user = await findUserByEmail(email);
 
     if (!user) {
       // Create new user

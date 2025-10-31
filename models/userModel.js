@@ -106,7 +106,7 @@ const userSchemaConfig = {
   },
   is_anonymous: {
     type: Boolean,
-    default: false,
+    default: true,
   },
   user_email_id: {
     type: String,
@@ -298,7 +298,7 @@ const userSchemaConfig = {
   // Encryption flag - indicates if sensitive data is encrypted
   is_masked: {
     type: Boolean,
-    default: false,
+    default: true,
     required: true,
     index: true  // For querying encrypted vs plain users
   },
@@ -377,13 +377,20 @@ userSchema.index({ profession: 1, field_of_study: 1, last_active_at: -1 });
 
 // Encryption middleware - auto-encrypt sensitive fields before saving
 userSchema.pre('save', async function (next) {
+  // Skip encryption if is_masked is explicitly set to false
+  if (this.is_masked === false) {
+    // User opted out of encryption, save as plain text
+    return next();
+  }
+
   // Skip if already masked and no sensitive fields modified
-  if (this.is_masked &&
+  if (this.is_masked === true &&
     !this.isModified('user_email_id') &&
     !this.isModified('actual_user_name') &&
     !this.isModified('user_phone_number') &&
     !this.isModified('secondary_email_id') &&
-    !this.isModified('user_location')) {
+    !this.isModified('user_location') &&
+    !this.isModified('is_masked')) {
     return next();
   }
 
@@ -391,6 +398,11 @@ userSchema.pre('save', async function (next) {
   if (!process.env.ENCRYPTION_KEY) {
     console.warn('⚠️  ENCRYPTION_KEY not configured - data will not be encrypted');
     this.is_masked = false;
+    return next();
+  }
+
+  // Only encrypt if is_masked is true (default or explicitly set)
+  if (this.is_masked !== true) {
     return next();
   }
 

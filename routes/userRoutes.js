@@ -28,6 +28,7 @@ const { protect } = require("../middleware/authMiddleware");
 const { verifyOTP, verifyMagicToken } = require("../config/auth");
 const { MagicLink, OTP } = require("../models/authModels");
 const { sendUnifiedAuthEmail, verifyUnifiedAuth } = require("../services/unifiedAuth");
+const { findUserByEmail } = require("../utils/emailComparison");
 const asyncHandler = require("express-async-handler");
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
@@ -285,9 +286,9 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
       const result = verifyMagicToken(email, token);
 
       if (result.success) {
-        // Find or create user
+        // Find or create user using encryption-aware email comparison
         const { User } = require("../models/userModel");
-        let user = await User.findOne({ user_email_id: email });
+        let user = await findUserByEmail(email);
 
         if (!user) {
           // Create new user for magic link sign-in
@@ -367,9 +368,9 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
     const result = verifyOTP(email, otp);
 
     if (result.success) {
-      // Find or create user (similar to magic link logic)
+      // Find or create user using encryption-aware email comparison
       const { User } = require("../models/userModel");
-      let user = await User.findOne({ user_email_id: email });
+      let user = await findUserByEmail(email);
 
       if (!user) {
         // Create new user logic (same as above)
@@ -445,7 +446,7 @@ router.route("/verify").get(asyncHandler(async (req, res) => {
 
 router.route("/user").get(protect, allUsers);
 router.route('/user/recommend/:user_id?').get(getUserRecommendations);
-router.route("/user/:id").get(getUserInfo)
+router.route("/user/:_id").get(getUserInfo)
 router.route("/followers").get(protect, getfollowersList);
 router.route("/users/connected-online-status").get(protect, getConnectedUsersOnlineStatus);
 
