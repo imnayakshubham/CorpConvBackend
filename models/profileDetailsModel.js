@@ -26,13 +26,17 @@ const ProfileItemSchema = new mongoose.Schema({
     // Keep only metadata/content here (not layout)
     type: {
         type: String,
-        enum: ['title', 'text', 'image', 'links', 'socialLink'],
+        enum: ['title', 'text', 'image', 'links', 'socialLink', 'category'],
         required: true
     }, // enums are a built-in validator in Mongoose
     content: { type: String, default: null },
     name: { type: String, default: null },
     img_url: { type: String, default: null },
     link: { type: String, default: null },
+    parent_id: { type: mongoose.Schema.Types.ObjectId, default: null }, // Reference to parent category
+    category_order: { type: Number, default: 0 }, // Order within category
+    width: { type: Number, default: null }, // Custom width in pixels (for resizable items)
+    height: { type: Number, default: null }, // Custom height in pixels (for resizable items)
     bookmarked_by: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     liked_by: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

@@ -655,15 +655,22 @@ function assertSelf(user_id, authedId) {
 }
 
 function sanitizeItemPayload(payload, user_id) {
-  const { type, content, name, img_url, link } = payload || {};
-  if (!['title', 'text', 'image', 'links', 'socialLink'].includes(type)) {
+  const { type, content, name, img_url, link, parent_id, category_order, width, height } = payload || {};
+  if (!['title', 'text', 'image', 'links', 'socialLink', 'category'].includes(type)) {
     const err = new Error('Invalid type');
     err.status = 400;
     throw err;
   }
   return {
-    type, content: content ?? null, name: name ?? null,
-    img_url: img_url ?? null, link: link ?? null,
+    type,
+    content: content ?? null,
+    name: name ?? null,
+    img_url: img_url ?? null,
+    link: link ?? null,
+    parent_id: parent_id ?? null,
+    category_order: category_order ?? 0,
+    width: width ?? null,
+    height: height ?? null,
     created_by: user_id,
     ...payload
   };
@@ -747,13 +754,17 @@ const updateProfileItem = async (req, res) => {
   try {
     assertSelf(user_id, authedId);
     // whitelist updatable fields
-    const { content, name, img_url, link, access } = req.body || {};
+    const { content, name, img_url, link, access, parent_id, category_order, width, height } = req.body || {};
     const updates = {};
     if (content !== undefined) updates.content = content;
     if (name !== undefined) updates.name = name;
     if (img_url !== undefined) updates.img_url = img_url;
     if (link !== undefined) updates.link = link;
     if (access !== undefined) updates.access = !!access;
+    if (parent_id !== undefined) updates.parent_id = parent_id;
+    if (category_order !== undefined) updates.category_order = category_order;
+    if (width !== undefined) updates.width = width;
+    if (height !== undefined) updates.height = height;
 
     const user = await User.findById(user_id).select('profile_details').lean();
     if (!user || !user.profile_details) return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
@@ -765,6 +776,14 @@ const updateProfileItem = async (req, res) => {
     );
 
     if (!result || !result.items?.length) return res.status(404).json({ status: 'Failed', message: 'Item not found' });
+
+    // Update Redis cache with full user data
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+    const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+    if (fullUser) {
+      await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+    }
+
     return res.json({ status: 'Success', message: 'Item updated', result: result.items[0] });
   } catch (e) {
     console.error(e);
@@ -791,8 +810,23 @@ const deleteProfileItem = async (req, res) => {
       if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
 
       // soft delete
-      const item = profile.items._id(item_id);
+      const item = profile.items.id(item_id);
       if (!item) throw Object.assign(new Error('Item not found'), { status: 404 });
+
+      // Save item data before modifying
+      updated = {
+        _id: item._id,
+        type: item.type,
+        content: item.content,
+        name: item.name,
+        img_url: item.img_url,
+        link: item.link,
+        access: item.access,
+        created_by: item.created_by,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
+      };
+
       item.access = false;
 
       // prune from layouts
@@ -801,10 +835,22 @@ const deleteProfileItem = async (req, res) => {
         profile.layouts[bp] = (profile.layouts[bp] || []).filter(li => li.i !== String(item_id));
       }
 
-      updated = await profile.save({ session });
+      await profile.save({ session });
     });
 
-    return res.json({ status: 'Success', message: 'Item soft-deleted and removed from layouts' });
+    // Update cache outside transaction
+    try {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+      const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+      if (fullUser) {
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+      }
+    } catch (cacheError) {
+      logger.warn('Cache update failed after delete:', cacheError);
+      // Don't fail the request if cache update fails
+    }
+
+    return res.json({ status: 'Success', message: 'Item soft-deleted and removed from layouts', result: updated });
   } catch (e) {
     console.error(e);
     return res.status(e.status || 500).json({ status: 'Failed', message: e.message });
@@ -847,6 +893,13 @@ const updateLayouts = async (req, res) => {
       { $set: { layouts } },
       { new: true, projection: { layouts: 1 } }
     );
+
+    // Update Redis cache with full user data
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+    const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+    if (fullUser) {
+      await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+    }
 
     return res.json({ status: 'Success', message: 'Layouts updated', result: updated?.layouts });
   } catch (e) {
@@ -1461,6 +1514,93 @@ const getConnectedUsersOnlineStatus = asyncHandler(async (req, res) => {
 });
 
 
+// PUT /:user_id/profile/items/reorder - Reorder items within categories
+const reorderProfileItems = asyncHandler(async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+  const { items } = req.body; // Array of { item_id, category_order, parent_id }
+
+  try {
+    assertSelf(user_id, authedId);
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        status: 'Failed',
+        message: 'Items array is required'
+      });
+    }
+
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user || !user.profile_details) {
+      return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+    }
+
+    const session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      const profile = await ProfileDetails.findById(user.profile_details).session(session);
+      if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      // Update each item's order and parent
+      for (const { item_id, category_order, parent_id } of items) {
+        const item = profile.items._id(item_id);
+        if (item) {
+          if (category_order !== undefined) item.category_order = category_order;
+          if (parent_id !== undefined) item.parent_id = parent_id;
+        }
+      }
+
+      await profile.save({ session });
+
+      // Update cache
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+      const fullUser = await User.findById(user_id).select(projection).populate('profile_details').session(session);
+      if (fullUser) {
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+      }
+    });
+
+    return res.status(200).json({
+      status: 'Success',
+      message: 'Items reordered successfully'
+    });
+  } catch (error) {
+    logger.error('Error reordering profile items:', error);
+    return res.status(error.status || 500).json({
+      status: 'Error',
+      message: error.message || 'Failed to reorder items'
+    });
+  }
+});
+
+// GET /link-metadata - Fetch link preview metadata
+const getLinkMetadata = asyncHandler(async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({
+      status: 'Failed',
+      message: 'URL parameter is required'
+    });
+  }
+
+  try {
+    const { fetchLinkMetadata } = require('../services/linkMetadataService');
+    const metadata = await fetchLinkMetadata(url);
+
+    return res.status(200).json({
+      status: 'Success',
+      message: 'Metadata fetched successfully',
+      result: metadata
+    });
+  } catch (error) {
+    logger.error('Error fetching link metadata:', error);
+    return res.status(500).json({
+      status: 'Error',
+      message: error.message || 'Failed to fetch link metadata'
+    });
+  }
+});
+
 module.exports = {
   allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations,
   refreshToken,
@@ -1469,4 +1609,6 @@ module.exports = {
   sendMagicLink,
   verifyAuth,
   getConnectedUsersOnlineStatus,
+  getLinkMetadata,
+  reorderProfileItems,
 }; 

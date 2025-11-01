@@ -22,6 +22,8 @@ const {
   verifyAuth,
   updatePremiumStatus,
   getConnectedUsersOnlineStatus,
+  getLinkMetadata,
+  reorderProfileItems,
 
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
@@ -472,6 +474,9 @@ router
 // Route: Add item or update layouts
 router.route('/:user_id/profile/items').post(protect, addProfileItem);
 
+// Route: Reorder items within categories
+router.route('/:user_id/profile/items/reorder').put(protect, reorderProfileItems);
+
 // Route: Update or delete a specific item
 router
   .route('/:user_id/profile/items/:item_id')
@@ -482,6 +487,9 @@ router
 router
   .route('/user/:user_id/profile/layouts')
   .put(protect, updateLayouts);
+
+// Route: Fetch link metadata for previews
+router.get('/link-metadata', getLinkMetadata);
 
 // Note: Firebase auth routes (firebase-google, refresh, me, logout) are registered
 // at the top of this file under /auth/* to ensure proper route precedence
