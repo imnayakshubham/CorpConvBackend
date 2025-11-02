@@ -124,10 +124,6 @@ const DEFAULT_DUPLICATE_PREVENTION_SETTINGS = {
 
 const DEFAULT_SOCIAL_MEDIA_SETTINGS = {
     enabled: true,
-    platforms: {
-        github: "https://github.com/preetsuthar17",
-        twitter: "https://x.com/preetsuthar17",
-    },
     showIcons: true,
     iconSize: "md",
     position: "footer",
