@@ -135,6 +135,12 @@ const surveyFormFieldSchema = new mongoose.Schema({
             return !this.type;
         }
     },
+    options: [
+        {
+            label: { type: String, required: true },
+            value: { type: String, required: true }
+        }
+    ],
     user_select_options: [
         {
             label: { type: String, required: true },
@@ -147,14 +153,14 @@ const surveyFormFieldSchema = new mongoose.Schema({
         type: String,
         enum: [
             // Basic input types
-            'text', 'email', 'number', 'textarea', 'url', 'phone', 'date', 'time',
+            'text', 'email', 'number', 'textarea', 'url', 'link', 'phone', 'date', 'time',
             // Selection types
             'select', 'checkbox', 'radio',
             // File types
             'file',
             // Advanced input types (previously missing from enum)
             'rating', 'slider', 'tags', 'scheduler', 'address', 'social',
-            'signature', 'statement', 'banner', 'poll'
+            'signature', 'statement', 'banner', 'poll', 'field-group'
         ],
         // Map from input_type if type is not provided
         default: function () {
@@ -174,6 +180,7 @@ const surveyFormFieldSchema = new mongoose.Schema({
                     'tel': 'phone',
                     'phone': 'phone',
                     'url': 'url',
+                    'link': 'link',
                     // Map new types
                     'rating': 'rating',
                     'slider': 'slider',
@@ -184,7 +191,8 @@ const surveyFormFieldSchema = new mongoose.Schema({
                     'signature': 'signature',
                     'statement': 'statement',
                     'banner': 'banner',
-                    'poll': 'poll'
+                    'poll': 'poll',
+                    'field-group': 'field-group'
                 };
                 return typeMap[this.input_type] || 'text';
             }
@@ -201,7 +209,6 @@ const surveyFormFieldSchema = new mongoose.Schema({
             default: 0
         }
     },
-    user_select_options: [String], // Alternative to user_select_options
     validation: fieldValidationSchema,
     conditional_logic: {
         show_if: [conditionalLogicSchema]
@@ -333,12 +340,10 @@ surveySchema.pre('save', function (next) {
             this.analytics.total_views = this.view_count;
         }
 
-        // Map user_select_options to options for new fields
         if (this.survey_form && this.survey_form.length > 0) {
             this.survey_form.forEach(field => {
-                // If user_select_options exists but options doesn't, map them
                 if (field.user_select_options && field.user_select_options.length > 0 && !field.options) {
-                    field.options = field.user_select_options.map(opt => opt.value);
+                    field.options = field.user_select_options;
                 }
 
                 // Sync is_required with validation.required
@@ -380,7 +385,7 @@ surveySchema.methods.migrateFieldFormat = function () {
             }
 
             if (field.user_select_options && !field.options) {
-                field.options = field.user_select_options.map(opt => opt.value);
+                field.options = field.user_select_options;
             }
 
             if (field.is_required !== undefined && !field.validation) {

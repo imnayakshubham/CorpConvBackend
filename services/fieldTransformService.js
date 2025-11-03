@@ -2,7 +2,7 @@
  * Field Transform Service
  *
  * Transforms field data based on field type before storage.
- * Handles all 22 field types with proper validation and formatting.
+ * Handles all 25 field types with proper validation and formatting.
  */
 
 class FieldTransformService {
@@ -24,6 +24,7 @@ class FieldTransformService {
             'number': this.transformNumberField.bind(this),
             'textarea': this.transformTextareaField.bind(this),
             'url': this.transformUrlField.bind(this),
+            'link': this.transformUrlField.bind(this), // Alias for url
             'phone': this.transformPhoneField.bind(this),
             'date': this.transformDateField.bind(this),
             'time': this.transformTimeField.bind(this),
@@ -40,7 +41,8 @@ class FieldTransformService {
             'signature': this.transformSignatureField.bind(this),
             'statement': this.transformStatementField.bind(this),
             'banner': this.transformBannerField.bind(this),
-            'poll': this.transformPollField.bind(this)
+            'poll': this.transformPollField.bind(this),
+            'field-group': this.transformFieldGroupField.bind(this)
         };
 
         const transformer = transformers[fieldType];
@@ -255,6 +257,15 @@ class FieldTransformService {
     transformPollField(value) {
         // Poll responses should be a selected option
         return value;
+    }
+
+    transformFieldGroupField(value) {
+        // Field group is a container for other fields, typically no direct value
+        // If it has nested fields, return the object structure as-is
+        if (typeof value === 'object') {
+            return value;
+        }
+        return null;
     }
 
     /**

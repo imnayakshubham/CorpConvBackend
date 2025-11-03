@@ -125,10 +125,11 @@ const submissionSchema = new mongoose.Schema({
 
 // Indexes for better query performance
 submissionSchema.index({ formId: 1, submittedAt: -1 });
-submissionSchema.index({ survey_id: 1, createdAt: -1 }); // Old format
+submissionSchema.index({ survey_id: 1, createdAt: -1 });
 submissionSchema.index({ formId: 1, isSpam: 1 });
 submissionSchema.index({ sessionId: 1 });
 submissionSchema.index({ survey_answered_by: 1 });
+submissionSchema.index({ survey_created_by: 1, createdAt: -1 });
 
 // Virtual to unify formId and survey_id
 submissionSchema.virtual('unifiedFormId').get(function() {

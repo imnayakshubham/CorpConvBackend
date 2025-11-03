@@ -19,6 +19,7 @@ const siteMapRoutes = require("./routes/siteMapRoutes");
 const aiRoutes = require('./routes/ai');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
 const { getAuth } = require('./config/auth');
 
@@ -142,6 +143,7 @@ app.use("/api/site_map", siteMapRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api', analyticsRoutes);
 
 
 
