@@ -327,7 +327,9 @@ surveySchema.pre('save', function (next) {
                 .replace(/-+/g, '-')
                 .replace(/^-|-$/g, '');
 
-            this.slug = `${baseSlug}-${Date.now()}`;
+            // Use random suffix for better uniqueness
+            const randomSuffix = Math.random().toString(36).substring(2, 10);
+            this.slug = `${baseSlug}-${randomSuffix}`;
         }
 
         // Update conversion rate (from new model)
@@ -380,9 +382,8 @@ surveySchema.methods.migrateFieldFormat = function () {
                 field.type = field.input_type;
             }
 
-            if (!field._id) {
-                field._id = `field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            }
+            // Remove custom field._id generation - let MongoDB handle it
+            // Fields are embedded documents and will get auto-generated _id if needed
 
             if (field.user_select_options && !field.options) {
                 field.options = field.user_select_options;

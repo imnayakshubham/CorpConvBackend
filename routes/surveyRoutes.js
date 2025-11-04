@@ -15,8 +15,10 @@ const {
     duplicateSurvey,
     togglePublishStatus,
     getSurveyAnalytics,
+    getUserSurveyStats,
     createFormLimit,
     submitFormLimit,
+    trackFormView,
     evaluateConditionalLogic,
     transformFieldData,
     validateFormSchema,
@@ -234,6 +236,12 @@ router.post("/",
     validateSurveyCreate,
     handleValidationErrors,
     createSurvey
+);
+
+// GET /api/survey/stats - Get user survey statistics (RESTful)
+router.get("/stats",
+    protect,
+    getUserSurveyStats
 );
 
 // ============ NEW ENHANCED FEATURES ============
@@ -1048,11 +1056,20 @@ router.post('/from-template',
 
 // ============ DYNAMIC :id ROUTES (Must come after specific routes) ============
 
-// GET /api/survey/:id - Get specific survey (RESTful)
+// GET /api/survey/:id - Get specific survey by ID or slug (RESTful)
 // Uses optionalAuth to allow public viewing with optional user context
+// Supports both MongoDB ObjectId and slug
 router.get("/:id",
     optionalAuth,
-    getSurvey
+    [
+        param('id').isString().withMessage('Invalid identifier'),
+        handleValidationErrors
+    ],
+    async (req, res) => {
+        // Map :id param to _id for backward compatibility with getSurvey
+        req.params._id = req.params.id;
+        return getSurvey(req, res);
+    }
 );
 
 // PUT /api/survey/:id - Update survey (RESTful)
@@ -1097,6 +1114,15 @@ router.get("/:id/submissions",
         handleValidationErrors
     ],
     getSurveySubmission
+);
+
+// POST /api/survey/:id/view - Track form view (Public endpoint)
+router.post("/:id/view",
+    [
+        param('id').isString().withMessage('Invalid survey identifier'),
+        handleValidationErrors
+    ],
+    trackFormView
 );
 
 module.exports = router;

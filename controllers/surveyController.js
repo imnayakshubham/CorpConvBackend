@@ -217,7 +217,8 @@ const listSurveys = async (req, res) => {
 // SOFT DELETE Survey (change status)
 const archiveSurvey = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        // Support both :id and :_id params
+        const surveyId = req.params.id || req.params._id;
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
@@ -249,7 +250,8 @@ const archiveSurvey = async (req, res) => {
 // EDIT Survey API
 const editSurvey = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        // Support both :id and :_id params
+        const surveyId = req.params.id || req.params._id;
 
         const survey = await Survey.findById(surveyId);
 
@@ -311,9 +313,20 @@ const editSurvey = async (req, res) => {
 
 const getSurvey = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        const identifier = req.params._id || req.params.id;
 
-        const survey = await Survey.findById(surveyId);
+        // Try to find by MongoDB ID first
+        let survey = null;
+
+        // Check if it's a valid MongoDB ObjectId
+        if (identifier && identifier.match(/^[0-9a-fA-F]{24}$/)) {
+            survey = await Survey.findById(identifier);
+        }
+
+        // If not found by ID, try finding by slug
+        if (!survey) {
+            survey = await Survey.findOne({ slug: identifier });
+        }
 
         if (!survey) {
             return res.error({
@@ -338,7 +351,8 @@ const getSurvey = async (req, res) => {
 
 const surveySubmission = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        // Support both :id and :_id params
+        const surveyId = req.params.id || req.params._id;
 
         const survey = await Survey.findById(surveyId);
 
@@ -393,7 +407,7 @@ const surveySubmission = async (req, res) => {
 
 const getSurveySubmission = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        const surveyId = req.params.id || req.params._id;
 
         // Add pagination support
         const page = parseInt(req.query.page) || 1;
@@ -446,7 +460,9 @@ const getSurveySubmission = async (req, res) => {
 // DUPLICATE Survey
 const duplicateSurvey = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        // Support both :id and :_id params
+        const surveyId = req.params.id || req.params._id;
+
         const survey = await Survey.findOne({
             _id: surveyId,
             $or: [
@@ -482,13 +498,54 @@ const duplicateSurvey = async (req, res) => {
             };
         }
 
-        const newSurvey = new Survey(surveyData);
-        await newSurvey.save();
+        // Generate unique slug with random suffix
+        const baseSlug = surveyData.survey_title
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
 
-        return res.success({
-            message: 'Survey duplicated successfully',
-            data: newSurvey
-        });
+        const generateSlugWithRetry = async (base, retries = 3) => {
+            for (let i = 0; i < retries; i++) {
+                const randomSuffix = Math.random().toString(36).substring(2, 10);
+                const slug = `${base}-${randomSuffix}`;
+
+                // Check if slug exists
+                const existing = await Survey.findOne({ slug });
+                if (!existing) {
+                    return slug;
+                }
+            }
+            // Final attempt with timestamp as fallback
+            return `${base}-${Date.now()}`;
+        };
+
+        surveyData.slug = await generateSlugWithRetry(baseSlug);
+
+        // Save with retry logic for duplicate key errors
+        try {
+            const newSurvey = new Survey(surveyData);
+            await newSurvey.save();
+
+            return res.success({
+                message: 'Survey duplicated successfully',
+                data: newSurvey
+            });
+        } catch (saveError) {
+            // Handle duplicate key error
+            if (saveError.code === 11000 && saveError.keyPattern?.slug) {
+                // Regenerate slug and retry once
+                surveyData.slug = await generateSlugWithRetry(baseSlug);
+                const newSurvey = new Survey(surveyData);
+                await newSurvey.save();
+
+                return res.success({
+                    message: 'Survey duplicated successfully',
+                    data: newSurvey
+                });
+            }
+            throw saveError;
+        }
     } catch (error) {
         console.error('Duplicate survey error:', error);
         return res.error({
@@ -502,7 +559,7 @@ const duplicateSurvey = async (req, res) => {
 // TOGGLE Publish Status
 const togglePublishStatus = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        const surveyId = req.params.id || req.params._id;
         const { isPublished } = req.body;
 
         const survey = await Survey.findOne({
@@ -541,7 +598,7 @@ const togglePublishStatus = async (req, res) => {
 // GET Survey Analytics
 const getSurveyAnalytics = async (req, res) => {
     try {
-        const surveyId = req.params._id;
+        const surveyId = req.params.id || req.params._id;
 
         const survey = await Survey.findOne({
             _id: surveyId,
@@ -637,7 +694,7 @@ const createFormLimit = async (req, res, next) => {
 // Rate limiting middleware for form submission
 const submitFormLimit = async (req, res, next) => {
     try {
-        const surveyId = req.params._id;
+        const surveyId = req.params.id || req.params._id;
 
         // Check if user already submitted this survey in last hour
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -905,6 +962,164 @@ const exportSubmissions = async (req, res) => {
     }
 };
 
+/**
+ * Get user's survey statistics
+ * GET /api/survey/stats
+ */
+const getUserSurveyStats = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get all surveys for the user
+        const surveys = await Survey.find({ created_by: userId });
+
+        // Calculate basic counts
+        const totalForms = surveys.length;
+        const publishedForms = surveys.filter(s => s.status === 'published').length;
+        const draftForms = surveys.filter(s => s.status === 'draft').length;
+        const archivedForms = surveys.filter(s => s.status === 'archived').length;
+
+        // Calculate engagement metrics
+        const totalViews = surveys.reduce((sum, s) => sum + (s.view_count || 0), 0);
+        const totalSubmissions = surveys.reduce((sum, s) => sum + (s.submissions?.length || 0), 0);
+
+        // Calculate conversion rates
+        const conversions = surveys.map(s => {
+            const views = s.view_count || 0;
+            const subs = s.submissions?.length || 0;
+            return views > 0 ? (subs / views) * 100 : 0;
+        }).filter(c => c > 0);
+
+        const avgConversionRate = conversions.length > 0
+            ? conversions.reduce((sum, c) => sum + c, 0) / conversions.length
+            : 0;
+
+        // Calculate time-based trends
+        const now = new Date();
+        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+        // Get submissions count for this week and month
+        const Submission = require('../models/Submission');
+        const formIds = surveys.map(s => s._id);
+
+        const submissionsThisWeek = await Submission.countDocuments({
+            form_id: { $in: formIds },
+            createdAt: { $gte: oneWeekAgo }
+        });
+
+        const submissionsThisMonth = await Submission.countDocuments({
+            form_id: { $in: formIds },
+            createdAt: { $gte: oneMonthAgo }
+        });
+
+        // Get recent activity (last 7 days of submissions)
+        const recentSubmissions = await Submission.aggregate([
+            {
+                $match: {
+                    form_id: { $in: formIds },
+                    createdAt: { $gte: oneWeekAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        // Get most viewed forms (top 5)
+        const mostViewedForms = surveys
+            .filter(s => s.view_count > 0)
+            .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
+            .slice(0, 5)
+            .map(s => ({
+                id: s._id,
+                title: s.survey_title,
+                views: s.view_count,
+                submissions: s.submissions?.length || 0,
+                conversionRate: s.view_count > 0
+                    ? ((s.submissions?.length || 0) / s.view_count * 100).toFixed(2)
+                    : 0
+            }));
+
+        return res.success({
+            message: 'Survey statistics retrieved successfully',
+            data: {
+                // Basic counts
+                totalForms,
+                publishedForms,
+                draftForms,
+                archivedForms,
+
+                // Engagement metrics
+                totalViews,
+                totalSubmissions,
+
+                // Conversion & performance
+                avgConversionRate: avgConversionRate.toFixed(2),
+
+                // Time-based trends
+                submissionsThisWeek,
+                submissionsThisMonth,
+                recentActivity: recentSubmissions,
+
+                // Top performers
+                mostViewedForms
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching survey statistics:', error);
+        return res.error({
+            message: 'Failed to fetch survey statistics',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
+/**
+ * Track form view (public endpoint)
+ * POST /api/survey/:id/view
+ */
+const trackFormView = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find survey by ID or slug
+        let survey = await Survey.findById(id);
+        if (!survey) {
+            survey = await Survey.findOne({ slug: id });
+        }
+
+        if (!survey) {
+            return res.error({
+                message: 'Survey not found',
+                code: 404
+            });
+        }
+
+        // Increment view count
+        await survey.incrementViewCount();
+
+        return res.success({
+            message: 'View tracked successfully',
+            data: {
+                view_count: survey.view_count
+            }
+        });
+    } catch (error) {
+        console.error('Error tracking form view:', error);
+        return res.error({
+            message: 'Failed to track view',
+            error: error.message,
+            code: 500
+        });
+    }
+};
+
 
 module.exports = {
     createSurvey,
@@ -917,8 +1132,10 @@ module.exports = {
     duplicateSurvey,
     togglePublishStatus,
     getSurveyAnalytics,
+    getUserSurveyStats,
     createFormLimit,
     submitFormLimit,
+    trackFormView,
     // New methods using service layer
     evaluateConditionalLogic,
     transformFieldData,
