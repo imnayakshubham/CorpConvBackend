@@ -70,7 +70,7 @@ const protect = asyncHandler(async (req, res, next) => {
   // Try Better Auth session first (primary auth method)
   // Check for any session cookie (primary or multiSession .1, .2, etc.)
   const sessionToken = findBetterAuthSessionCookie(req.cookies);
-
+  console.log({ sessionToken })
   if (sessionToken) {
     try {
       const auth = getAuth();

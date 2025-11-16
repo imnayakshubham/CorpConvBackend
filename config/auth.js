@@ -21,7 +21,7 @@ const generateOTP = () => {
 const otpStore = new Map();
 
 // Validate and provide fallback for baseURL
-const baseURL = process.env.FRONTEND_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || "http://localhost:5000";
+const baseURL = process.env.FRONTEND_URL || process.env.ALLOW_ORIGIN?.split(',')[0] || "http://localhost:5001";
 if (!process.env.FRONTEND_URL && !process.env.ALLOW_ORIGIN) {
   logger.warn(`FRONTEND_URL not configured - using fallback: ${baseURL}`);
 }

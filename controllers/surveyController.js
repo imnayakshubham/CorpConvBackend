@@ -969,7 +969,7 @@ const exportSubmissions = async (req, res) => {
 const getUserSurveyStats = async (req, res) => {
     try {
         const userId = req.user._id;
-
+        console.log({ userId })
         // Get all surveys for the user
         const surveys = await Survey.find({ created_by: userId });
 

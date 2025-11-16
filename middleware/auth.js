@@ -25,7 +25,6 @@ const optionalAuth = async (req, res, next) => {
   try {
     // Check for session cookie
     const sessionToken = findBetterAuthSessionCookie(req.cookies);
-
     if (sessionToken) {
       try {
         const auth = getAuth();

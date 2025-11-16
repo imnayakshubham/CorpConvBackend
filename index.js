@@ -37,8 +37,6 @@ const { responseFormatter } = require("./middleware/responseFormatter");
 const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
 const logger = require("./utils/logger.js");
 const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
-const { protect } = require("./middleware/authMiddleware.js");
-const { initEmbeddingModel } = require("./services/computeEmbedding.js");
 const { User } = require('./models/userModel');
 
 dotenv.config();
