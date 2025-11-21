@@ -1,4 +1,8 @@
+require("colors");
 const express = require("express");
+const cookieParser = require("cookie-parser");
+
+
 const connectDB = require("./config/db");
 const dotenv = require("dotenv");
 const userRoutes = require("./routes/userRoutes");
@@ -12,7 +16,12 @@ const commentRoutes = require("./routes/commentRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
+const aiRoutes = require('./routes/ai');
+const feedbackRoutes = require('./routes/feedbackRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
+const { getAuth } = require('./config/auth');
 
 const cors = require("cors");
 
@@ -22,18 +31,25 @@ const { initializeSocket, getIo } = require("./utils/socketManger");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
-const { job } = require("./restartServerCron");
+const { job, restartHf } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
+const { responseFormatter } = require("./middleware/responseFormatter");
+const { markOnline, markOffline, syncOnlineStatusToDB } = require("./redisClient/redisUtils.js");
+const logger = require("./utils/logger.js");
+const { toNodeHandler, fromNodeHeaders } = require("better-auth/node");
+const { User } = require('./models/userModel');
 
 dotenv.config();
-connectDB();
+
+// Initialize app first
 const app = express();
+app.use(cookieParser());
 
 app.set('trust proxy', 1);
 
+const APP_ENV = process.env.APP_ENV
 
 const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
-
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -47,30 +63,71 @@ app.use(cors({
       callback(null, false);
     }
   },
-  methods: ["GET", "POST", "DELETE", "PUT"],
+  methods: ["GET", "POST", "DELETE", "PUT", "OPTIONS"],
   credentials: true,
-  transports: ['websocket']
+  transports: ['websocket'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+
+// Middleware to handle better-auth routes (lazy initialization)
+// Better Auth is initialized on first /api/auth/* request to ensure MongoDB is connected
+let authHandler = null;
+let authInitialized = false;
+
+app.all("/api/auth/*", async (req, res, next) => {
+  if (!authHandler) {
+    try {
+      const auth = getAuth();
+      authHandler = toNodeHandler(auth);
+
+      // Only log once on first initialization
+      if (!authInitialized) {
+        logger.info("✓ Better-auth initialized with MongoDB adapter");
+        authInitialized = true;
+      }
+    } catch (error) {
+      logger.error("Failed to initialize better-auth:", error);
+      return res.status(500).json({ error: "Auth service not available" });
+    }
+  }
+  return authHandler(req, res, next);
+});
+connectDB();
+
+
 app.use(express.json());
+app.use(responseFormatter);
+
 app.use(express.urlencoded({ extended: true }));
 
-if (process.env.APP_ENV === "PROD") {
+require('./workers/recommendationWorker.js')
+
+
+
+
+if (APP_ENV === "PROD") {
   job.start()
 }
+
 
 app.get("/api/init", (req, res) => {
   try {
     res.status(200).json({
-      status: "Success"
+      status: "Success",
+      message: "Helllo"
     });
   } catch (error) {
     console.error("Error handling /init request:", error);
     res.status(500).json({
-      status: "Failed"
+      status: "Failed",
+      message: "Something went wrong. Please try again."
     });
   }
 });
+
+
+
 
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
@@ -81,10 +138,41 @@ app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api', analyticsRoutes);
+
+
+
+app.get("/api/me", async (req, res) => {
+  const session = await auth.api.getSession({
+    headers: fromNodeHeaders(req.headers),
+  });
+  return res.json(session);
+});
+
+if (APP_ENV === "PROD") {
+  app.use(trackActivity);
+}
+
+
+
 
 
 app.get("/", (req, res) => {
-  res.send(`Hello World!`);
+  const targetUrl = allowedOrigins.find(origin => origin.startsWith('https://') || origin.includes('hushwork'));
+  res.send(`
+    <main style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 90vh; font-family: Arial, sans-serif;">
+      <h1 style="color: #2c3e50;">Welcome to Hushwork</h1>
+      <p style="color: #34495e; font-size: 1.2rem; text-align: center; margin-bottom: 20px;">
+        Your platform for confidential surveys and discussions.
+      </p>
+      <a href=${targetUrl} target="_blank" rel="noopener noreferrer" style="padding: 10px 20px; background-color: #3498db; color: white; text-decoration: none; border-radius: 5px; font-size: 1rem; transition: background-color 0.3s;">
+        Visit Hushwork
+      </a>
+    </main>
+  `);
 });
 
 
@@ -92,9 +180,8 @@ function generateRandomUserId() {
   return new mongoose.Types.ObjectId();
 }
 
-// Error Handling middlewares
-app.use(notFound);
 app.use(errorHandler);
+app.use(notFound);
 
 const PORT = process.env.PORT;
 const server = app.listen(
@@ -106,24 +193,58 @@ initializeSocket(server);
 
 const redis = getRedisInstance();
 
-(async () => {
-  try {
-    await redis.ping(); // Test connection
-    console.log('Redis connection ready');
-  } catch (error) {
-    console.error('Failed to connect to Redis:', error);
-  }
-})();
+restartHf.start()
+
+if (APP_ENV === "PROD") {
+
+  (async () => {
+    try {
+      await redis.ping(); // Test connection
+      console.log('Redis connection ready');
+    } catch (error) {
+      console.error('Failed to connect to Redis:', error);
+    }
+  })();
+}
+
+
+setInterval(() => {
+  syncOnlineStatusToDB().catch(logger.error);
+}, 10 * 60 * 1000);
 
 const io = getIo()
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   let currentActiveChat = null
+
   console.log("Connected to socket.io");
-  socket.on("setup", (userData) => {
-    if (userData?._id) {
-      socket.join(userData._id);
+  socket.on("setup", async (user_id) => {
+    if (user_id) {
+      socket.join(user_id);
       socket.emit("connected");
+
+      socket.user_id = user_id
+      await markOnline(user_id)
+
+      // Broadcast online status to connected users (mutual followers)
+      try {
+        // Better Auth uses string UUIDs, not ObjectIds
+        const user = await User.findOne({ _id: user_id }).select('followers followings').lean();
+        if (user) {
+          // Get connected users (intersection of followers and followings)
+          const followers = user.followers || [];
+          const followings = user.followings || [];
+          const connectedUserIds = followers.filter(id => followings.includes(id));
+
+          // Emit online event to each connected user
+          connectedUserIds.forEach(connectedUserId => {
+            io.to(connectedUserId).emit("user_online", { user_id: user_id });
+          });
+        }
+      } catch (error) {
+        logger.error("Error broadcasting online status:", error);
+      }
+
     }
   });
 
@@ -185,6 +306,7 @@ io.on("connection", (socket) => {
         }
       }
     } catch (error) {
+      logger.error("error ==>", error)
       updatedAnswer = {
         data: null,
         status: 'Failed',
@@ -219,7 +341,6 @@ io.on("connection", (socket) => {
 
   socket.on("new message", (newMessageRecieved) => {
     let chat = newMessageRecieved.chat;
-
 
     if (!chat.users) return console.log("chat.users not defined");
 
@@ -282,7 +403,6 @@ io.on("connection", (socket) => {
           }
         }
       } catch (error) {
-        console.log({ error })
         answer = {
           data: null,
           status: 'Failed',
@@ -313,7 +433,8 @@ io.on("connection", (socket) => {
         }
       }
     } catch (error) {
-      console.log(error)
+      logger.error("error ==>", error)
+
       updatedQuestion = {
         data: null,
         status: 'Failed',
@@ -335,13 +456,13 @@ io.on("connection", (socket) => {
           message: "Question Like Update Failed"
         }
       }
-      const userId = payload.user_id ?? generateRandomUserId()
+      const user_id = payload.user_id ?? generateRandomUserId()
 
       // Check if user has already liked the answer
-      const userIndex = question.liked_by.indexOf(userId);
+      const userIndex = question.liked_by.indexOf(user_id);
       if (userIndex === -1) {
         // User hasn't liked the question, add like
-        question.liked_by.push(userId);
+        question.liked_by.push(user_id);
       } else {
         // User has already liked the question, remove like
         question.liked_by.splice(userIndex, 1);
@@ -365,11 +486,45 @@ io.on("connection", (socket) => {
       }
     }
     io.to(payload.question_id).emit("update_likes_response", updatedQuestion)
-
   })
 
-  socket.off("setup", () => {
-    console.log("USER DISCONNECTED");
-    socket.leave(userData._id);
+  socket.on("remove-user", (id) => {
+    socket.leave(id);
+  });
+
+  socket.on("disconnect", async () => {
+    if (socket.user_id) {
+      await markOffline(socket.user_id);
+
+      // Broadcast offline status to connected users
+      try {
+        // Better Auth uses string UUIDs, not ObjectIds
+        const user = await User.findOne({ _id: socket.user_id }).select('followers followings').lean();
+
+        if (user) {
+          const followers = user.followers || [];
+          const followings = user.followings || [];
+          const connectedUserIds = followers.filter(id => followings.includes(id));
+
+          // Emit offline event to each connected user
+          connectedUserIds.forEach(connectedUserId => {
+            io.to(connectedUserId).emit("user_offline", { userId: socket.user_id });
+          });
+        }
+      } catch (error) {
+        logger.error("Error broadcasting offline status:", error);
+      }
+
+      socket.leave(socket.user_id);
+    }
+  });
+
+  socket.off("setup", async () => {
+    if (socket?.user_id) {
+      await markOffline(socket.user_id);
+      socket.leave(socket.user_id);
+    } else {
+      console.log("elese user_id")
+    }
   });
 });

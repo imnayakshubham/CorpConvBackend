@@ -1,4 +1,5 @@
 const QuestionModel = require("../models/questionModel")
+const logger = require("../utils/logger")
 
 
 
@@ -43,6 +44,7 @@ const getquestions = async (req, res) => {
             message: "Questions Fetched successfully"
         })
     } catch (error) {
+        logger.error("error ==>", error)
 
         return res.status(500).json({
             data: null,
@@ -54,7 +56,7 @@ const getquestions = async (req, res) => {
 
 const deletequestion = async (req, res) => {
     try {
-        const _id = req.params.id
+        const _id = req.params._id
         const updatedQuestion = await QuestionModel.findByIdAndUpdate(_id, { access: false }, { new: true })
         if (updatedQuestion) {
             return res.status(201).json({
@@ -70,6 +72,7 @@ const deletequestion = async (req, res) => {
             })
         }
     } catch (error) {
+        logger.error("error ==>", error)
 
         return res.status(500).json({
             data: null,

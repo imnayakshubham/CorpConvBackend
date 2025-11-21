@@ -1,39 +1,140 @@
-const jwt = require("jsonwebtoken");
-const User = require("../models/userModel.js");
 const asyncHandler = require("express-async-handler");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const {
+  tokenkeyName,
+  cookieOptions,
+  authCookieNames,
+  betterAuthSessionCookie,
+  getAllBetterAuthSessionCookieNames,
+  findBetterAuthSessionCookie,
+  projection
+} = require("../constants/index.js");
+const { validateJwtAndGetUser, extractTokenFromExpress } = require("../utils/jwtAuth");
+const { getAuth } = require("../config/auth.js");
+const { User } = require("../models/userModel");
 
+const isProd = process.env.APP_ENV === 'PROD';
+
+/**
+ * Clear all authentication cookies
+ *
+ * Primary: Better Auth session cookie
+ * MultiSession: All additional session cookies (.1, .2, etc.)
+ * Legacy: JWT tokens (for backward compatibility)
+ *
+ * @param {Object} res - Express response object
+ */
+const clearAuthCookies = (res) => {
+  const clearOptions = {
+    ...cookieOptions,
+    maxAge: 0
+  };
+
+  // Clear all Better Auth session cookies (primary + multiSession)
+  const allSessionCookies = getAllBetterAuthSessionCookieNames();
+  allSessionCookies.forEach(cookieName => {
+    res.clearCookie(cookieName, clearOptions);
+  });
+
+  // Clear legacy JWT cookies (for backward compatibility)
+  res.clearCookie(authCookieNames.token, clearOptions);
+  res.clearCookie(authCookieNames.refreshToken, clearOptions);
+
+  // Clear authentication flag
+  res.clearCookie(authCookieNames.isAuthenticated, {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+};
+
+/**
+ * Authentication Middleware - Protects routes requiring authentication
+ *
+ * AUTHENTICATION FLOW (Better Auth - Primary):
+ * 1. Check for Better Auth session cookie
+ * 2. Validate session with Better Auth
+ * 3. Extract user ID from session
+ * 4. Fetch user data from MongoDB
+ * 5. Attach user to req.user
+ *
+ * FALLBACK (Legacy JWT - for backward compatibility):
+ * If Better Auth session not found, try JWT validation
+ *
+ * This ensures:
+ * - Better Auth is the primary authentication system
+ * - User data is always fresh from database
+ * - Revoked users are immediately blocked
+ */
 const protect = asyncHandler(async (req, res, next) => {
-  const token = req.headers.token
-
-  if (!!token) {
+  // Try Better Auth session first (primary auth method)
+  // Check for any session cookie (primary or multiSession .1, .2, etc.)
+  const sessionToken = findBetterAuthSessionCookie(req.cookies);
+  console.log({ sessionToken })
+  if (sessionToken) {
     try {
+      const auth = getAuth();
+      const session = await auth.api.getSession({ headers: req.headers });
+      if (session && session.user) {
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
-      const user = await User.findOne({ _id: decoded.id })
+        // Fetch full user data from database
+        const user = await User.findOne(
+          { _id: session.user._id },
+          projection
+        );
+        if (!user || user.access === false) {
+          clearAuthCookies(res);
+          return res.status(401).send({ error: 'Unauthorized', message: 'User not found or access revoked' });
+        }
 
-      if (user && user.access) {
-        req.user = await User.findOne({ _id: decoded.id })
-        next();
-      } else {
-        res.clearCookie(tokenkeyName, cookieOptions);
-        return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
+        req.user = user;
+        return next();
       }
-
     } catch (error) {
-      res.clearCookie(tokenkeyName, cookieOptions);
-      if (error.name === 'TokenExpiredError') {
-        return res.status(401).send({ error: 'TokenExpiredError', message: 'Session expired' });
-      }
-
-      return res.status(400).send({ error: 'Invalid token' });
+      console.log('Better Auth validation error:', error);
+      return res.error({
+        status: 401,
+        message: 'Unauthorized: Invalid Better Auth session'
+      })
     }
   }
 
-  if (!token) {
-    res.status(401);
-    throw new Error("Not authorized");
-  }
+  // No valid session found
+  return res.status(401).send({ error: 'Unauthorized', message: 'No valid session found' });
 });
 
-module.exports = { protect };
+/**
+ * Admin Middleware - Protects admin-only routes
+ *
+ * Checks if the authenticated user has admin privileges via:
+ * 1. is_admin flag (primary)
+ * 2. role field set to "admin" (secondary)
+ * 3. Email in ADMIN_IDS environment variable (fallback)
+ *
+ * Must be used after protect() middleware
+ */
+const admin = asyncHandler(async (req, res, next) => {
+  // Check if user is authenticated
+  if (!req.user) {
+    res.status(401);
+    throw new Error("User not authenticated. Please login first.");
+  }
+
+  // Check multiple admin conditions
+  const adminEmails = (process.env.ADMIN_IDS || '').split(',').map(email => email.trim()).filter(Boolean);
+
+  const isAdmin =
+    req.user.is_admin === true ||  // Primary check: is_admin flag
+    req.user.role === 'admin' ||   // Secondary check: role field
+    (req.user.user_email_id && adminEmails.includes(req.user.user_email_id)); // Fallback: email whitelist
+
+  if (!isAdmin) {
+    res.status(403);
+    throw new Error("Access denied. Admin privileges required.");
+  }
+
+  // User is admin, proceed
+  next();
+});
+
+module.exports = { protect, admin };

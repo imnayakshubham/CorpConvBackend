@@ -1,14 +1,15 @@
 const asyncHandler = require("express-async-handler");
 const Chat = require("../models/chatModel");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
 const mongoose = require('mongoose');
+const logger = require("../utils/logger");
 
 const accessChat = asyncHandler(async (req, res) => {
-  const { userId } = req.body;
+  const { user_id } = req.body;
 
   try {
 
-    if (!userId) {
+    if (!user_id) {
       console.log("UserId param not sent with request");
       return res.sendStatus(400);
     }
@@ -17,7 +18,7 @@ const accessChat = asyncHandler(async (req, res) => {
       isGroupChat: false,
       $and: [
         { users: { $elemMatch: { $eq: req.user._id } } },
-        { users: { $elemMatch: { $eq: userId } } },
+        { users: { $elemMatch: { $eq: user_id } } },
       ],
     }).populate({
       path: "users",
@@ -37,7 +38,7 @@ const accessChat = asyncHandler(async (req, res) => {
         chatName: "sender",
         isGroupChat: false,
         readBy: [req.user._id],
-        users: [req.user._id, userId],
+        users: [req.user._id, user_id],
       };
 
       const createdChat = await Chat.create(chatData);
@@ -82,7 +83,8 @@ const fetchChats = asyncHandler(async (req, res) => {
       return res.status(200).send({ status: "Success", message: "No chats found for the user.", result: results });
     }
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
+
     return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: results });
   }
 });
@@ -154,14 +156,14 @@ const renameGroup = asyncHandler(async (req, res) => {
 // @route   PUT /api/chat/groupremove
 // @access  Protected
 const removeFromGroup = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+  const { chatId, user_id } = req.body;
 
   // check if the requester is admin
 
   const removed = await Chat.findByIdAndUpdate(
     chatId,
     {
-      $pull: { users: userId },
+      $pull: { users: user_id },
     },
     {
       new: true,
@@ -182,14 +184,14 @@ const removeFromGroup = asyncHandler(async (req, res) => {
 // @route   PUT /api/chat/groupadd
 // @access  Protected
 const addToGroup = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+  const { chatId, user_id } = req.body;
 
   // check if the requester is admin
 
   const added = await Chat.findByIdAndUpdate(
     chatId,
     {
-      $push: { users: userId },
+      $push: { users: user_id },
     },
     {
       new: true,

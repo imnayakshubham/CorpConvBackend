@@ -1,14 +1,84 @@
 const asyncHandler = require("express-async-handler");
-const User = require("../models/userModel");
+const { User } = require("../models/userModel");
+const ProfileDetails = require("../models/profileDetailsModel.js");
+
 const Company = require("../models/companySchema");
-const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
+const { toTitleCase, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
 const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, isProd, authCookieNames } = require("../constants/index.js");
+const { addOrUpdateCachedDataInRedis, enqueueEmbeddingJob, isUserOnline } = require("../redisClient/redisUtils.js");
+const Item = require("../models/Item.js");
+const userEmbedding = require("../models/userEmbedding.js");
+const { recommendationQueue } = require("../queues/index.js");
+const Recommendation = require("../models/Recommendation.js");
+const { generateSingleEmbedding } = require("../services/computeEmbedding.js");
+const logger = require("../utils/logger.js");
+const { decryptUserData } = require("../utils/encryption");
+const { findUserByEmail } = require("../utils/emailComparison");
+const { getAuth, generateMagicLink, verifyMagicToken, verifyOTP, responseFormatterForAuth } = require("../config/auth.js");
 
 
+const projection = {
+  user_job_role: 1,
+  is_anonymous: 1,
+  is_email_verified: 1,
+  user_bio: 1,
+  user_current_company_name: 1,
+  user_id: 1,
+  user_job_experience: 1,
+  user_location: 1,
+  public_user_name: 1,
+  followings: 1,
+  followers: 1,
+  avatar: 1,
+  user_public_profile_pic: 1,
+  pending_followings: 1,
+  profile_details: 1,
+};
+
+
+// user_id: string,
+//   options?: {
+//     projection?: unknown;
+//     populateOptions?: Parameters<typeof User.prototype.populate>[0];
+//     profileItemsFilter?: (item: any) => boolean;
+//   }
+
+async function getUserWithFlatProfileDetails({
+  user_id,
+  access = true,
+  options,
+}) {
+  // Destructure options with defaults
+  const { projection = null, populateOptions = {}, profileItemsFilter } = options || {};
+  logger.info("id", user_id)
+  // Fetch user with populated profile_details document
+  const userDoc = await User.findById(user_id, projection).where({ access }).populate({
+    path: 'profile_details',
+    ...populateOptions,
+  });
+
+  if (!userDoc) return null;
+
+  // Convert mongoose doc to plain object
+  const userObj = userDoc.toObject();
+
+
+  // Extract profile items array
+  let profileItems = {
+    layouts: userObj.profile_details?.layouts || {},
+    items: userObj.profile_details?.items || []
+  }
+
+  // Return user with flattened, optionally filtered profile items
+  return {
+    ...userObj,
+    profile_details: profileItems,
+  };
+}
 
 
 const allUsers = asyncHandler(async (req, res) => {
@@ -20,11 +90,12 @@ const allUsers = asyncHandler(async (req, res) => {
       ],
     }
       : {};
+
     const users = await User.find({ ...keyword, _id: { $ne: req.user._id } }, { public_user_name: 1, user_job_experience: 1 });
     return res.status(200).json({ message: "Filtered User List", status: "Success", result: users })
 
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 });
@@ -32,10 +103,10 @@ const allUsers = asyncHandler(async (req, res) => {
 const getfollowersList = async (req, res) => {
   try {
     const searchTerm = req.query.search;
-    const userId = req.user._id;
+    const user_id = req.user._id;
 
     if (!searchTerm) {
-      const user = await User.findById(userId, { followers: 1 })
+      const user = await User.findById(user_id, { followers: 1 })
         .populate({
           path: "followers",
           select: "public_user_name user_job_experience"
@@ -44,7 +115,7 @@ const getfollowersList = async (req, res) => {
       const followers = user?.followers || [];
       return res.status(200).json({ message: "All Followers", status: "Success", result: followers });
     }
-    const followerIds = (await User.findById(userId, { followers: 1 })).followers || [];
+    const followerIds = (await User.findById(user_id, { followers: 1 })).followers || [];
     const followersMatchingSearch = await User.find({
       _id: { $in: followerIds },
       $or: [
@@ -60,25 +131,7 @@ const getfollowersList = async (req, res) => {
   }
 };
 
-const responseFormatterForAuth = (result) => {
-  return {
-    is_email_verified: result.is_email_verified,
-    user_job_role: result.user_job_role,
-    user_job_experience: result.user_job_experience,
-    user_bio: result.user_bio,
-    isAdmin: result.isAdmin,
-    is_anonymous: result.is_anonymous,
-    token: result?.token,
-    user_current_company_name: result.user_current_company_name,
-    user_email_id: result.user_email_id,
-    _id: result._id,
-    secondary_email_id: result.secondary_email_id,
-    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
-    public_user_name: result.public_user_name,
-    is_secondary_email_id_verified: result.is_secondary_email_id_verified,
-    user_public_profile_pic: result.user_public_profile_pic,
-  }
-}
+
 
 const authUser = async (req, res) => {
   const { user_email_id } = req.body;
@@ -87,11 +140,11 @@ const authUser = async (req, res) => {
     if (!user_email_id) {
       return res.status(200).json({ message: "Please Fill all the details", status: "Failed" });
     }
-    const userData = await User.findOne({
-      $or: [
-        { user_email_id },
-        { secondary_email_id: user_email_id }
-      ]
+
+    // Use encryption-aware email comparison
+    const userData = await findUserByEmail(user_email_id, {
+      projection,
+      includeSecondary: true
     });
 
     if (userData) {
@@ -102,7 +155,6 @@ const authUser = async (req, res) => {
 
       const result = {
         ...userData._doc,
-        token: token
       }
 
       return res.status(200).json({ message: "email already exists!", status: "Success", result: responseFormatterForAuth(result) });
@@ -140,16 +192,19 @@ const authUser = async (req, res) => {
         return res.status(200).json({
           message: "Registration Successfully. Welcome!!",
           status: "Success",
-          result: { ...responseFormatterForAuth(result), token: token, _id: result._id }
+          result: { ...responseFormatterForAuth(result), _id: result._id }
         });
       }
     }
   } catch (error) {
-    console.log({ error })
     return res.status(200).json({ message: error, status: "Failed" });
   }
 };
 
+/**
+ * Logout
+ * POST /api/auth/logout
+ */
 const logout = async (req, res) => {
   try {
     const updateOperation = {
@@ -160,57 +215,187 @@ const logout = async (req, res) => {
     const updatedData = await User.updateOne({ token: req.user.token }, updateOperation)
 
     if (updatedData) {
-      res.clearCookie(tokenkeyName, cookieOptions);
+      // Clear all authentication cookies (JWT tokens, Better Auth session, etc.)
+      const clearOptions = {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/',
+        domain: isProd ? undefined : 'localhost',
+        maxAge: 0
+      };
+
+      // Clear legacy JWT tokens
+      res.clearCookie(authCookieNames.token, clearOptions);
+      res.clearCookie(authCookieNames.refreshToken, clearOptions);
+
+      // Clear Better Auth session cookie (format: {prefix}.session_token)
+      const betterAuthSessionCookie = `${authCookieNames.betterAuthSessionCookiePrefix}.session_token`;
+      res.clearCookie(betterAuthSessionCookie, clearOptions);
+
+      // Clear isAuthenticated flag cookie
+      res.clearCookie(authCookieNames.isAuthenticated, {
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/',
+        domain: isProd ? undefined : 'localhost'
+      });
+
       return res.status(200).json({ message: "Logged Out", status: "Success" })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
+    logger.error("error ==>", error)
+
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
 
   }
 }
 
 const updateUserProfile = async (req, res) => {
-  try {
 
-    const UserInfo = await User.findOne({ _id: req.body._id })
-    if (!UserInfo) {
+  const user_id = req.body._id ?? req.user._id;
+
+  if (!user_id) {
+    return res.status(400).json({
+      message: "User ID is required",
+      status: "Failed",
+      result: [],
+    });
+  }
+
+  try {
+    const userInfo = await User.findOne({ _id: req.body._id ?? req.user._id })
+    if (!userInfo) {
       return res.status(200).json({ message: "No User Exist", status: "Failed", })
+    }
+    const profession = req.body.profession
+
+    let role = null
+    let suffix = null
+
+    let updateFields = {
+      ...req.body,
+    }
+
+    if (profession) {
+      role = profession === "student" ? req.body.field_of_study : profession === "homemaker" ? `Anything & Everything` : req.body.user_job_role
+      suffix = profession === "homemaker" ? profession : req.body.user_current_company_name ? req.body.user_current_company_name : userInfo.user_current_company_name
+      updateFields = {
+        ...updateFields,
+        public_user_name: `${toTitleCase(role)} @ ${toTitleCase(suffix)}`,
+        user_job_experience: Number(req.body.user_job_experience)
+      }
     }
 
 
-    const updateOperation = {
-      $set: {
-        ...req.body,
-        public_user_name: `${toTitleCase(req.body.user_job_role)} @ ${UserInfo.user_current_company_name}`
-      },
-    };
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user_id },
+      { $set: updateFields },
+      { new: true, projection }
+    );
+    if (updatedUser) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
 
-    const redis = getRedisInstance()
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
-    const result = await redis.del(userInfoRedisKey);
-    const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
-    if (updatedData) {
+      addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+      const textToEmbed = `Public Name: ${updatedUser.public_user_name || ''}
+          Profession: ${updatedUser.profession || ''}
+          Hobbies: ${(updatedUser.hobbies ?? [])?.join(', ')}
+          Bio: ${updatedUser.user_bio || ''}
+          Academic level: ${updatedUser.academic_level || ''}
+          Field of study: ${updatedUser.field_of_study || ''}
+        `
+
+      const { embedding } = await generateSingleEmbedding(user_id, textToEmbed)
+
+
+      // Upsert embedding document to keep in sync
+      await userEmbedding.findOneAndUpdate(
+        { user_id },
+        { embedding, lastUpdated: new Date() },
+        { upsert: true, new: true }
+      );
+
       return res.status(200).json({
-        message: "Your Profile has been Updated Successfully", status: "Success", result: updateOperation["$set"]
+        message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
       })
     } else {
       return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
+    logger.error("error ==>", error)
+    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+  }
+}
+
+
+
+const updateUserProfileDetails = async (req, res) => {
+
+  const user_id = req.body._id ?? req.user._id;
+
+  if (!user_id) {
+    return res.status(400).json({
+      message: "User ID is required",
+      status: "Failed",
+      result: [],
+    });
+  }
+
+  try {
+    const userInfo = await User.findOne({ _id: req.body._id ?? req.user._id })
+    if (!userInfo) {
+      return res.status(200).json({ message: "No User Exist", status: "Failed", })
+    }
+    const profession = req.body.profession
+
+    let role = null
+    let suffix = null
+
+    let updateFields = {
+      ...req.body,
+    }
+
+    if (profession) {
+      role = profession === "student" ? req.body.field_of_study : profession === "homemaker" ? `Anything & Everything` : req.body.user_job_role
+      suffix = profession === "homemaker" ? profession : req.body.user_current_company_name ? req.body.user_current_company_name : userInfo.user_current_company_name
+      updateFields = {
+        ...updateFields,
+        public_user_name: `${toTitleCase(role)} @ ${toTitleCase(suffix)}`,
+        user_job_experience: Number(req.body.user_job_experience)
+      }
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user_id },
+      { $set: updateFields },
+      { new: true, projection }
+    ).populate("project_details");
+    if (updatedUser) {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
+
+      addOrUpdateCachedDataInRedis(userInfoRedisKey, updatedUser)
+      return res.status(200).json({
+        message: "Your Profile has been Updated Successfully", status: "Success", result: updatedUser
+      })
+    } else {
+      return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    }
+  } catch (error) {
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
 
 const getUserInfo = async (req, res) => {
   try {
-    const userId = req.params?.id
-    if (!userId) {
+    const user_id = req.params?._id
+    if (!user_id) {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
     }
 
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`
     const redis = getRedisInstance()
     const cachedData = await redis.get(userInfoRedisKey)
 
@@ -223,30 +408,17 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-    const projection = {
-      user_job_role: 1,
-      is_anonymous: 1,
-      is_email_verified: 1,
-      user_bio: 1,
-      user_current_company_name: 1,
-      user_id: 1,
-      user_job_experience: 1,
-      user_location: 1,
-      public_user_name: 1,
-      followings: 1,
-      followers: 1,
-    };
-
-    const user = await User.findOne({ _id: userId, access: true }, projection)
-    await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+    const user = await getUserWithFlatProfileDetails({ user_id, options: { projection } })
 
     if (user) {
+      await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
       return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
     } else {
       return res.status(404).json({ message: "Sorry, it appears this user doesn't exist.", status: "Failed", result: null })
     }
 
   } catch (error) {
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
@@ -260,31 +432,51 @@ const fetchUsersPayloadFormatter = (type, data) => {
 const fetchUsers = async (req, res) => {
   try {
     const payload = req.body
-    const userLoggedIn = req.body.loggedIn
+    const userLoggedId = payload?._id ?? req.user?._id
 
-    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", ...(userLoggedIn ? ["pending_followings", "followings", "followers"] : [])]
+    const keysToRetrieve = ["is_anonymous", "is_email_verified", "user_bio", "user_current_company_name", "user_id", "user_job_experience", "user_location", "public_user_name", "is_email_verified", "avatar", "user_public_profile_pic", ...(!!userLoggedId ? ["pending_followings", "followings", "followers"] : [])]
     const projection = keysToRetrieve.reduce((acc, key) => {
       acc[`${key}`] = 1;
       return acc;
     }, {});
 
     if (payload.type === "all_users") {
-      const currentUser = await User.findOne({ _id: payload?._id }).select("followings pending_followings followers");
+      const currentUser = await User.findOne({ _id: payload?._id ?? userLoggedId }).select("followings pending_followings followers");
 
       const ignoredIds = [
         ...(currentUser?.followings ?? []),
         ...(currentUser?.pending_followings ?? []),
         ...(currentUser?.followers ?? []),
-        ...([payload?._id] ?? []),
+        ...(userLoggedId ? [userLoggedId] : []),
       ];
 
-      const usersList = await User.find(
-        {
-          access: true,
-          _id: { $nin: ignoredIds },
-        },
-        { ...projection }
-      );
+
+      let usersList = []
+
+      const limitParam = req.body.limit;
+
+      if (limitParam !== undefined) {
+        const limitNum = parseInt(limitParam, 10);
+        if (!isNaN(limitNum) && limitNum > 0) {
+          usersList = await User.find(
+            {
+              access: true,
+              _id: { $nin: ignoredIds },
+              public_user_name: { $ne: null }
+            },
+            { public_user_name: 1, avatar: 1, user_bio: 1, user_public_profile_pic: 1 }
+          ).limit(limitNum)
+        }
+      } else {
+        usersList = await User.find(
+          {
+            access: true,
+            _id: { $nin: ignoredIds },
+          },
+          { ...projection }
+        ).sort({ createdAt: -1 });
+      }
+
       return res.status(200).json({
         message: "Users  Fetched SuccessFully", status: "Success", result: fetchUsersPayloadFormatter(payload.type, usersList)
       })
@@ -320,7 +512,7 @@ const fetchUsers = async (req, res) => {
     }
 
   } catch (error) {
-    console.log({ error })
+    logger.error("error ==>", error)
     return res.status(200).json({ message: "Something went Wrong", status: "Failed", result: [] })
   }
 }
@@ -329,67 +521,107 @@ const fetchUsers = async (req, res) => {
 // ----------------------------------------------------------
 const sendFollowRequest = async (req, res) => {
   const { senderId, receiverId } = req.body;
+  if (!senderId || !receiverId) {
+    return res.status(400).json({
+      message: "Missing senderId or receiverId",
+      status: "Failed",
+      result: []
+    });
+  }
+
+  const redis = getRedisInstance();
 
   try {
-    const receiverUser = await User.findById(receiverId);
-    // Check if the receiverId is in the pending_followings of senderId
-    const isRequestWithdrawal = receiverUser.pending_followings.includes(senderId);
+    const [senderUser, receiverUser] = await Promise.all([
+      User.findById(senderId).select(projection).lean(),
+      User.findById(receiverId).select(projection).lean()
+    ]);
 
-    if (isRequestWithdrawal) {
-      // Withdraw request
-      const result = await User.findByIdAndUpdate(senderId, {
-        $pull: { followings: receiverId },
-      }, { upsert: true, new: true });
-      if (result) {
-        await User.findByIdAndUpdate(receiverId, {
-          $pull: { pending_followings: senderId },
-        });
-      }
-
-    } else {
-      // Send request
-      const recieverData = await User.findByIdAndUpdate(receiverId, { $addToSet: { pending_followings: senderId }, }, { upsert: true, new: true });
-      if (recieverData) {
-        const senderData = await User.findByIdAndUpdate(senderId, {
-          $addToSet: { followings: receiverId },
-        }, { upsert: true, new: true });
-
-        const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
-        if (notification) {
-          const io = getIo()
-          io.to(receiverId).emit('follow_request_send_notication', notification);
-
-        }
-
-      }
+    if (!senderUser || !receiverUser) {
+      return res.status(404).json({
+        message: "Sender or receiver not found",
+        status: "Failed",
+        result: []
+      });
     }
 
-    // const result = await User.findById(senderId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    const isWithdrawal = receiverUser.pending_followings?.includes(senderId);
+    let updatedSender = null;
 
-    res.status(200).json({ message: "Updated User Info ", status: "Success", result: [] });
+    if (isWithdrawal) {
+      updatedSender = await User.findByIdAndUpdate(
+        senderId,
+        { $pull: { followings: receiverId } },
+        { new: true, projection, lean: true }
+      );
+      await User.findByIdAndUpdate(
+        receiverId,
+        { $pull: { pending_followings: senderId } },
+        { new: true, projection, lean: true }
+      );
+    } else {
+      updatedSender = await User.findByIdAndUpdate(
+        senderId,
+        { $addToSet: { followings: receiverId } },
+        { new: true, projection, lean: true }
+      );
+      const updatedReceiver = await User.findByIdAndUpdate(
+        receiverId,
+        { $addToSet: { pending_followings: senderId } },
+        { new: true, projection, lean: true }
+      );
+
+      const notification = await Notifications.create({
+        content: `${senderUser.public_user_name} sent you a follow request`,
+        receiverId
+      });
+      if (notification) {
+        getIo().to(receiverId).emit("follow_request_send_notification", notification);
+      }
+
+      // Optionally cache receiver's updated info too:
+      const receiverKey = `${process.env.APP_ENV}_user_info_${receiverId}`;
+      await redis.set(receiverKey, JSON.stringify(updatedReceiver), 'EX', 21600);
+    }
+
+
+    // Cache the updated sender data
+    if (updatedSender) {
+      const senderKey = `${process.env.APP_ENV}_user_info_${senderId}`;
+      await redis.set(senderKey, JSON.stringify(updatedSender), 'EX', 21600);
+    }
+
+    return res.status(200).json({
+      message: "User info updated",
+      status: "Success",
+      result: updatedSender || []
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
+    console.error("Error processing follow request:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      status: "Failed",
+      result: []
+    });
   }
-}
-
+};
 
 const acceptFollowRequest = async (req, res) => {
-  const { userId, requesterId } = req.body;
+  const { user_id, requesterId } = req.body;
 
 
   try {
-    await User.findByIdAndUpdate(userId, {
+    await User.findByIdAndUpdate(user_id, {
       $pull: { pending_followings: requesterId },
       $addToSet: { followers: requesterId },
     }, { upsert: true, new: true });
 
     await User.findByIdAndUpdate(requesterId, {
-      $pull: { followings: userId },
-      $addToSet: { followers: userId },
+      $pull: { followings: user_id },
+      $addToSet: { followers: user_id },
     }, { upsert: true, new: true });
 
-    const result = await User.findById(userId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    const result = await User.findById(user_id, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: result });
   } catch (error) {
@@ -400,9 +632,9 @@ const acceptFollowRequest = async (req, res) => {
 
 // API 3: Reject Connection Request
 const rejectFollowRequest = async (req, res) => {
-  const { userId, requesterId } = req.body;
+  const { user_id, requesterId } = req.body;
   try {
-    await User.findByIdAndUpdate(userId, {
+    await User.findByIdAndUpdate(user_id, {
       $pull: { pending_followings: requesterId },
     }, { upsert: true, new: true });
 
@@ -413,4 +645,970 @@ const rejectFollowRequest = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo };
+
+function assertSelf(user_id, authedId) {
+  if (!user_id || !authedId || user_id.toString() !== authedId.toString()) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+}
+
+function sanitizeItemPayload(payload, user_id) {
+  const { type, content, name, img_url, link, parent_id, category_order, width, height } = payload || {};
+  if (!['title', 'text', 'image', 'links', 'socialLink', 'category'].includes(type)) {
+    const err = new Error('Invalid type');
+    err.status = 400;
+    throw err;
+  }
+  return {
+    type,
+    content: content ?? null,
+    name: name ?? null,
+    img_url: img_url ?? null,
+    link: link ?? null,
+    parent_id: parent_id ?? null,
+    category_order: category_order ?? 0,
+    width: width ?? null,
+    height: height ?? null,
+    created_by: user_id,
+    ...payload
+  };
+}
+
+// GET /users/:user_id/
+
+const getProfile = async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user) return res.status(404).json({ status: 'Failed', message: 'User not found' });
+    const profile = user.profile_details
+      ? await ProfileDetails.findById(user.profile_details).lean()
+      : null;
+    return res.json({ status: 'Success', result: profile ?? { layouts: {}, items: [] } });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// POST /users/:user_id/profile/items  (add item)
+const addProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+    const sanitized = sanitizeItemPayload(req.body, authedId);
+
+    const session = await mongoose.startSession();
+    let createdItem;
+    await session.withTransaction(async () => {
+      // ensure user & profile
+      let user = await User.findOne({ _id: user_id, access: true }).select(projection).session(session);
+      if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
+      let profile;
+      if (!user.profile_details) {
+        profile = await ProfileDetails.create([{ created_by: authedId, layouts: {}, items: [] }], { session });
+        user.profile_details = profile[0]._id;
+        await user.save({ session });
+        profile = profile[0];
+      } else {
+        profile = await ProfileDetails.findById(user.profile_details).session(session);
+        if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+      }
+
+      profile.items.push(sanitized);
+      await profile.save({ session });
+
+      user = {
+        ...user.toObject(),
+        profile_details: profile
+      }
+
+      if (user) {
+        const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, user);
+      }
+
+      createdItem = profile.items[profile.items.length - 1];
+    });
+
+    return res.status(201).json({
+      status: 'Success',
+      message: 'Item created',
+      result: createdItem
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// PUT /users/:user_id/profile/items/:item_id  (update item metadata)
+const updateProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id, item_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+    // whitelist updatable fields
+    const { content, name, img_url, link, access, parent_id, category_order, width, height } = req.body || {};
+    const updates = {};
+    if (content !== undefined) updates.content = content;
+    if (name !== undefined) updates.name = name;
+    if (img_url !== undefined) updates.img_url = img_url;
+    if (link !== undefined) updates.link = link;
+    if (access !== undefined) updates.access = !!access;
+    if (parent_id !== undefined) updates.parent_id = parent_id;
+    if (category_order !== undefined) updates.category_order = category_order;
+    if (width !== undefined) updates.width = width;
+    if (height !== undefined) updates.height = height;
+
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user || !user.profile_details) return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+
+    const result = await ProfileDetails.findOneAndUpdate(
+      { _id: user.profile_details, 'items._id': item_id },
+      { $set: Object.fromEntries(Object.entries(updates).map(([k, v]) => [`items.$.${k}`, v])) },
+      { new: true, projection: { items: { $elemMatch: { _id: item_id } } } }
+    );
+
+    if (!result || !result.items?.length) return res.status(404).json({ status: 'Failed', message: 'Item not found' });
+
+    // Update Redis cache with full user data
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+    const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+    if (fullUser) {
+      await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+    }
+
+    return res.json({ status: 'Success', message: 'Item updated', result: result.items[0] });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Error', message: e.message });
+  }
+};
+
+// DELETE (soft) /users/:user_id/profile/items/:item_id
+// Also remove the item id from all breakpoints in layouts to prevent rendering "dangling" ids.
+const deleteProfileItem = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id, item_id } = req.params;
+
+  try {
+    assertSelf(user_id, authedId);
+
+    const session = await mongoose.startSession();
+    let updated;
+    await session.withTransaction(async () => {
+      const user = await User.findById(user_id).select('profile_details').session(session);
+      if (!user || !user.profile_details) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      const profile = await ProfileDetails.findById(user.profile_details).session(session);
+      if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      // soft delete
+      const item = profile.items.id(item_id);
+      if (!item) throw Object.assign(new Error('Item not found'), { status: 404 });
+
+      // Save item data before modifying
+      updated = {
+        _id: item._id,
+        type: item.type,
+        content: item.content,
+        name: item.name,
+        img_url: item.img_url,
+        link: item.link,
+        access: item.access,
+        created_by: item.created_by,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
+      };
+
+      item.access = false;
+
+      // prune from layouts
+      const bps = ['lg', 'md', 'sm', 'xs', 'xxs'];
+      for (const bp of bps) {
+        profile.layouts[bp] = (profile.layouts[bp] || []).filter(li => li.i !== String(item_id));
+      }
+
+      await profile.save({ session });
+    });
+
+    // Update cache outside transaction
+    try {
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+      const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+      if (fullUser) {
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+      }
+    } catch (cacheError) {
+      logger.warn('Cache update failed after delete:', cacheError);
+      // Don't fail the request if cache update fails
+    }
+
+    return res.json({ status: 'Success', message: 'Item soft-deleted and removed from layouts', result: updated });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Failed', message: e.message });
+  }
+};
+
+// PUT /users/:user_id/profile/layouts  (save responsive layouts)
+const updateLayouts = async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+  const layouts = req.body?.layouts;
+
+  try {
+    assertSelf(user_id, authedId);
+
+    // Minimal shape validation: ensure keys are arrays of layout items with required fields
+    const bps = ['lg', 'md', 'sm', 'xs', 'xxs'];
+    for (const bp of bps) {
+      if (layouts[bp] && !Array.isArray(layouts[bp])) {
+        const err = new Error(`layouts.${bp} must be an array`);
+        err.status = 400; throw err;
+      }
+      (layouts[bp] || []).forEach(li => {
+        ['i', 'x', 'y', 'w', 'h'].forEach(k => {
+          if (li[k] === undefined) {
+            const err = new Error(`layouts.${bp}[].${k} is required`);
+            err.status = 400; throw err;
+          }
+        });
+      });
+    }
+
+
+    const user = await User.findById(user_id, { access: true }).select('profile_details').lean();
+
+    if (!user) return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+
+    const updated = await ProfileDetails.findByIdAndUpdate(
+      user.profile_details,
+      { $set: { layouts } },
+      { new: true, projection: { layouts: 1 } }
+    );
+
+    // Update Redis cache with full user data
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+    const fullUser = await User.findById(user_id).select(projection).populate('profile_details').lean();
+    if (fullUser) {
+      await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+    }
+
+    return res.json({ status: 'Success', message: 'Layouts updated', result: updated?.layouts });
+  } catch (e) {
+    console.error(e);
+    return res.status(e.status || 500).json({ status: 'Failed', message: e.message });
+  }
+};
+
+
+// '/recommend/:user_id'
+function paginate(list, limit) {
+  const hasMore = list.length > limit;
+  const results = hasMore ? list.slice(0, limit) : list;
+  const nextCursor = hasMore ? list[limit]._id.toString() : null;
+  return { results, nextCursor };
+}
+
+const getUserRecommendations = async (req, res) => {
+
+  try {
+    const { user_id = null } = req.params;
+
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const cursor = req.query.cursor || null;
+    const filter = cursor ? { _id: { $gt: new mongoose.Types.ObjectId(cursor) } } : {};
+
+
+    // List all users if user_id is "users"
+    if (!user_id) {
+      const users = await User.find(filter, { ...projection })
+        .sort({ _id: 1 })
+        .limit(limit + 1)
+        .lean();
+
+      const { results: records, nextCursor } = paginate(users, limit);
+      return res.success({
+        status: "Success",
+        message: "Users fetched",
+        result: { data: records, nextCursor }
+      });
+    }
+
+    // Personalized recommendations for specific user_id
+    const user = await User.findById(user_id, { ...projection }).lean();
+    if (!user) {
+      return res.error({ status: "Error", message: "User not found", code: 404 });
+    }
+
+    // Fetch recommendations document for user
+    const recDoc = await Recommendation.findOne({ user_id }).lean();
+
+    const updated_at = recDoc ? recDoc.updatedAt ?? recDoc?.updated_at : null;
+    const currentTime = new Date()
+    const timeDiffInHours = updated_at ? Math.abs(currentTime - new Date(updated_at)) / 36e5 : null;
+
+
+    const staleThresholdHours = 24;
+
+    const isDifferenceExceedsThreshold = updated_at ? timeDiffInHours !== null && timeDiffInHours > staleThresholdHours : true;
+
+    // If no recommendations exist, enqueue background computation and fallback to users list
+    if (!recDoc || !recDoc.items || recDoc.items.length === 0 || isDifferenceExceedsThreshold) {
+      // Assuming recommendationQueue is correctly initialized and imported elsewhere
+      recommendationQueue.add(
+        'compute',
+        { user_id, limit: 500 },
+        { removeOnComplete: true, removeOnFail: true }
+      );
+
+      // Fallback: get all users except current user, paginate and return
+      const fallbackUsers = await User.find({ _id: { $ne: user._id } }, { ...projection })
+        .sort({ _id: 1 })
+        .limit(limit + 1)
+        .lean();
+
+      const { results, nextCursor } = paginate(fallbackUsers, limit);
+
+      return res.success({
+        status: "Success",
+        message: "Fallback users fetched",
+        result: { data: results, nextCursor }
+      });
+    }
+
+    // If recommendations exist, we merge with user data and add recommendation_value key
+    // Apply pagination on recommendations
+    let recommendationItems = recDoc.items;
+
+    // If cursor is provided, find index of cursor in the items list
+    if (cursor) {
+      const cursorIndex = recommendationItems.findIndex(item => item.user_id.toString() === cursor);
+      if (cursorIndex >= 0) {
+        // slice from next element after cursor
+        recommendationItems = recommendationItems.slice(cursorIndex + 1);
+      }
+    }
+
+    // Limit the recommendation items to requested limit + 1 for nextCursor calculation
+    const limitedItems = recommendationItems.slice(0, limit + 1);
+
+    // Extract user ids from recommendation items
+    const recommendedUserIds = limitedItems.map(item => item.user_id.toString());
+
+    // Fetch full user details for these recommended users
+    const recommendedUsers = await User.find({ _id: { $in: recommendedUserIds, $ne: user_id } }, { ...projection })
+      .lean();
+
+    // Map user details by _id string for quick lookup
+    const userMap = new Map(recommendedUsers.map(u => [u._id.toString(), u]));
+
+    // Compose final results with recommendation_value added
+    const results = limitedItems.map(item => {
+      const user = userMap.get(item.user_id.toString());
+      return user ? { ...user, recommendation_value: item.recommendation_value } : null;
+    }) // filter out nulls if any
+    // Determine nextCursor for pagination
+    const nextCursor = limitedItems.length > limit ? limitedItems[limit].user_id.toString() : null;
+
+    return res.success({
+      status: 'Success',
+      message: 'Recommendations fetched',
+      result: {
+        data: results,
+        nextCursor
+      },
+    });
+  } catch (err) {
+    logger.error("error ==>", err)
+    return res.error({
+      status: "Failed",
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'production' ? null : err.message,
+      code: 500
+    });
+  }
+};
+
+
+/**
+ * Generate JWT tokens for authentication
+ * @param {string} user_id - User ID
+ * @returns {Object} - Access and refresh tokens
+ */
+const generateTokens = (user_id) => {
+  const accessToken = generateToken(user_id, '7d'); // 7 days (extended from 15m)
+  const refreshToken = generateToken(user_id, '30d'); // 30 days (extended from 7d)
+  return { accessToken, refreshToken };
+}
+
+/**
+ * Set authentication cookies
+ * @param {Object} res - Express response object
+ * @param {string} accessToken - JWT access token
+ * @param {string} refreshToken - JWT refresh token
+ */
+const setAuthCookies = (res, accessToken, refreshToken) => {
+  // Main auth token (httpOnly for security)
+  res.cookie(tokenkeyName, accessToken, {
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (extended from 15 minutes)
+  });
+
+  // Refresh token (httpOnly, longer expiry)
+  res.cookie(`${tokenkeyName}:refresh`, refreshToken, {
+    ...cookieOptions,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days (extended from 7 days)
+  });
+
+  // Client-readable auth status (not httpOnly) - matches access token expiry
+  res.cookie('isAuthenticated', 'true', {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    httpOnly: false, // Must be readable by client JavaScript
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (extended from 15 minutes)
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+}
+
+/**
+ * Clear authentication cookies
+ * @param {Object} res - Express response object
+ */
+const clearAuthCookies = (res) => {
+  const clearOptions = {
+    ...cookieOptions,
+    maxAge: 0
+  };
+
+  res.clearCookie(tokenkeyName, clearOptions);
+  res.clearCookie(`${tokenkeyName}:refresh`, clearOptions);
+  res.clearCookie('isAuthenticated', {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    domain: isProd ? undefined : 'localhost'
+  });
+}
+
+/**
+ * Token Refresh
+ * POST /api/auth/refresh
+ */
+const refreshToken = asyncHandler(async (req, res) => {
+  const refreshTokenCookie = req.cookies?.[`${tokenkeyName}:refresh`];
+
+  if (!refreshTokenCookie) {
+    return res.status(401).json({
+      success: false,
+      error: "Refresh token not found"
+    });
+  }
+
+  try {
+    const jwt = require("jsonwebtoken");
+    const decoded = jwt.verify(refreshTokenCookie, process.env.JWT_SECRET_KEY);
+
+    // Check if user still exists and has access
+    const user = await User.findOne({ _id: decoded._id, access: true });
+
+    if (!user) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        success: false,
+        error: "User not found or access revoked"
+      });
+    }
+
+    // Generate new tokens
+    const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id);
+    setAuthCookies(res, accessToken, newRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: "Tokens refreshed successfully",
+      data: {
+        user: responseFormatterForAuth(user._doc),
+        token: accessToken
+      }
+    });
+
+  } catch (error) {
+    clearAuthCookies(res);
+    return res.status(401).json({
+      success: false,
+      error: "Invalid refresh token"
+    });
+  }
+});
+
+/**
+ * Get Current User
+ * GET /api/auth/me
+ */
+const getCurrentUser = asyncHandler(async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: responseFormatterForAuth(user._doc)
+      }
+    });
+
+  } catch (error) {
+    logger.error("Get current user error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to get user data"
+    });
+  }
+});
+
+
+
+/**
+ * Send Magic Link (Better-auth Email OTP)
+ * POST /api/auth/send-magic-link
+ */
+const sendMagicLink = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: "Email is required"
+    });
+  }
+
+  try {
+    // Check if email credentials are configured
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      logger.error("Email credentials not configured (EMAIL_USER or EMAIL_PASS missing)");
+      return res.status(500).json({
+        success: false,
+        error: "Email service not configured. Please contact support."
+      });
+    }
+
+    // Use better-auth's email OTP functionality
+    // This will trigger the sendOTP function configured in config/auth.js
+    const result = await generateMagicLink(email);
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || "Failed to send magic link"
+      });
+    }
+
+    // Send the magic link via email
+    const transporter = nodemailer.createTransporter({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"${process.env.APP_NAME || 'Hushwork'}" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Your Magic Link",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Sign in to ${process.env.APP_NAME || 'Hushwork'}</h2>
+          <p>Click the button below to sign in to your account:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${result.url}"
+               style="background: #007bff; color: white; padding: 12px 24px;
+                      text-decoration: none; border-radius: 6px; display: inline-block;">
+              Sign In
+            </a>
+          </div>
+          <p style="color: #666; font-size: 14px;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="${result.url}">${result.url}</a>
+          </p>
+          <p style="color: #666; font-size: 14px;">
+            This link will expire in 15 minutes for security reasons.
+          </p>
+        </div>
+      `
+    });
+
+    logger.info(`Magic link sent to ${email}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Magic link sent successfully"
+    });
+
+  } catch (error) {
+    logger.error("Send magic link error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send magic link"
+    });
+  }
+});
+
+/**
+ * Verify Magic Link or OTP
+ * POST /api/auth/verify
+ */
+const verifyAuth = asyncHandler(async (req, res) => {
+  const { email, otp, token, type } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: "Email is required"
+    });
+  }
+
+  try {
+    let verificationResult;
+
+    if (type === 'magic-link' && token) {
+      // Verify magic link token
+      verificationResult = verifyMagicToken(email, token);
+    } else if (type === 'otp' && otp) {
+      // Verify OTP
+      verificationResult = verifyOTP(email, otp);
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid verification type or missing credentials"
+      });
+    }
+
+    if (!verificationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: verificationResult.error
+      });
+    }
+
+    // Find or create user using encryption-aware email comparison
+    let user = await findUserByEmail(email);
+
+    if (!user) {
+      // Create new user
+      const emailSplit = email.split("@");
+      const domain = emailSplit[1].split(".")[0];
+      const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
+      const companyId = companyExist?.company_id || new mongoose.Types.ObjectId();
+
+      if (!companyExist) {
+        const company = new Company({
+          company_id: companyId,
+          company_name: toTitleCase(domain)
+        });
+        await company.save();
+      }
+
+      const user_current_company_name = !["example", "gmail", "outlook"].includes(domain)
+        ? toTitleCase(domain)
+        : "Somewhere";
+
+      user = new User({
+        user_email_id: email,
+        public_user_name: email.split('@')[0],
+        is_email_verified: true,
+        is_anonymous: true,
+        user_current_company_name,
+        user_company_id: companyId,
+        user_past_company_history: [companyId],
+        primary_email_domain: emailSplit[1],
+        access: true
+      });
+
+      await user.save();
+      logger.info(`New user created via ${type}: ${email}`);
+    }
+
+    // Generate tokens and set cookies
+    const { accessToken, refreshToken } = generateTokens(user._id);
+    setAuthCookies(res, accessToken, refreshToken);
+
+    logger.info(`User verified via ${type}: ${email}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Authentication successful",
+      data: {
+        user: responseFormatterForAuth(user._doc),
+        token: accessToken
+      }
+    });
+
+  } catch (error) {
+    logger.error("Verify auth error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Verification failed"
+    });
+  }
+});
+
+
+// Update premium status
+const updatePremiumStatus = asyncHandler(async (req, res) => {
+  const { has_premium, premium_plan, premium_expires_at } = req.body;
+
+  // Validate input
+  if (typeof has_premium !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: "has_premium must be a boolean"
+    });
+  }
+
+  const validPlans = ["free", "monthly", "yearly", "lifetime"];
+  if (premium_plan && !validPlans.includes(premium_plan)) {
+    return res.status(400).json({
+      success: false,
+      error: `premium_plan must be one of: ${validPlans.join(", ")}`
+    });
+  }
+
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Update premium status
+    user.has_premium = has_premium;
+
+    if (premium_plan) {
+      user.premium_plan = premium_plan;
+    }
+
+    if (premium_expires_at) {
+      user.premium_expires_at = new Date(premium_expires_at);
+    } else if (has_premium && premium_plan === "lifetime") {
+      user.premium_expires_at = null; // null means lifetime
+    } else if (!has_premium) {
+      user.premium_plan = "free";
+      user.premium_expires_at = null;
+    }
+
+    // Check if premium has expired
+    if (user.has_premium && user.premium_expires_at && new Date() > user.premium_expires_at) {
+      user.has_premium = false;
+      user.premium_plan = "free";
+    }
+
+    await user.save();
+
+    logger.info(`Premium status updated for user ${user.user_email_id}: ${has_premium} (${user.premium_plan})`);
+
+    // Return decrypted user data
+    const decryptedUser = decryptUserData(user._doc);
+
+    return res.status(200).json({
+      success: true,
+      message: "Premium status updated successfully",
+      data: {
+        user: responseFormatterForAuth(decryptedUser)
+      }
+    });
+
+  } catch (error) {
+    logger.error("Update premium status error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update premium status"
+    });
+  }
+});
+
+
+/**
+ * Get Online Status for Connected Users
+ * GET /api/users/connected-online-status
+ * Returns online status ONLY for users that are following each other (connected)
+ */
+const getConnectedUsersOnlineStatus = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get current user with followers and followings
+    // Better Auth uses string UUIDs, not ObjectIds
+    const user = await User.findOne({ _id: userId }).select('followers followings').lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Get connected users (intersection of followers and followings)
+    const followers = user.followers || [];
+    const followings = user.followings || [];
+    const connectedUserIds = followers.filter(id => followings.includes(id));
+
+    if (connectedUserIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          onlineUsers: []
+        }
+      });
+    }
+
+    // Check online status from Redis for each connected user using redisUtils helper
+    const onlineStatuses = await Promise.all(
+      connectedUserIds.map(async (connectedUserId) => {
+        const online = await isUserOnline(connectedUserId);
+        return {
+          userId: connectedUserId,
+          isOnline: online
+        };
+      })
+    );
+
+    // Filter to return only users who are online
+    const onlineUsers = onlineStatuses
+      .filter(status => status.isOnline)
+      .map(status => status.userId);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        onlineUsers,
+        totalConnected: connectedUserIds.length,
+        totalOnline: onlineUsers.length
+      }
+    });
+
+  } catch (error) {
+    logger.error("Get connected users online status error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to get online status"
+    });
+  }
+});
+
+
+// PUT /:user_id/profile/items/reorder - Reorder items within categories
+const reorderProfileItems = asyncHandler(async (req, res) => {
+  const authedId = req.user?._id;
+  const { user_id } = req.params;
+  const { items } = req.body; // Array of { item_id, category_order, parent_id }
+
+  try {
+    assertSelf(user_id, authedId);
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        status: 'Failed',
+        message: 'Items array is required'
+      });
+    }
+
+    const user = await User.findById(user_id).select('profile_details').lean();
+    if (!user || !user.profile_details) {
+      return res.status(404).json({ status: 'Failed', message: 'Profile not found' });
+    }
+
+    const session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      const profile = await ProfileDetails.findById(user.profile_details).session(session);
+      if (!profile) throw Object.assign(new Error('Profile not found'), { status: 404 });
+
+      // Update each item's order and parent
+      for (const { item_id, category_order, parent_id } of items) {
+        const item = profile.items._id(item_id);
+        if (item) {
+          if (category_order !== undefined) item.category_order = category_order;
+          if (parent_id !== undefined) item.parent_id = parent_id;
+        }
+      }
+
+      await profile.save({ session });
+
+      // Update cache
+      const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${user_id}`;
+      const fullUser = await User.findById(user_id).select(projection).populate('profile_details').session(session);
+      if (fullUser) {
+        await addOrUpdateCachedDataInRedis(userInfoRedisKey, fullUser);
+      }
+    });
+
+    return res.status(200).json({
+      status: 'Success',
+      message: 'Items reordered successfully'
+    });
+  } catch (error) {
+    logger.error('Error reordering profile items:', error);
+    return res.status(error.status || 500).json({
+      status: 'Error',
+      message: error.message || 'Failed to reorder items'
+    });
+  }
+});
+
+// GET /link-metadata - Fetch link preview metadata
+const getLinkMetadata = asyncHandler(async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({
+      status: 'Failed',
+      message: 'URL parameter is required'
+    });
+  }
+
+  try {
+    const { fetchLinkMetadata } = require('../services/linkMetadataService');
+    const metadata = await fetchLinkMetadata(url);
+
+    return res.status(200).json({
+      status: 'Success',
+      message: 'Metadata fetched successfully',
+      result: metadata
+    });
+  } catch (error) {
+    logger.error('Error fetching link metadata:', error);
+    return res.status(500).json({
+      status: 'Error',
+      message: error.message || 'Failed to fetch link metadata'
+    });
+  }
+});
+
+module.exports = {
+  allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, updateUserProfileDetails, getProfile, addProfileItem, deleteProfileItem, updateProfileItem, updateLayouts, getUserRecommendations,
+  refreshToken,
+  getCurrentUser,
+  updatePremiumStatus,
+  sendMagicLink,
+  verifyAuth,
+  getConnectedUsersOnlineStatus,
+  getLinkMetadata,
+  reorderProfileItems,
+}; 
