@@ -260,7 +260,7 @@ class FieldTransformService {
     }
 
     transformFieldGroupField(value) {
-        // Field group is a container for other fields, typically no direct value
+        // Field group is afor other fields, typically no direct value
         // If it has nested fields, return the object structure as-is
         if (typeof value === 'object') {
             return value;
