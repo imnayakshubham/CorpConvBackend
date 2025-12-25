@@ -7,7 +7,7 @@ const { createPost, fetchPosts, upVotePost, updatePost, deletePost, getPost } = 
 const router = express.Router();
 
 router.route("/create").post(protect, createPost);
-router.route("/all-posts").get(fetchPosts);
+router.route("/discussions").get(fetchPosts);
 router.route("/upvote").post(protect, upVotePost);
 router.route("/update").post(protect, updatePost);
 router.route("/delete").post(protect, deletePost);

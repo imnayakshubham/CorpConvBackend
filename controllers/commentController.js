@@ -1,8 +1,7 @@
 const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
+const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis } = require("../redisClient/redisUtils");
 const { populateChildComments } = require("../utils/utils");
-
-
 
 // app.post('/api/comments',
 const postComments = async (req, res) => {
@@ -30,7 +29,19 @@ const postComments = async (req, res) => {
             path: 'comments',
             match: { access: { $ne: false } },
         });
+
         await populateChildComments(updatedPost.comments)
+
+        // update the redis post cache based on getch post logic
+        const query = {
+            posted_by: post.posted_by,
+            category: post.category,
+        }
+        const redisKey = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`)
+        addOrUpdateCachedDataInRedis(redisKey, updatedPost)
+
+        console.log("create comment", redisKey, updatedPost)
+
 
         res.status(201).json({
             status: 'Success',

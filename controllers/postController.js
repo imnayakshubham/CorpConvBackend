@@ -1,12 +1,12 @@
 const Post = require("../models/postModel");
 const getRedisInstance = require("../redisClient/redisClient");
+const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis } = require("../redisClient/redisUtils");
 const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
 
 
 const createPost = async (req, res) => {
     try {
-
         const postPayload = {
             category: req.body.category,
             content: req.body.content,
@@ -87,16 +87,25 @@ const updatePost = async (req, res) => {
 const fetchPosts = async (req, res) => {
     try {
         const user_id = req.query?.user_id ?? null;
+        const category = req.query?.category ?? "all";
         let query = {};
 
         if (user_id) {
             query = { posted_by: user_id };
         }
 
+        if (category !== "all") {
+            query = {
+                ...query,
+                category: category
+            };
+        }
+
         const redis = getRedisInstance()
-        const postedByRedisKey = user_id ? `${process.env.APP_ENV}_posted_by_${user_id}` : `${process.env.APP_ENV}_posts`
-        const cachedData = await redis.get(postedByRedisKey)
+        const redisKey = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`)
+        const cachedData = await redis.get(redisKey)
         const parsedCachedData = JSON.parse(cachedData)
+        console.log(redisKey, parsedCachedData)
 
         if (parsedCachedData) {
             return res.status(200).json({
@@ -107,13 +116,14 @@ const fetchPosts = async (req, res) => {
         } else if (parsedCachedData === null) {
             const posts = await Post.find(query)
                 .sort({ createdAt: -1 })
-                .populate("posted_by", "public_user_name is_email_verified")
+                .populate("posted_by", "public_user_name is_email_verified public_user_profile_pic avatar")
                 .populate({
                     path: 'comments',
                     match: { access: { $ne: false } },
-                    populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
+                    populate: { path: 'commented_by', select: 'public_user_name is_email_verified public_user_profile_pic avatar' }
                 }).maxTimeMS(15000).lean()
-            await redis.set(postedByRedisKey, JSON.stringify(posts), 'EX', 21600); //Cached for 6 hours
+
+            addOrUpdateCachedDataInRedis(redisKey, posts)
 
             return res.status(200).json({
                 status: 'Success',

@@ -35,6 +35,50 @@ const commentSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    reported_info: [
+        {
+            reporter: {
+                // who reported
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+                required: true
+            },
+            targetUser: {
+                // who is being reported (if applicable)
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+                required: true
+            },
+            reason: {
+                // reason for reporting
+                type: String,
+                required: true,
+                trim: true
+            },
+            description: {
+                // optional detailed explanation
+                type: String,
+                trim: true
+            },
+            category: {
+                // type/category of report (spam, abuse, etc.)
+                type: String,
+                enum: ["spam", "abuse", "harassment", "other"],
+                default: "other"
+            },
+            createdAt: {
+                // timestamp
+                type: Date,
+                default: Date.now
+            },
+            status: {
+                // for review workflow
+                type: String,
+                enum: ["pending", "reviewed", "resolved", "rejected"],
+                default: "pending"
+            }
+        }
+    ],
     access: {
         type: Boolean,
         default: true

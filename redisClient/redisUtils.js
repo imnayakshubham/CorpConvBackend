@@ -112,4 +112,24 @@ const syncOnlineStatusToDB = async () => {
     }
 };
 
-module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, isUserOnline, syncOnlineStatusToDB }
+function createRedisKeyFromQuery(query = {}, namespace = "cache") {
+    const parts = [namespace];
+
+    Object.keys(query)
+        .sort()
+        .forEach((key) => {
+            const value = query[key];
+            if (
+                value !== undefined &&
+                value !== null &&
+                value !== "" &&
+                !(Array.isArray(value) && value.length === 0)
+            ) {
+                parts.push(`${key}:${String(value)}`);
+            }
+        });
+
+    return parts.join("|");
+}
+
+module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, isUserOnline, syncOnlineStatusToDB, createRedisKeyFromQuery }
