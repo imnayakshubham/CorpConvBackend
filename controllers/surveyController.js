@@ -837,7 +837,7 @@ const validateFormSchema = async (req, res) => {
 const submitSurveyWithServices = async (req, res) => {
     try {
         const surveyId = req.params.id;
-        const submissionData = req.body.submissions || req.body.data;
+        const submissionData = req.body.submissionData || req.body.submissions || req.body.data;
 
         const survey = await Survey.findById(surveyId);
         if (!survey) {

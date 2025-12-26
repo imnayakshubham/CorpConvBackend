@@ -328,7 +328,7 @@ router.post('/validate-schema',
 );
 
 // POST /api/survey/:id/submit-enhanced - Submit with spam detection and services
-router.post('/:id/submit-enhanced',
+router.post('/:id/submit',
     optionalAuth,
     submitFormLimit,
     [
