@@ -105,7 +105,6 @@ const fetchPosts = async (req, res) => {
         const redisKey = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`)
         const cachedData = await redis.get(redisKey)
         const parsedCachedData = JSON.parse(cachedData)
-        console.log(redisKey, parsedCachedData)
 
         if (parsedCachedData) {
             return res.status(200).json({
@@ -113,21 +112,24 @@ const fetchPosts = async (req, res) => {
                 data: parsedCachedData,
                 message: "Posts fetched successfully (Cached)"
             })
-        } else if (parsedCachedData === null) {
+        } else {
             const posts = await Post.find(query)
                 .sort({ createdAt: -1 })
                 .populate("posted_by", "public_user_name is_email_verified public_user_profile_pic avatar")
-                .populate({
-                    path: 'comments',
-                    match: { access: { $ne: false } },
-                    populate: { path: 'commented_by', select: 'public_user_name is_email_verified public_user_profile_pic avatar' }
-                }).maxTimeMS(15000).lean()
+                .maxTimeMS(15000)
+                .lean();
 
-            addOrUpdateCachedDataInRedis(redisKey, posts)
+            // Add comment count to each post instead of populating comments
+            const postsWithCommentCount = posts.map(post => ({
+                ...post,
+                commentCount: post.comments.length
+            }));
+
+            addOrUpdateCachedDataInRedis(redisKey, postsWithCommentCount)
 
             return res.status(200).json({
                 status: 'Success',
-                data: posts,
+                data: postsWithCommentCount,
                 message: "Posts fetched successfully"
             })
         }
@@ -149,43 +151,38 @@ const upVotePost = async (req, res) => {
         const post = await Post.findById(req.body.post_id);
         if (post) {
             const io = getIo()
+            let postData;
+            let message;
             if (post.upvoted_by.includes(req.user._id)) {
-                const postData = await Post.findByIdAndUpdate(req.body.post_id, { $pull: { upvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified").populate({
-                    path: 'comments',
-                    match: { access: { $ne: false } },
-                });
-                await populateChildComments(postData.comments)
-                io.emit('listen_upvote', {
-                    data: postData,
-                    upvoted_by: req.user._id
-                })
-
-                if (postData) {
-                    return res.status(200).json({
-                        status: 'Success',
-                        data: postData,
-                        message: "Post Upvote Removed successfully"
-                    })
-                }
-
+                postData = await Post.findByIdAndUpdate(req.body.post_id, { $pull: { upvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+                message = "Post Upvote Removed successfully";
             } else {
-                const postData = await Post.findByIdAndUpdate(req.body.post_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified").populate({
-                    path: 'comments',
-                    match: { access: { $ne: false } },
-                });
-                await populateChildComments(postData.comments)
+                // Remove from downvote if exists
+                await Post.findByIdAndUpdate(req.body.post_id, { $pull: { downvoted_by: req.user._id } });
+                postData = await Post.findByIdAndUpdate(req.body.post_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+                message = "Post Upvoted successfully";
+            }
+
+            if (postData) {
+                // Update Redis Cache
+                const query = { category: postData.category };
+                const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+                const redisKeyCat = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`);
+                const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+
+                const redis = getRedisInstance();
+                await redis.del(redisKeyAll, redisKeyCat, redisKeyUser);
+
                 io.emit('listen_upvote', {
                     data: postData,
                     upvoted_by: req.user._id
                 })
-                if (postData) {
-                    return res.status(200).json({
-                        status: 'Success',
-                        data: postData,
-                        message: "Post Upvoted successfully"
-                    })
-                }
 
+                return res.status(200).json({
+                    status: 'Success',
+                    data: postData,
+                    message: message
+                })
             }
         } else {
             return res.status(400).json({
@@ -201,6 +198,94 @@ const upVotePost = async (req, res) => {
             status: 'Failed',
             message: "Post not upvoted"
         })
+    }
+}
+
+const downVotePost = async (req, res) => {
+    try {
+        const post = await Post.findById(req.body.post_id);
+        if (post) {
+            const io = getIo()
+            let postData;
+            let message;
+            if (post.downvoted_by.includes(req.user._id)) {
+                postData = await Post.findByIdAndUpdate(req.body.post_id, { $pull: { downvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+                message = "Post Downvote Removed successfully";
+            } else {
+                // Remove from upvote if exists
+                await Post.findByIdAndUpdate(req.body.post_id, { $pull: { upvoted_by: req.user._id } });
+                postData = await Post.findByIdAndUpdate(req.body.post_id, { $addToSet: { downvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+                message = "Post Downvoted successfully";
+            }
+
+            if (postData) {
+                // Invalidate Redis Cache
+                const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+                const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
+                const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+
+                const redis = getRedisInstance();
+                await redis.del(redisKeyAll, redisKeyCat, redisKeyUser);
+
+                io.emit('listen_downvote', {
+                    data: postData,
+                    downvoted_by: req.user._id
+                })
+
+                return res.status(200).json({
+                    status: 'Success',
+                    data: postData,
+                    message: message
+                })
+            }
+        } else {
+            return res.status(400).json({
+                status: 'Failed',
+                message: "Post not found",
+                data: null
+            })
+        }
+    } catch (error) {
+        console.log(error)
+        return res.status(500).json({
+            data: null,
+            status: 'Failed',
+            message: "Post not downvoted"
+        })
+    }
+}
+
+const awardPost = async (req, res) => {
+    try {
+        const { post_id, awardType } = req.body;
+        const postData = await Post.findByIdAndUpdate(post_id, { $push: { awards: awardType } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+        if (postData) {
+            return res.status(200).json({
+                status: 'Success',
+                data: postData,
+                message: "Award added successfully"
+            });
+        }
+        res.status(400).json({ status: 'Failed', message: 'Post not found' });
+    } catch (error) {
+        res.status(500).json({ status: 'Failed', message: 'Something went wrong' });
+    }
+}
+
+const sharePost = async (req, res) => {
+    try {
+        const { post_id } = req.body;
+        const postData = await Post.findByIdAndUpdate(post_id, { $inc: { shares: 1 } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+        if (postData) {
+            return res.status(200).json({
+                status: 'Success',
+                data: postData,
+                message: "Post shared successfully"
+            });
+        }
+        res.status(400).json({ status: 'Failed', message: 'Post not found' });
+    } catch (error) {
+        res.status(500).json({ status: 'Failed', message: 'Something went wrong' });
     }
 }
 
@@ -263,4 +348,4 @@ const getPost = async (req, res) => {
     }
 }
 
-module.exports = { createPost, fetchPosts, upVotePost, updatePost, deletePost, getPost };
+module.exports = { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost };
