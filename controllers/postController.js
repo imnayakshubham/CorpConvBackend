@@ -1,6 +1,6 @@
 const Post = require("../models/postModel");
 const getRedisInstance = require("../redisClient/redisClient");
-const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis } = require("../redisClient/redisUtils");
+const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis, syncRedisPostCache } = require("../redisClient/redisUtils");
 const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
 
@@ -14,10 +14,23 @@ const createPost = async (req, res) => {
         }
 
         const post = await Post.create(postPayload)
-        const postData = await post.populate("posted_by", "public_user_name is_email_verified")
+        const postData = await post.populate("posted_by", "public_user_name is_email_verified public_user_profile_pic avatar")
         if (postData) {
+            // Prepare data for cache sync
+            const dataToSync = {
+                ...postData.toObject(),
+                commentCount: 0
+            };
+
+            // Sync Redis Cache
+            const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+            const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
+            const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+            await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "ADD", dataToSync);
+
             const io = getIo()
             io.emit('listen_post_creation', postData)
+            io.emit('listen_post_update', postData) // Generic update listener
 
             return res.status(201).json({
                 status: 'Success',
@@ -54,6 +67,21 @@ const updatePost = async (req, res) => {
             await populateChildComments(postData.comments)
 
             if (postData) {
+                // Prepare data for cache sync
+                const dataToSync = {
+                    ...postData.toObject(),
+                    commentCount: (postData.comments || []).length
+                };
+
+                // Sync Redis Cache
+                const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+                const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
+                const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+                await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
+
+                const io = getIo()
+                io.emit('listen_post_update', postData)
+
                 return res.status(200).json({
                     status: 'Success',
                     data: postData,
@@ -122,7 +150,7 @@ const fetchPosts = async (req, res) => {
             // Add comment count to each post instead of populating comments
             const postsWithCommentCount = posts.map(post => ({
                 ...post,
-                commentCount: post.comments.length
+                commentCount: (post.comments || []).length
             }));
 
             addOrUpdateCachedDataInRedis(redisKey, postsWithCommentCount)
@@ -153,7 +181,7 @@ const upVotePost = async (req, res) => {
             const io = getIo()
             let postData;
             let message;
-            if (post.upvoted_by.includes(req.user._id)) {
+            if (post.upvoted_by.some(id => id.toString() === req.user._id.toString())) {
                 postData = await Post.findByIdAndUpdate(req.body.post_id, { $pull: { upvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
                 message = "Post Upvote Removed successfully";
             } else {
@@ -170,9 +198,13 @@ const upVotePost = async (req, res) => {
                 const redisKeyCat = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`);
                 const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
 
-                const redis = getRedisInstance();
-                await redis.del(redisKeyAll, redisKeyCat, redisKeyUser);
+                const dataToSync = {
+                    ...postData.toObject(),
+                    commentCount: (postData.comments || []).length
+                };
+                await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
 
+                io.emit('listen_post_update', postData)
                 io.emit('listen_upvote', {
                     data: postData,
                     upvoted_by: req.user._id
@@ -208,7 +240,7 @@ const downVotePost = async (req, res) => {
             const io = getIo()
             let postData;
             let message;
-            if (post.downvoted_by.includes(req.user._id)) {
+            if (post.downvoted_by.some(id => id.toString() === req.user._id.toString())) {
                 postData = await Post.findByIdAndUpdate(req.body.post_id, { $pull: { downvoted_by: req.user._id } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
                 message = "Post Downvote Removed successfully";
             } else {
@@ -224,9 +256,13 @@ const downVotePost = async (req, res) => {
                 const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
                 const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
 
-                const redis = getRedisInstance();
-                await redis.del(redisKeyAll, redisKeyCat, redisKeyUser);
+                const dataToSync = {
+                    ...postData.toObject(),
+                    commentCount: (postData.comments || []).length
+                };
+                await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
 
+                io.emit('listen_post_update', postData)
                 io.emit('listen_downvote', {
                     data: postData,
                     downvoted_by: req.user._id
@@ -258,15 +294,54 @@ const downVotePost = async (req, res) => {
 const awardPost = async (req, res) => {
     try {
         const { post_id, awardType } = req.body;
-        const postData = await Post.findByIdAndUpdate(post_id, { $push: { awards: awardType } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
+        const post = await Post.findById(post_id);
+        if (!post) return res.status(404).json({ status: 'Failed', message: 'Post not found' });
+
+        const existingAwardIndex = post.awards.findIndex(a =>
+            a.user.toString() === req.user._id.toString() && a.type === awardType
+        );
+
+        let postData;
+        let message;
+
+        if (existingAwardIndex !== -1) {
+            // Remove the award
+            postData = await Post.findByIdAndUpdate(post_id,
+                { $pull: { awards: { user: req.user._id, type: awardType } } },
+                { new: true }
+            ).populate("posted_by", "public_user_name is_email_verified");
+            message = "Award removed successfully";
+        } else {
+            // Add the award
+            postData = await Post.findByIdAndUpdate(post_id,
+                { $push: { awards: { user: req.user._id, type: awardType } } },
+                { new: true }
+            ).populate("posted_by", "public_user_name is_email_verified");
+            message = "Award added successfully";
+        }
+
         if (postData) {
+            // Prepare data for cache sync
+            const dataToSync = {
+                ...postData.toObject(),
+                commentCount: (postData.comments || []).length
+            };
+
+            // Sync Redis Cache
+            const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+            const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
+            const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+            await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
+
+            const io = getIo();
+            io.emit('listen_post_update', postData);
+
             return res.status(200).json({
                 status: 'Success',
                 data: postData,
-                message: "Award added successfully"
+                message: message
             });
         }
-        res.status(400).json({ status: 'Failed', message: 'Post not found' });
     } catch (error) {
         res.status(500).json({ status: 'Failed', message: 'Something went wrong' });
     }
@@ -277,6 +352,21 @@ const sharePost = async (req, res) => {
         const { post_id } = req.body;
         const postData = await Post.findByIdAndUpdate(post_id, { $inc: { shares: 1 } }, { new: true }).populate("posted_by", "public_user_name is_email_verified");
         if (postData) {
+            // Invalidate Redis Cache
+            const redis = getRedisInstance();
+            const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+            const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
+            const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
+            const dataToSync = {
+                ...postData.toObject(),
+                commentCount: (postData.comments || []).length
+            };
+            await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
+
+
+            const io = getIo();
+            io.emit('listen_post_update', postData);
+
             return res.status(200).json({
                 status: 'Success',
                 data: postData,
@@ -293,8 +383,19 @@ const deletePost = async (req, res) => {
     try {
         const post = await Post.findById(req.body._id);
         if (post) {
+            const category = post.category;
+            const posted_by = post.posted_by;
             const postData = await Post.findByIdAndDelete(req.body._id);
             if (postData) {
+                // Prepare data for cache sync
+                const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+                const redisKeyCat = createRedisKeyFromQuery({ category: category }, `${process.env.APP_ENV}_post_`);
+                const redisKeyUser = createRedisKeyFromQuery({ posted_by: posted_by }, `${process.env.APP_ENV}_post_`);
+                await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "DELETE", { _id: req.body._id });
+
+                const io = getIo();
+                io.emit('listen_post_delete', { _id: req.body._id });
+
                 return res.status(200).json({
                     status: 'Success',
                     data: null,
@@ -307,7 +408,6 @@ const deletePost = async (req, res) => {
                     data: null
                 })
             }
-
         }
     } catch (error) {
         console.log(error)
@@ -321,7 +421,7 @@ const deletePost = async (req, res) => {
 
 const getPost = async (req, res) => {
     try {
-        const post = await Post.findById(req.params._id).populate("posted_by", "public_user_name is_email_verified").populate({
+        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified").populate({
             path: 'comments',
             match: { access: { $ne: false } },
         });
@@ -348,4 +448,39 @@ const getPost = async (req, res) => {
     }
 }
 
-module.exports = { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost };
+const reportPost = async (req, res) => {
+    try {
+        const { post_id, reason, description, category, targetUser } = req.body;
+        const reporter = req.user._id;
+
+        const report = {
+            reporter,
+            targetUser,
+            reason,
+            description,
+            category,
+            createdAt: Date.now(),
+            status: "pending"
+        };
+
+        const updatedPost = await Post.findByIdAndUpdate(
+            post_id,
+            { $push: { reported_info: report } },
+            { new: true }
+        );
+
+        if (updatedPost) {
+            return res.status(200).json({
+                status: 'Success',
+                message: 'Post reported successfully',
+                data: updatedPost
+            });
+        }
+        return res.status(404).json({ message: "Post not found" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+}
+
+module.exports = { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost, reportPost };

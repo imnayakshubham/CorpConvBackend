@@ -132,4 +132,43 @@ function createRedisKeyFromQuery(query = {}, namespace = "cache") {
     return parts.join("|");
 }
 
-module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, isUserOnline, syncOnlineStatusToDB, createRedisKeyFromQuery }
+/**
+ * Atomic update for cached post lists in Redis.
+ * Instead of deleting the key, we update the existing list to maintain cache hit rate.
+ * @param {string[]} keys - Array of Redis keys to update
+ * @param {string} operation - "ADD", "UPDATE", or "DELETE"
+ * @param {object} data - The post data to add/update or an object with { _id } for delete
+ */
+const syncRedisPostCache = async (keys, operation, data) => {
+    for (const key of keys) {
+        const cached = await redis.get(key);
+        if (!cached) continue;
+
+        try {
+            let list = JSON.parse(cached);
+            if (!Array.isArray(list)) continue;
+
+            if (operation === "ADD") {
+                if (!list.some(p => p._id.toString() === data._id.toString())) {
+                    list.unshift(data);
+                }
+            } else if (operation === "UPDATE") {
+                const index = list.findIndex(p => p._id.toString() === data._id.toString());
+                if (index !== -1) {
+                    list[index] = { ...list[index], ...data };
+                }
+            } else if (operation === "DELETE") {
+                const idToDelete = (data._id || data).toString();
+                list = list.filter(p => p._id.toString() !== idToDelete);
+            }
+
+            if (list.length > 200) list = list.slice(0, 200);
+
+            await redis.set(key, JSON.stringify(list), 'EX', 21600);
+        } catch (err) {
+            console.error(`Failed to sync Redis cache for key ${key}:`, err);
+        }
+    }
+}
+
+module.exports = { deleteCachedDataInRedis, addOrUpdateCachedDataInRedis, getOrAddDataInRedis, enqueueEmbeddingJob, popEmbeddingJob, markUserCompletedInJob, markOffline, markOnline, isUserOnline, syncOnlineStatusToDB, createRedisKeyFromQuery, syncRedisPostCache }

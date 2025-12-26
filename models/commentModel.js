@@ -41,7 +41,10 @@ const commentSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
-    awards: [{ type: String }],
+    awards: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        type: { type: String }
+    }],
     shares: { type: Number, default: 0 },
     reported_info: [
         {

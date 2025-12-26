@@ -51,12 +51,13 @@ const isJobVerified = (link) => {
 }
 
 const populateChildComments = async (comments) => {
+    if (!Array.isArray(comments)) return;
     for (const comment of comments) {
-        await comment.populate('commented_by', "public_user_name is_email_verified")
+        await comment.populate('commented_by', "public_user_name is_email_verified user_public_profile_pic avatar")
 
         if (comment.nested_comments.length > 0) {
             if (comment.access || comment?.access === undefined) {
-                await comment.populate('commented_by', "public_user_name is_email_verified")
+                await comment.populate('commented_by', "public_user_name is_email_verified user_public_profile_pic avatar")
                 await comment.populate({
                     path: 'nested_comments',
                     match: { access: { $ne: false } },
