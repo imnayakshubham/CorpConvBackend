@@ -2,7 +2,7 @@
 
 const express = require("express");
 const { protect } = require("../middleware/authMiddleware");
-const { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost, reportPost } = require("../controllers/postController");
+const { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost, reportPost, getCategories } = require("../controllers/postController");
 
 const router = express.Router();
 
@@ -16,5 +16,6 @@ router.route("/update").post(protect, updatePost);
 router.route("/delete").post(protect, deletePost);
 router.route("/:id").get(getPost);
 router.route("/report").post(protect, reportPost);
+router.route("/categories").get(getCategories);
 
 module.exports = router;

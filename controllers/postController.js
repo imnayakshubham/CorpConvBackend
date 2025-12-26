@@ -1,4 +1,5 @@
 const Post = require("../models/postModel");
+const Category = require("../models/categoryModel");
 const getRedisInstance = require("../redisClient/redisClient");
 const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis, syncRedisPostCache } = require("../redisClient/redisUtils");
 const { getIo } = require("../utils/socketManger");
@@ -14,6 +15,16 @@ const createPost = async (req, res) => {
         }
 
         const post = await Post.create(postPayload)
+
+        // Dynamic Category Upsert
+        if (req.body.category) {
+            await Category.findOneAndUpdate(
+                { name: req.body.category },
+                { $inc: { usageCount: 1 } },
+                { upsert: true, new: true }
+            );
+        }
+
         const postData = await post.populate("posted_by", "public_user_name is_email_verified public_user_profile_pic avatar")
         if (postData) {
             // Prepare data for cache sync
@@ -59,6 +70,15 @@ const createPost = async (req, res) => {
 const updatePost = async (req, res) => {
     try {
         const post = await Post.findOne({ _id: req.body._id, access: { $ne: false } });
+        if (!post) {
+            return res.status(404).json({ status: 'Failed', message: "Post not found" });
+        }
+
+        // Ownership Check
+        if (post.posted_by.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ status: 'Failed', message: "Unauthorized: You can only edit your own posts" });
+        }
+
         if (post) {
             const historyItem = {
                 content: post.content,
@@ -75,6 +95,15 @@ const updatePost = async (req, res) => {
                 path: 'comments',
                 match: { access: { $ne: false } },
             });
+
+            // Dynamic Category Upsert if changed
+            if (req.body.category && req.body.category !== post.category) {
+                await Category.findOneAndUpdate(
+                    { name: req.body.category },
+                    { $inc: { usageCount: 1 } },
+                    { upsert: true, new: true }
+                );
+            }
             await populateChildComments(postData.comments)
 
             if (postData) {
@@ -403,32 +432,37 @@ const sharePost = async (req, res) => {
 const deletePost = async (req, res) => {
     try {
         const post = await Post.findById(req.body._id);
-        if (post) {
-            const category = post.category;
-            const posted_by = post.posted_by;
-            const postData = await Post.findByIdAndUpdate(req.body._id, { $set: { access: false } }, { new: true });
-            if (postData) {
-                // Prepare data for cache sync
-                const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
-                const redisKeyCat = createRedisKeyFromQuery({ category: category }, `${process.env.APP_ENV}_post_`);
-                const redisKeyUser = createRedisKeyFromQuery({ posted_by: posted_by }, `${process.env.APP_ENV}_post_`);
-                await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "DELETE", { _id: req.body._id });
+        if (!post) return res.status(404).json({ message: "Post not found" });
 
-                const io = getIo();
-                io.emit('listen_post_delete', { _id: req.body._id });
+        // Ownership Check
+        if (post.posted_by.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: "Unauthorized: You can only delete your own posts" });
+        }
 
-                return res.status(200).json({
-                    status: 'Success',
-                    data: null,
-                    message: "Post deleted successfully"
-                })
-            } else {
-                return res.status(400).json({
-                    status: 'Failed',
-                    message: "Post not found",
-                    data: null
-                })
-            }
+        const category = post.category;
+        const posted_by = post.posted_by;
+        const postData = await Post.findByIdAndUpdate(req.body._id, { $set: { access: false } }, { new: true });
+        if (postData) {
+            // Prepare data for cache sync
+            const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+            const redisKeyCat = createRedisKeyFromQuery({ category: category }, `${process.env.APP_ENV}_post_`);
+            const redisKeyUser = createRedisKeyFromQuery({ posted_by: posted_by }, `${process.env.APP_ENV}_post_`);
+            await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "DELETE", { _id: req.body._id });
+
+            const io = getIo();
+            io.emit('listen_post_delete', { _id: req.body._id });
+
+            return res.status(200).json({
+                status: 'Success',
+                data: null,
+                message: "Post deleted successfully"
+            })
+        } else {
+            return res.status(400).json({
+                status: 'Failed',
+                message: "Post not found",
+                data: null
+            })
         }
     } catch (error) {
         console.log(error)
@@ -504,4 +538,40 @@ const reportPost = async (req, res) => {
     }
 }
 
-module.exports = { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost, reportPost };
+const getCategories = async (req, res) => {
+    try {
+        const redis = getRedisInstance();
+        const redisKey = `${process.env.APP_ENV}_post_categories`;
+        const cachedData = await redis.get(redisKey);
+
+        if (cachedData) {
+            return res.status(200).json({
+                status: 'Success',
+                data: JSON.parse(cachedData),
+                message: "Categories fetched successfully (Cached)"
+            });
+        }
+
+        const categories = await Category.find({})
+            .sort({ usageCount: -1 })
+            .lean();
+
+        // Cache for 6 hours (21600 seconds)
+        addOrUpdateCachedDataInRedis(redisKey, categories);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: categories,
+            message: "Categories fetched successfully"
+        });
+    } catch (error) {
+        console.error("Error in getCategories:", error);
+        return res.status(500).json({
+            status: 'Failed',
+            data: null,
+            message: "Categories not fetched"
+        });
+    }
+}
+
+module.exports = { createPost, fetchPosts, upVotePost, downVotePost, awardPost, sharePost, updatePost, deletePost, getPost, reportPost, getCategories };
