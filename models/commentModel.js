@@ -35,6 +35,14 @@ const commentSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    downvoted_by: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+    ],
+    awards: [{ type: String }],
+    shares: { type: Number, default: 0 },
     reported_info: [
         {
             reporter: {

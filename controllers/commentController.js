@@ -1,6 +1,7 @@
 const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
 const { createRedisKeyFromQuery, addOrUpdateCachedDataInRedis } = require("../redisClient/redisUtils");
+const getRedisInstance = require("../redisClient/redisClient");
 const { populateChildComments } = require("../utils/utils");
 
 // app.post('/api/comments',
@@ -107,42 +108,14 @@ const likeComment = async (req, res) => {
     try {
         const post = await Post.findById(post_id);
         if (post) {
-            if (parent_comment_id && comment_id) {
-                const commentData = await Comment.findOne({
-                    $and: [
-                        { _id: comment_id },
-                        { parent_comment_id }
-                    ]
-                });
-                if (commentData) {
-                    let updatedData = null
-                    if (commentData.upvoted_by.includes(req.user._id)) {
-                        updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } }, { new: true })
-                    } else {
-                        updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true })
-                    }
-
-                    if (updatedData) {
-                        const updatedPost = await Post.findById(post_id).populate("posted_by", "public_user_name is_email_verified").populate({
-                            path: 'comments',
-                            match: { access: { $ne: false } },
-                        });
-                        await populateChildComments(updatedPost.comments)
-
-                        return res.status(200).json({
-                            status: 'Success',
-                            data: updatedPost,
-                            message: "Comment Upvote added successfully"
-                        })
-                    }
-                }
-            } else {
-                const commentData = await Comment.findById(comment_id)
-                let updatedData = null
+            let updatedData = null;
+            const commentData = await Comment.findById(comment_id);
+            if (commentData) {
                 if (commentData.upvoted_by.includes(req.user._id)) {
-                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } }, { new: true })
+                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } }, { new: true });
                 } else {
-                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true })
+                    await Comment.findByIdAndUpdate(comment_id, { $pull: { downvoted_by: req.user._id } });
+                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true });
                 }
 
                 if (updatedData) {
@@ -155,14 +128,100 @@ const likeComment = async (req, res) => {
                     return res.status(200).json({
                         status: 'Success',
                         data: updatedPost,
-                        message: "Comment Upvote added successfully"
+                        message: "Comment Upvoted successfully"
                     })
                 }
             }
         }
-
+        res.status(404).json({ message: "Post or Comment not found" });
     } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+}
 
+const getCommentsByPostId = async (req, res) => {
+    try {
+        const post_id = req.params.post_id;
+        const comments = await Comment.find({ post_id, parent_comment_id: null, access: { $ne: false } })
+            .populate('commented_by', 'public_user_name is_email_verified public_user_profile_pic avatar')
+            .sort({ commented_at: -1 });
+
+        for (const comment of comments) {
+            await populateChildComments(comment);
+        }
+
+        res.status(200).json({
+            status: 'Success',
+            data: comments,
+            message: 'Comments fetched successfully',
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+const downvoteComment = async (req, res) => {
+    const { comment_id, post_id } = req.body;
+    try {
+        const comment = await Comment.findById(comment_id);
+        if (comment) {
+            let updatedData;
+            if (comment.downvoted_by.includes(req.user._id)) {
+                updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { downvoted_by: req.user._id } }, { new: true });
+            } else {
+                await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } });
+                updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { downvoted_by: req.user._id } }, { new: true });
+            }
+
+            if (updatedData) {
+                // Invalidate post cache
+                const post = await Post.findById(post_id);
+                if (post) {
+                    const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
+                    const redisKeyCat = createRedisKeyFromQuery({ category: post.category }, `${process.env.APP_ENV}_post_`);
+                    const redisKeyUser = createRedisKeyFromQuery({ posted_by: post.posted_by }, `${process.env.APP_ENV}_post_`);
+                    const redis = getRedisInstance();
+                    await redis.del(redisKeyAll, redisKeyCat, redisKeyUser);
+                }
+
+                return res.status(200).json({
+                    status: 'Success',
+                    data: updatedData,
+                    message: "Comment Downvoted successfully"
+                });
+            }
+        }
+        res.status(404).json({ message: "Comment not found" });
+    } catch (error) {
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+}
+
+const awardComment = async (req, res) => {
+    const { comment_id, awardType } = req.body;
+    try {
+        const updatedComment = await Comment.findByIdAndUpdate(comment_id, { $push: { awards: awardType } }, { new: true });
+        if (updatedComment) {
+            return res.status(200).json({ status: 'Success', data: updatedComment, message: "Award given successfully" });
+        }
+        res.status(404).json({ message: "Comment not found" });
+    } catch (error) {
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+}
+
+const shareComment = async (req, res) => {
+    const { comment_id } = req.body;
+    try {
+        const updatedComment = await Comment.findByIdAndUpdate(comment_id, { $inc: { shares: 1 } }, { new: true });
+        if (updatedComment) {
+            return res.status(200).json({ status: 'Success', data: updatedComment, message: "Comment shared successfully" });
+        }
+        res.status(404).json({ message: "Comment not found" });
+    } catch (error) {
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
@@ -250,4 +309,4 @@ const getCommentReplies = async (req, res) => {
 }
 
 
-module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies };
+module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, getCommentReplies, getCommentsByPostId, downvoteComment, awardComment, shareComment };
