@@ -1,7 +1,7 @@
 const express = require("express");
 
 const { protect } = require("../middleware/authMiddleware");
-const { postComments, postReplyComments, likeComment, downvoteComment, awardComment, shareComment, deleteComment, getCommentReplies, getCommentsByPostId } = require("../controllers/commentController");
+const { postComments, postReplyComments, likeComment, downvoteComment, awardComment, shareComment, deleteComment, getCommentReplies, getCommentsByPostId, reportComment } = require("../controllers/commentController");
 
 const router = express.Router();
 
@@ -17,6 +17,6 @@ router.route(`/:post_id/comment/:comment_id`).get(getCommentReplies)
 
 // router.route("/bookmark").post(protect, bookMarkJob)
 // router.route("/").get(fetchJobs)
-router.post('/report', is_login, commentController.reportComment);
+router.route("/report").post(protect, reportComment);
 
 module.exports = router;

@@ -49,6 +49,13 @@ const postModel = mongoose.Schema({
         }
     ],
     shares: { type: Number, default: 0 },
+    access: { type: Boolean, default: true },
+    is_edited: { type: Boolean, default: false },
+    edit_history: [{
+        content: String,
+        category: String,
+        edited_at: { type: Date, default: Date.now }
+    }]
 }, { timestamps: true });
 
 module.exports = mongoose.model("Post", postModel);

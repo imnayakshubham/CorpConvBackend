@@ -58,9 +58,20 @@ const createPost = async (req, res) => {
 
 const updatePost = async (req, res) => {
     try {
-        const post = await Post.findOne({ _id: req.body._id });
+        const post = await Post.findOne({ _id: req.body._id, access: { $ne: false } });
         if (post) {
-            const postData = await Post.findByIdAndUpdate(req.body._id, { content: req.body.content, category: req.body.category }, { new: true }).populate("posted_by", "public_user_name is_email_verified").populate({
+            const historyItem = {
+                content: post.content,
+                category: post.category,
+                edited_at: new Date()
+            };
+
+            const postData = await Post.findByIdAndUpdate(req.body._id, {
+                content: req.body.content,
+                category: req.body.category,
+                is_edited: true,
+                $push: { edit_history: historyItem }
+            }, { new: true }).populate("posted_by", "public_user_name is_email_verified").populate({
                 path: 'comments',
                 match: { access: { $ne: false } },
             });
@@ -128,6 +139,8 @@ const fetchPosts = async (req, res) => {
                 category: category
             };
         }
+
+        query.access = { $ne: false };
 
         const redis = getRedisInstance()
         const redisKey = createRedisKeyFromQuery(query, `${process.env.APP_ENV}_post_`)
@@ -297,8 +310,12 @@ const awardPost = async (req, res) => {
         const post = await Post.findById(post_id);
         if (!post) return res.status(404).json({ status: 'Failed', message: 'Post not found' });
 
+        if (!Array.isArray(post.awards)) {
+            post.awards = [];
+        }
+
         const existingAwardIndex = post.awards.findIndex(a =>
-            a.user.toString() === req.user._id.toString() && a.type === awardType
+            a.user && a.user.toString() === req.user._id.toString() && a.type === awardType
         );
 
         let postData;
@@ -328,10 +345,13 @@ const awardPost = async (req, res) => {
             };
 
             // Sync Redis Cache
-            const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
-            const redisKeyCat = createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`);
-            const redisKeyUser = createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`);
-            await syncRedisPostCache([redisKeyAll, redisKeyCat, redisKeyUser], "UPDATE", dataToSync);
+            const keys = [
+                createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`),
+                createRedisKeyFromQuery({ category: postData.category }, `${process.env.APP_ENV}_post_`),
+                postData.posted_by?._id ? createRedisKeyFromQuery({ posted_by: postData.posted_by._id }, `${process.env.APP_ENV}_post_`) : null
+            ].filter(Boolean);
+
+            await syncRedisPostCache(keys, "UPDATE", dataToSync);
 
             const io = getIo();
             io.emit('listen_post_update', postData);
@@ -343,6 +363,7 @@ const awardPost = async (req, res) => {
             });
         }
     } catch (error) {
+        console.error("Error in awardPost:", error);
         res.status(500).json({ status: 'Failed', message: 'Something went wrong' });
     }
 }
@@ -385,7 +406,7 @@ const deletePost = async (req, res) => {
         if (post) {
             const category = post.category;
             const posted_by = post.posted_by;
-            const postData = await Post.findByIdAndDelete(req.body._id);
+            const postData = await Post.findByIdAndUpdate(req.body._id, { $set: { access: false } }, { new: true });
             if (postData) {
                 // Prepare data for cache sync
                 const redisKeyAll = createRedisKeyFromQuery({ category: "all" }, `${process.env.APP_ENV}_post_`);
@@ -421,7 +442,7 @@ const deletePost = async (req, res) => {
 
 const getPost = async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified").populate({
+        const post = await Post.findOne({ _id: req.params.id, access: { $ne: false } }).populate("posted_by", "public_user_name is_email_verified").populate({
             path: 'comments',
             match: { access: { $ne: false } },
         });
