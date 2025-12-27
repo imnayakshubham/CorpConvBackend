@@ -87,6 +87,7 @@ class FieldTransformService {
     }
 
     transformDateField(value) {
+        console.log({ value })
         // Convert to ISO date string
         try {
             const date = new Date(value);

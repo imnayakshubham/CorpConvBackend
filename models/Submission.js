@@ -29,33 +29,27 @@ const submissionSchema = new mongoose.Schema({
   formId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Survey',
-    required: function() {
+    required: function () {
       return !this.survey_id;
     }
   },
   survey_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Survey',
-    required: function() {
+    required: function () {
       return !this.formId;
     }
   },
 
-  // Response data - flexible structure to handle any form fields
-  // Supports both 'data' (new Map format) and 'submissions' (old array format)
-  data: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    required: function() {
-      return !this.submissions;
-    }
-  },
-  submissions: [{
+  // Response data - unified 'submissions' field
+  // Stores the form data map: { fieldId: value }
+  submissions: {
     type: mongoose.Schema.Types.Mixed,
-    required: function() {
-      return !this.data;
-    }
-  }],
+    required: true
+  },
+
+  // Deprecated: 'data' field removal
+  // We are standardizing on 'submissions' key
 
   // User references - support both formats
   survey_answered_by: {
@@ -132,12 +126,12 @@ submissionSchema.index({ survey_answered_by: 1 });
 submissionSchema.index({ survey_created_by: 1, createdAt: -1 });
 
 // Virtual to unify formId and survey_id
-submissionSchema.virtual('unifiedFormId').get(function() {
+submissionSchema.virtual('unifiedFormId').get(function () {
   return this.formId || this.survey_id;
 });
 
 // Virtual to unify data and submissions
-submissionSchema.virtual('unifiedData').get(function() {
+submissionSchema.virtual('unifiedData').get(function () {
   if (this.data) {
     return this.data instanceof Map ? Object.fromEntries(this.data) : this.data;
   }
@@ -145,7 +139,7 @@ submissionSchema.virtual('unifiedData').get(function() {
 });
 
 // Pre-save hook to sync formId and survey_id
-submissionSchema.pre('save', function(next) {
+submissionSchema.pre('save', function (next) {
   // Sync formId <-> survey_id
   if (this.formId && !this.survey_id) {
     this.survey_id = this.formId;
@@ -162,7 +156,7 @@ submissionSchema.pre('save', function(next) {
 });
 
 // Update form/survey analytics after submission
-submissionSchema.post('save', async function(doc) {
+submissionSchema.post('save', async function (doc) {
   try {
     const Survey = mongoose.model('Survey');
     const targetId = doc.formId || doc.survey_id;
