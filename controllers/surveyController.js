@@ -237,20 +237,29 @@ const getSurveySubmission = async (req, res) => {
         const survey = await Survey.findById(surveyId, {
             survey_title: 1,
             survey_description: 1,
-            view_count: 1
+            view_count: 1,
+            created_by: 1
 
         }).lean().exec()
 
-        const surveySubmission = await Submission.find({ survey_id: surveyId });
-
-        if (!surveySubmission || !survey) {
+        if (!survey) {
             return res.status(404).json({
                 status: 'Failed',
-                message: 'Submission not found for the Survey',
+                message: 'Survey not found',
                 data: null
             });
         }
 
+        // Authorization check: Only survey creator can view submissions
+        if (survey.created_by.toString() !== req.user._id.toString()) {
+            return res.status(403).json({
+                status: 'Failed',
+                message: 'You do not have permission to view submissions for this survey',
+                data: null
+            });
+        }
+
+        const surveySubmission = await Submission.find({ survey_id: surveyId });
 
         return res.status(200).json({
             status: 'Success',
