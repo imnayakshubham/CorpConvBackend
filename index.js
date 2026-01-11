@@ -1,6 +1,6 @@
+require("dotenv").config();
 const express = require("express");
 const connectDB = require("./config/db");
-const dotenv = require("dotenv");
 const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const jobRoutes = require("./routes/jobRoutes");
@@ -12,6 +12,8 @@ const commentRoutes = require("./routes/commentRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
+const { toNodeHandler } = require("better-auth/node");
+// auth is required later after DB connection
 
 
 const cors = require("cors");
@@ -25,8 +27,9 @@ const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
 
-dotenv.config();
+
 connectDB();
+const { getAuth } = require("./utils/auth");
 const app = express();
 
 app.set('trust proxy', 1);
@@ -72,6 +75,10 @@ app.get("/api/init", (req, res) => {
   }
 });
 
+app.all("/api/auth/*", (req, res) => {
+  return toNodeHandler(getAuth())(req, res);
+});
+
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -105,15 +112,13 @@ initializeSocket(server);
 
 
 const redis = getRedisInstance();
-
-(async () => {
-  try {
-    await redis.ping(); // Test connection
-    console.log('Redis connection ready');
-  } catch (error) {
-    console.error('Failed to connect to Redis:', error);
-  }
-})();
+if (redis) {
+  redis.ping().then(() => {
+    console.log('Redis ping successful');
+  }).catch((err) => {
+    console.warn('Redis ping failed, continuing without Redis cache features.');
+  });
+}
 
 const io = getIo()
 

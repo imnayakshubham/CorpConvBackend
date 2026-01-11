@@ -189,7 +189,9 @@ const updateUserProfile = async (req, res) => {
 
     const redis = getRedisInstance()
     const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
-    const result = await redis.del(userInfoRedisKey);
+    if (redis) {
+      await redis.del(userInfoRedisKey);
+    }
     const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
     if (updatedData) {
       return res.status(200).json({
@@ -212,14 +214,16 @@ const getUserInfo = async (req, res) => {
 
     const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
     const redis = getRedisInstance()
-    const cachedData = await redis.get(userInfoRedisKey)
+    if (redis) {
+      const cachedData = await redis.get(userInfoRedisKey)
 
-    if (cachedData) {
-      const parsedCachedData = JSON.parse(cachedData)
-      if (parsedCachedData) {
-        return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
-      } else {
-        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: parsedCachedData })
+      if (cachedData) {
+        const parsedCachedData = JSON.parse(cachedData)
+        if (parsedCachedData) {
+          return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
+        } else {
+          return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: parsedCachedData })
+        }
       }
     }
 
@@ -238,7 +242,9 @@ const getUserInfo = async (req, res) => {
     };
 
     const user = await User.findOne({ _id: userId, access: true }, projection)
-    await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+    if (redis) {
+      await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+    }
 
     if (user) {
       return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })

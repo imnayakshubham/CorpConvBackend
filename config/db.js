@@ -4,7 +4,9 @@ const colors = require("colors");
 const connectDB = async () => {
   try {
     const db = await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 30000
+      serverSelectionTimeoutMS: 30000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 45000
     });
 
     console.log(`MongoDB Connected: ${db.connection.host}`.cyan.underline);

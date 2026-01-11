@@ -95,8 +95,12 @@ const fetchPosts = async (req, res) => {
 
         const redis = getRedisInstance()
         const postedByRedisKey = user_id ? `${process.env.APP_ENV}_posted_by_${user_id}` : `${process.env.APP_ENV}_posts`
-        const cachedData = await redis.get(postedByRedisKey)
-        const parsedCachedData = JSON.parse(cachedData)
+
+        let parsedCachedData = null;
+        if (redis) {
+            const cachedData = await redis.get(postedByRedisKey)
+            parsedCachedData = JSON.parse(cachedData)
+        }
 
         if (parsedCachedData) {
             return res.status(200).json({
@@ -104,7 +108,7 @@ const fetchPosts = async (req, res) => {
                 data: parsedCachedData,
                 message: "Posts fetched successfully (Cached)"
             })
-        } else if (parsedCachedData === null) {
+        } else {
             const posts = await Post.find(query)
                 .sort({ createdAt: -1 })
                 .populate("posted_by", "public_user_name is_email_verified")
@@ -113,7 +117,10 @@ const fetchPosts = async (req, res) => {
                     match: { access: { $ne: false } },
                     populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
                 }).maxTimeMS(15000).lean()
-            await redis.set(postedByRedisKey, JSON.stringify(posts), 'EX', 21600); //Cached for 6 hours
+
+            if (redis) {
+                await redis.set(postedByRedisKey, JSON.stringify(posts), 'EX', 21600); //Cached for 6 hours
+            }
 
             return res.status(200).json({
                 status: 'Success',

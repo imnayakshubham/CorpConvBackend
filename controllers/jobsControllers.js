@@ -98,8 +98,12 @@ const fetchJobs = asyncHandler(async (req, res) => {
         }
         const redis = getRedisInstance()
         const jobsPostedByRedisKey = user_id ? `${process.env.APP_ENV}_job_posted_by_${user_id}` : `${process.env.APP_ENV}_jobs`
-        const cachedData = await redis.get(jobsPostedByRedisKey)
-        const parsedCachedData = JSON.parse(cachedData)
+
+        let parsedCachedData = null;
+        if (redis) {
+            const cachedData = await redis.get(jobsPostedByRedisKey)
+            parsedCachedData = JSON.parse(cachedData)
+        }
 
         if (parsedCachedData) {
             return res.status(200).json({
@@ -107,9 +111,13 @@ const fetchJobs = asyncHandler(async (req, res) => {
                 data: parsedCachedData,
                 message: "Jobs fetched successfully (Cached)"
             })
-        } else if (parsedCachedData === null) {
+        } else {
             const jobs = await Job.find(query).sort({ updatedAt: -1 }).populate('job_posted_by', 'public_user_name is_email_verified')
-            await redis.set(jobsPostedByRedisKey, JSON.stringify(jobs), 'EX', 21600); //Cached for 6 hours
+
+            if (redis) {
+                await redis.set(jobsPostedByRedisKey, JSON.stringify(jobs), 'EX', 21600); //Cached for 6 hours
+            }
+
             if (jobs) {
                 return res.status(200).json({
                     status: 'Success',
