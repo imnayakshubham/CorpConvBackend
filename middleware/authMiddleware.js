@@ -4,17 +4,44 @@ const asyncHandler = require("express-async-handler");
 const { tokenkeyName, cookieOptions } = require("../constants/index.js");
 
 const protect = asyncHandler(async (req, res, next) => {
-  const token = req.headers.token
+  const token = req.headers.token;
+  const { getAuth } = require("../utils/auth");
 
+  // 1. Try Better Auth
+  try {
+    const auth = getAuth();
+    if (auth) {
+      const session = await auth.api.getSession({
+        headers: req.headers,
+      });
+
+      console.log(session)
+
+      if (session) {
+        req.user = session.user;
+
+        if (session.user) {
+          const dbUser = await User.findById(session.user.id || session.user._id);
+          if (dbUser && dbUser.access) {
+            req.user = dbUser;
+            return next();
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.log("Better Auth check failed, falling back to legacy token:", error.message);
+  }
+
+  // 2. Fallback to Legacy JWT Token
   if (!!token) {
     try {
-
       const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
       const user = await User.findOne({ _id: decoded.id })
 
       if (user && user.access) {
         req.user = await User.findOne({ _id: decoded.id })
-        next();
+        return next();
       } else {
         res.clearCookie(tokenkeyName, cookieOptions);
         return res.status(401).send({ error: 'User Not Found', message: 'User Not Found or User Access is Revoked' });
