@@ -11,6 +11,9 @@ const getAuth = () => {
             throw new Error("Database not connected yet. Cannot initialize Better Auth.");
         }
 
+        mongoose.connection.db.collection("verification").deleteMany({ id: null })
+
+
         // Parse ALLOW_ORIGIN from env
         const allowedOrigins = process.env.ALLOW_ORIGIN ? process.env.ALLOW_ORIGIN.split(",").map(o => o.trim()) : [];
 
@@ -221,7 +224,7 @@ const getAuth = () => {
             advanced: {
                 crossOrigin: true,
                 database: {
-                    generateId: false,
+                    idField: "_id",
                 },
                 cookies: {
                     session_token: {
@@ -237,8 +240,6 @@ const getAuth = () => {
                         enabled: true,
                         domain: process.env.FRONTEND_URL,
                     },
-                    trustedOrigins: allowedOrigins,
-
                 },
             }
         });

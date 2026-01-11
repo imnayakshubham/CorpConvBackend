@@ -79,8 +79,45 @@ const deletequestion = async (req, res) => {
     }
 }
 
+const getquestionbyid = async (req, res) => {
+    try {
+        const _id = req.params.id
+        const question = await QuestionModel.findById(_id)
+            .populate("question_posted_by", "public_user_name user_public_profile_pic")
+            .populate({
+                path: "answers",
+                populate: {
+                    path: "answered_by",
+                    select: "public_user_name user_public_profile_pic"
+                }
+            })
+
+        if (question) {
+            return res.status(200).json({
+                status: 'Success',
+                data: question,
+                message: "Question Fetched successfully"
+            })
+        } else {
+            return res.status(404).json({
+                status: 'Failed',
+                message: "Question not found",
+                data: null
+            })
+        }
+    } catch (error) {
+        console.log(error)
+        return res.status(500).json({
+            data: null,
+            status: 'Failed',
+            message: "Something went Wrong"
+        })
+    }
+}
+
 module.exports = {
     createquestion,
     getquestions,
-    deletequestion
+    deletequestion,
+    getquestionbyid
 }
