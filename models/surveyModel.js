@@ -72,8 +72,9 @@ const optionSchema = new mongoose.Schema({
 }, { _id: false });
 
 const surveyFormFieldSchema = new mongoose.Schema({
-    // Unique identifier for each field (critical for conditional logic)
-    field_id: { type: String, required: true },
+    // Unique identifier for each field (optional - _id is the canonical identifier)
+    // field_id is kept for backwards compatibility with existing surveys
+    field_id: { type: String, required: false },
     label: { type: String, required: true },
     placeholder: { type: String, required: false },
     description: { type: String, required: false },
