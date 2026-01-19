@@ -12,6 +12,7 @@ const commentRoutes = require("./routes/commentRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
+const uploadRoutes = require("./routes/uploadRoutes");
 const { toNodeHandler } = require("better-auth/node");
 // auth is required later after DB connection
 
@@ -88,6 +89,10 @@ app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
+app.use("/api/upload", uploadRoutes);
+
+// Serve uploaded files statically
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 
 app.get("/", (req, res) => {

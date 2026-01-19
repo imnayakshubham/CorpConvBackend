@@ -173,6 +173,108 @@ const getSurvey = async (req, res) => {
     }
 };
 
+// Helper function to calculate quiz score
+const calculateQuizScore = (surveyForm, responses) => {
+    let totalScore = 0;
+    let maxPossibleScore = 0;
+    const scoredResponses = [];
+
+    // Build a map of field_id to field config for quick lookup
+    const fieldMap = new Map();
+    surveyForm.forEach(field => {
+        const fieldId = field.field_id || field._id?.toString();
+        if (fieldId) {
+            fieldMap.set(fieldId, field);
+        }
+    });
+
+    // Process each response
+    responses.forEach(response => {
+        const field = fieldMap.get(response.field_id);
+        if (!field) {
+            scoredResponses.push({ ...response, is_correct: null, score_earned: 0 });
+            return;
+        }
+
+        const inputType = field.input_type;
+        let isCorrect = null;
+        let scoreEarned = 0;
+
+        // Handle selection-based fields (radio, checkbox, select)
+        if (['radio', 'checkbox', 'select'].includes(inputType) && field.user_select_options) {
+            const options = field.user_select_options;
+
+            // Calculate max possible score for this field
+            const fieldMaxScore = options.reduce((max, opt) => {
+                if (opt.is_correct && opt.score) {
+                    return max + opt.score;
+                }
+                return max;
+            }, 0);
+            maxPossibleScore += fieldMaxScore;
+
+            // Check if response matches correct answer(s)
+            if (inputType === 'checkbox' && Array.isArray(response.value)) {
+                // For checkbox, check if all correct options are selected
+                const correctOptions = options.filter(opt => opt.is_correct);
+                const selectedValues = response.value;
+
+                let allCorrect = true;
+                correctOptions.forEach(opt => {
+                    if (selectedValues.includes(opt.value)) {
+                        scoreEarned += opt.score || 0;
+                    } else {
+                        allCorrect = false;
+                    }
+                });
+
+                // Check for incorrect selections
+                selectedValues.forEach(val => {
+                    const opt = options.find(o => o.value === val);
+                    if (opt && !opt.is_correct) {
+                        allCorrect = false;
+                    }
+                });
+
+                isCorrect = allCorrect && correctOptions.length > 0;
+            } else {
+                // For radio/select, single selection
+                const selectedOption = options.find(opt => opt.value === response.value);
+                if (selectedOption) {
+                    isCorrect = selectedOption.is_correct || false;
+                    scoreEarned = isCorrect ? (selectedOption.score || 0) : 0;
+                }
+            }
+        }
+        // Handle text-based fields with quiz_correct_answer
+        else if (field.quiz_correct_answer) {
+            maxPossibleScore += field.quiz_score || 0;
+            const normalizedResponse = String(response.value || '').trim().toLowerCase();
+            const normalizedCorrect = String(field.quiz_correct_answer).trim().toLowerCase();
+            isCorrect = normalizedResponse === normalizedCorrect;
+            scoreEarned = isCorrect ? (field.quiz_score || 0) : 0;
+        }
+
+        totalScore += scoreEarned;
+        scoredResponses.push({
+            ...response,
+            is_correct: isCorrect,
+            score_earned: scoreEarned
+        });
+    });
+
+    const percentageScore = maxPossibleScore > 0
+        ? Math.round((totalScore / maxPossibleScore) * 100)
+        : 0;
+
+    return {
+        responses: scoredResponses,
+        total_score: totalScore,
+        max_possible_score: maxPossibleScore,
+        percentage_score: percentageScore
+    };
+};
+
 const surveySubmission = async (req, res) => {
     try {
         const surveyId = req.params.id;
@@ -187,16 +289,76 @@ const surveySubmission = async (req, res) => {
             });
         }
 
-        const payload = req.body
+        // Check response limits
+        if (survey.response_settings?.max_responses) {
+            const currentResponseCount = survey.submissions?.length || 0;
+            if (currentResponseCount >= survey.response_settings.max_responses) {
+                return res.status(400).json({
+                    status: 'Failed',
+                    message: 'This survey has reached its maximum number of responses',
+                    data: null
+                });
+            }
+        }
+
+        // Check one response per user
+        if (survey.response_settings?.one_response_per_user) {
+            const existingSubmission = await Submission.findOne({
+                survey_id: surveyId,
+                survey_answered_by: req.user._id
+            });
+            if (existingSubmission) {
+                return res.status(400).json({
+                    status: 'Failed',
+                    message: 'You have already submitted a response to this survey',
+                    data: null
+                });
+            }
+        }
+
+        // Check date restrictions
+        const now = new Date();
+        if (survey.response_settings?.start_date && new Date(survey.response_settings.start_date) > now) {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'This survey is not yet open for submissions',
+                data: null
+            });
+        }
+        if (survey.response_settings?.end_date && new Date(survey.response_settings.end_date) < now) {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'This survey has closed and is no longer accepting submissions',
+                data: null
+            });
+        }
+
+        const payload = req.body;
         const survey_answered_by = req.user._id;
         const survey_created_by = survey.created_by;
+
+        // Build responses array from payload
+        let responses = payload.responses || [];
+        let quizResults = null;
+
+        // Calculate quiz score if quiz mode is enabled
+        if (survey.quiz_settings?.enabled && survey.survey_form) {
+            quizResults = calculateQuizScore(survey.survey_form, responses);
+            responses = quizResults.responses;
+        }
 
         const updatedPayload = {
             survey_id: surveyId,
             survey_answered_by,
             survey_created_by,
-            submissions: payload.submissions
-        }
+            responses: responses,
+            submissions: payload.submissions, // Legacy format
+            total_score: quizResults?.total_score || 0,
+            max_possible_score: quizResults?.max_possible_score || 0,
+            percentage_score: quizResults?.percentage_score || 0,
+            is_partial: payload.is_partial || false,
+            current_page: payload.current_page || 0
+        };
 
         const newSubmission = new Submission(updatedPayload);
         await newSubmission.save();
@@ -215,9 +377,24 @@ const surveySubmission = async (req, res) => {
             });
         }
 
+        // Prepare response with quiz results if applicable
+        const responseData = {
+            submission: newSubmission,
+            quiz_results: survey.quiz_settings?.enabled ? {
+                total_score: quizResults?.total_score || 0,
+                max_possible_score: quizResults?.max_possible_score || 0,
+                percentage_score: quizResults?.percentage_score || 0,
+                passed: survey.quiz_settings.passing_score
+                    ? (quizResults?.percentage_score || 0) >= survey.quiz_settings.passing_score
+                    : null,
+                show_correct_answers: survey.quiz_settings.show_correct_answers,
+                show_score_immediately: survey.quiz_settings.show_score_immediately
+            } : null
+        };
+
         return res.status(200).json({
             message: 'Submission Submitted',
-            data: newSubmission,
+            data: responseData,
             status: 'Success',
         });
 
