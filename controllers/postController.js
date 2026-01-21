@@ -306,4 +306,33 @@ const getPost = async (req, res) => {
     }
 }
 
-module.exports = { createPost, fetchPosts, upVotePost, updatePost, deletePost, getPost };
+const getCategories = async (req, res) => {
+    try {
+        const categories = await Post.distinct('category');
+        const predefinedCategories = [
+            'company_review', 'random', 'reading',
+            'learning', 'thoughts', 'project', 'Watching'
+        ];
+
+        // Merge and deduplicate (case-insensitive)
+        const categoryMap = new Map();
+        [...predefinedCategories, ...categories].forEach(cat => {
+            if (cat && cat.trim()) {
+                const lowerKey = cat.toLowerCase().trim();
+                if (!categoryMap.has(lowerKey)) {
+                    categoryMap.set(lowerKey, cat.trim());
+                }
+            }
+        });
+
+        const uniqueCategories = Array.from(categoryMap.values()).sort();
+        return res.status(200).json({
+            status: 'Success',
+            data: uniqueCategories
+        });
+    } catch (error) {
+        return res.status(500).json({ status: 'Failed', message: "Failed to fetch categories" });
+    }
+};
+
+module.exports = { createPost, fetchPosts, upVotePost, updatePost, deletePost, getPost, getCategories };

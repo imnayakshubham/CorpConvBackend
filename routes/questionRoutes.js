@@ -6,7 +6,7 @@ const { createquestion, getquestions, deletequestion, getquestionbyid } = requir
 const router = express.Router();
 
 router.route("/create").post(protect, createquestion)
-router.route("/").post(getquestions)
+router.route("/").get(getquestions)
 router.route("/delete/:id").delete(protect, deletequestion)
 router.route("/:id").get(getquestionbyid)
 

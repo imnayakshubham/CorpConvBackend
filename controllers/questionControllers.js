@@ -32,23 +32,90 @@ const createquestion = async (req, res) => {
 
 const getquestions = async (req, res) => {
     try {
-        const payload = req.body
-        const updatedPayload = payload.type === "your-questions" ? {
-            question_posted_by: payload.user_id
-        } : {}
-        const allQuestions = await QuestionModel.find({ ...updatedPayload, access: true }).populate("question_posted_by", "public_user_name user_public_profile_pic")
-        return res.status(201).json({
-            status: 'Success',
-            data: { [payload.type]: allQuestions },
-            message: "Questions Fetched successfully"
-        })
-    } catch (error) {
+        const limit = parseInt(req.query.limit) || 10;
+        const cursor = req.query.cursor || null;
+        const search = req.query.search || '';
+        const sortBy = req.query.sortBy || 'newest';
+        const filter = req.query.filter || 'all';
+        const userId = req.query.userId || null;
 
+        // Build query
+        let query = { access: true };
+
+        // Filter: my questions
+        if (filter === 'my-questions' && userId) {
+            query.question_posted_by = userId;
+        }
+
+        // Search: case-insensitive regex
+        if (search.trim()) {
+            query.question = { $regex: search.trim(), $options: 'i' };
+        }
+
+        // Cursor pagination (for newest/oldest)
+        if (cursor) {
+            if (sortBy === 'oldest') {
+                query.createdAt = { $gt: new Date(cursor) };
+            } else {
+                query.createdAt = { $lt: new Date(cursor) };
+            }
+        }
+
+        let questions;
+
+        if (sortBy === 'most-answers' || sortBy === 'most-liked') {
+            // Aggregation for computed sorts
+            const sortField = sortBy === 'most-answers' ? 'answersCount' : 'likedCount';
+            const pipeline = [
+                { $match: query },
+                {
+                    $addFields: {
+                        answersCount: { $size: { $ifNull: ['$answers', []] } },
+                        likedCount: { $size: { $ifNull: ['$liked_by', []] } }
+                    }
+                },
+                { $sort: { [sortField]: -1, createdAt: -1 } },
+                { $limit: limit + 1 },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'question_posted_by',
+                        foreignField: '_id',
+                        as: 'question_posted_by',
+                        pipeline: [{ $project: { public_user_name: 1, user_public_profile_pic: 1 } }]
+                    }
+                },
+                { $unwind: { path: '$question_posted_by', preserveNullAndEmptyArrays: true } }
+            ];
+            questions = await QuestionModel.aggregate(pipeline);
+        } else {
+            // Simple find for date sorts
+            const sortOptions = sortBy === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
+            questions = await QuestionModel.find(query)
+                .sort(sortOptions)
+                .limit(limit + 1)
+                .populate('question_posted_by', 'public_user_name user_public_profile_pic')
+                .lean();
+        }
+
+        const hasMore = questions.length > limit;
+        const resultQuestions = hasMore ? questions.slice(0, limit) : questions;
+        const nextCursor = hasMore && resultQuestions.length > 0
+            ? resultQuestions[resultQuestions.length - 1].createdAt
+            : null;
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { questions: resultQuestions, nextCursor, hasMore },
+            message: 'Questions fetched successfully'
+        });
+    } catch (error) {
+        console.error('Error fetching questions:', error);
         return res.status(500).json({
             data: null,
             status: 'Failed',
-            message: "Something went Wrong"
-        })
+            message: 'Something went wrong'
+        });
     }
 }
 
