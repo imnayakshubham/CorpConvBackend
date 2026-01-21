@@ -2,6 +2,8 @@ const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const mongoose = require("mongoose");
 const User = require("../models/userModel");
+const { customSession } = require("better-auth/plugins");
+const { projection } = require("../constants");
 
 let _auth;
 
@@ -221,11 +223,13 @@ const getAuth = () => {
                     redirectURI: process.env.GOOGLE_REDIRECT_URI,
                 },
             },
+
             advanced: {
                 crossOrigin: true,
                 database: {
                     idField: "_id",
                 },
+
                 cookies: {
                     session_token: {
                         attributes: {
@@ -241,7 +245,23 @@ const getAuth = () => {
                         domain: process.env.FRONTEND_URL,
                     },
                 },
-            }
+            },
+            plugins: [
+                customSession(async ({ user, session }) => {
+                    const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
+                        if (projection[key] === 1) {
+                            acc[key] = user[key]
+                        }
+                        return acc
+                    }, {})
+
+                    return {
+                        user: userInfo,
+                        session,
+
+                    }
+                })
+            ]
         });
     }
     return _auth;

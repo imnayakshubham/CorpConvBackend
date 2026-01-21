@@ -6,7 +6,7 @@ const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
 const getRedisInstance = require("../redisClient/redisClient.js");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 
 
 
@@ -227,19 +227,6 @@ const getUserInfo = async (req, res) => {
       }
     }
 
-    const projection = {
-      user_job_role: 1,
-      is_anonymous: 1,
-      is_email_verified: 1,
-      user_bio: 1,
-      user_current_company_name: 1,
-      user_id: 1,
-      user_job_experience: 1,
-      user_location: 1,
-      public_user_name: 1,
-      followings: 1,
-      followers: 1,
-    };
 
     const user = await User.findOne({ _id: userId, access: true }, projection)
     if (redis) {
