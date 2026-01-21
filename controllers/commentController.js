@@ -50,7 +50,7 @@ const postComments = async (req, res) => {
 
 const postReplyComments = async (req, res) => {
     try {
-        const { post_id, parent_comment_id, comment_id, comment } = req.body;
+        const { post_id, parent_comment_id, comment } = req.body;
         const commented_by = req.user._id;
 
         // Create a new comment as a reply
@@ -58,12 +58,12 @@ const postReplyComments = async (req, res) => {
             comment,
             commented_by,
             post_id,
-            parent_comment_id: comment_id,
+            parent_comment_id,
         });
 
         // Add new comment to the child comments of parent
         await Comment.findByIdAndUpdate(
-            comment_id,
+            parent_comment_id,
             { $addToSet: { nested_comments: newComment._id } },
             { new: true }
         );
@@ -78,13 +78,13 @@ const postReplyComments = async (req, res) => {
             data: {
                 comment: populatedReply,
                 post_id,
-                parent_comment_id: comment_id
+                parent_comment_id
             },
         });
 
         // Emit socket event for real-time updates
         const io = getIo();
-        io.emit('listen_comment_reply', { post_id, comment: populatedReply, parent_comment_id: comment_id });
+        io.emit('listen_comment_reply', { post_id, comment: populatedReply, parent_comment_id });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -218,40 +218,104 @@ const deleteComment = async (req, res) => {
 }
 
 
-const getCommentReplies = async (req, res) => {
+// Fetch top-level comments for a post with pagination
+const getPostComments = async (req, res) => {
     try {
-        const payload = req.params
+        const { post_id } = req.params;
+        const { limit = 10, cursor } = req.query;
 
-        const comment = await Comment.find({ post_id: payload.post_id, _id: payload.comment_id })
-        console.log("before", comment)
+        const query = {
+            post_id,
+            parent_comment_id: { $exists: false },
+            access: { $ne: false }
+        };
 
-        await populateChildComments(comment)
-
-
-
-        if (comment[0]) {
-            return res.status(200).json({
-                status: 'Success',
-                message: 'Comment fetched successfully',
-                data: comment[0],
-            });
-        } else {
-            return res.status(400).json({
-                status: 'Failed',
-                message: 'Comment fetched Failed',
-                data: null,
-            });
+        if (cursor) {
+            query._id = { $lt: cursor };
         }
 
+        const limitNum = parseInt(limit);
+        const comments = await Comment.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum + 1)
+            .populate('commented_by', 'public_user_name is_email_verified user_public_profile_pic');
 
+        // Add reply_count for each comment (not full replies)
+        const commentsWithReplyCount = await Promise.all(
+            comments.slice(0, limitNum).map(async (comment) => {
+                const replyCount = await Comment.countDocuments({
+                    parent_comment_id: comment._id,
+                    access: { $ne: false }
+                });
+                return { ...comment.toObject(), reply_count: replyCount };
+            })
+        );
 
+        const hasMore = comments.length > limitNum;
+        const nextCursor = hasMore ? comments[limitNum - 1]._id : null;
+
+        res.json({
+            status: true,
+            data: {
+                comments: commentsWithReplyCount,
+                nextCursor,
+                hasMore
+            }
+        });
     } catch (error) {
-
         console.error(error);
-        return res.status(500).json({ message: 'Internal Server Error' });
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
 
+// Fetch replies for a specific comment with pagination
+const getCommentReplies = async (req, res) => {
+    try {
+        const { comment_id } = req.params;
+        const { limit = 5, cursor } = req.query;
+
+        const query = {
+            parent_comment_id: comment_id,
+            access: { $ne: false }
+        };
+
+        if (cursor) {
+            query._id = { $lt: cursor };
+        }
+
+        const limitNum = parseInt(limit);
+        const replies = await Comment.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum + 1)
+            .populate('commented_by', 'public_user_name is_email_verified user_public_profile_pic');
+
+        // Add reply_count for nested replies
+        const repliesWithCount = await Promise.all(
+            replies.slice(0, limitNum).map(async (reply) => {
+                const replyCount = await Comment.countDocuments({
+                    parent_comment_id: reply._id,
+                    access: { $ne: false }
+                });
+                return { ...reply.toObject(), reply_count: replyCount };
+            })
+        );
+
+        const hasMore = replies.length > limitNum;
+        const nextCursor = hasMore ? replies[limitNum - 1]._id : null;
+
+        res.json({
+            status: true,
+            data: {
+                replies: repliesWithCount,
+                nextCursor,
+                hasMore
+            }
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
 
-module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies };
+module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies, getPostComments };

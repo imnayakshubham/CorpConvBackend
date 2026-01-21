@@ -276,6 +276,8 @@ const projection = {
     public_user_name: 1,
     followings: 1,
     followers: 1,
+    id: 1,
+    _id: 1
 };
 
 
