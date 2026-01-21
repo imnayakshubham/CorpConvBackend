@@ -1,6 +1,7 @@
 const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
 const { populateChildComments } = require("../utils/utils");
+const { getIo } = require("../utils/socketManger");
 
 
 
@@ -37,6 +38,10 @@ const postComments = async (req, res) => {
                 post_id
             },
         });
+
+        // Emit socket event for real-time updates
+        const io = getIo();
+        io.emit('listen_comment_created', { post_id, comment: populatedComment });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -76,6 +81,10 @@ const postReplyComments = async (req, res) => {
                 parent_comment_id: comment_id
             },
         });
+
+        // Emit socket event for real-time updates
+        const io = getIo();
+        io.emit('listen_comment_reply', { post_id, comment: populatedReply, parent_comment_id: comment_id });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -133,6 +142,10 @@ const likeComment = async (req, res) => {
                 user_id: userId.toString()
             };
 
+            // Emit socket event for real-time updates
+            const io = getIo();
+            io.emit('listen_comment_like', minimalPayload);
+
             return res.status(200).json({
                 status: 'Success',
                 data: minimalPayload,
@@ -181,6 +194,10 @@ const deleteComment = async (req, res) => {
                 post_id: post_id || updatedComment.post_id,
                 deleted: true
             };
+
+            // Emit socket event for real-time updates
+            const io = getIo();
+            io.emit('listen_comment_deleted', minimalPayload);
 
             return res.status(200).json({
                 status: 'Success',

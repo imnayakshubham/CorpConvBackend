@@ -96,8 +96,10 @@ const surveyFormFieldSchema = new mongoose.Schema({
     conditional_logic: conditionalLogicSchema,
     // Quiz mode - score for this field (for non-option fields like text matching)
     quiz_score: { type: Number, default: 0 },
-    quiz_correct_answer: { type: String }
-});
+    quiz_correct_answer: { type: String },
+    access: { type: Boolean, default: true },
+    is_active: { type: Boolean, default: true },
+}, { timestamps: true });
 
 // Page schema for multi-step forms
 const pageSchema = new mongoose.Schema({
@@ -188,6 +190,11 @@ const surveySchema = new mongoose.Schema({
         type: [pageSchema],
         default: [{ page_id: 'page_default', title: 'Page 1', description: '', order: 0 }]
     },
+
+    is_multi_step: {
+        type: Boolean,
+        default: false
+    },
     // Quiz mode settings
     quiz_settings: {
         type: quizSettingsSchema,
@@ -219,6 +226,11 @@ const surveySchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    slug: {
+        type: String,
+        default: null,
+        trim: true
+    },
     created_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'draft' },
     tags: [{ type: String, default: [] }],
@@ -230,7 +242,11 @@ surveySchema.pre('save', function (next) {
         console.log("Pre-save hook triggered");
         if (this.survey_title) {
             this.survey_title = this.survey_title.trim();
+            // addd below slug creation like notion
+            this.slug = this.survey_title.toLowerCase().replace(/\s+/g, '-')
         }
+
+
         if (this.survey_description) {
             this.survey_description = this.survey_description.trim();
         }
