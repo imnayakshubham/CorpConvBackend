@@ -212,6 +212,18 @@ const getAuth = () => {
                     premium_plan: {
                         type: "string",
                         defaultValue: "free",
+                    },
+                    avatar_config: {
+                        type: "object",
+                        defaultValue: {
+                            style: "avataaars",
+                            seed: null,
+                            options: {}
+                        }
+                    },
+                    qr_config: {
+                        type: "object",
+                        defaultValue: null
                     }
                 }
             },
