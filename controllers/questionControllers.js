@@ -1,4 +1,5 @@
 const QuestionModel = require("../models/questionModel")
+const { getIo } = require("../utils/socketManger")
 
 
 
@@ -7,6 +8,14 @@ const createquestion = async (req, res) => {
         const question_posted_by = req.user._id
         const newQuestion = await QuestionModel.create({ question_posted_by })
         if (newQuestion) {
+            // Populate and broadcast to questions_list room
+            const populatedQuestion = await newQuestion.populate(
+                'question_posted_by',
+                'public_user_name user_public_profile_pic'
+            );
+            const io = getIo();
+            io.to("questions_list").emit("new_question_created", populatedQuestion);
+
             return res.status(201).json({
                 status: 'Success',
                 data: newQuestion,

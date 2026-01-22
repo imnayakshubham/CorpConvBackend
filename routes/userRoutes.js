@@ -10,7 +10,10 @@ const {
   acceptFollowRequest,
   rejectFollowRequest,
   getfollowersList,
-  getUserInfo
+  getUserInfo,
+  listUserSessions,
+  revokeSession,
+  revokeAllSessions
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -28,6 +31,11 @@ router.route("/update-profile").post(protect, updateUserProfile);
 router.route("/send-follow-request").post(protect, sendFollowRequest);
 router.route("/accept-follow-request").post(protect, acceptFollowRequest);
 router.route("/reject-follow-request").post(protect, rejectFollowRequest);
+
+// Session Management
+router.route("/sessions").get(protect, listUserSessions);
+router.route("/sessions/revoke").post(protect, revokeSession);
+router.route("/sessions/revoke-all").post(protect, revokeAllSessions);
 
 
 module.exports = router;

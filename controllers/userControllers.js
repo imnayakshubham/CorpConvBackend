@@ -406,4 +406,99 @@ const rejectFollowRequest = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo };
+// Session Management
+const listUserSessions = async (req, res) => {
+  try {
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    const sessions = await auth.api.listSessions({
+      headers: req.headers,
+    });
+
+    if (sessions) {
+      return res.status(200).json({
+        message: "Sessions retrieved successfully",
+        status: "Success",
+        result: sessions,
+      });
+    }
+
+    return res.status(200).json({
+      message: "No sessions found",
+      status: "Success",
+      result: [],
+    });
+  } catch (error) {
+    console.error("List sessions error:", error);
+    return res.status(500).json({
+      message: "Failed to retrieve sessions",
+      status: "Failed",
+    });
+  }
+};
+
+const revokeSession = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        message: "Session token is required",
+        status: "Failed",
+      });
+    }
+
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    await auth.api.revokeSession({
+      headers: req.headers,
+      body: { token },
+    });
+
+    return res.status(200).json({
+      message: "Session revoked successfully",
+      status: "Success",
+    });
+  } catch (error) {
+    console.error("Revoke session error:", error);
+    return res.status(500).json({
+      message: "Failed to revoke session",
+      status: "Failed",
+    });
+  }
+};
+
+const revokeAllSessions = async (req, res) => {
+  try {
+    const { exceptCurrent } = req.body;
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    if (exceptCurrent) {
+      await auth.api.revokeOtherSessions({
+        headers: req.headers,
+      });
+    } else {
+      await auth.api.revokeSessions({
+        headers: req.headers,
+      });
+    }
+
+    return res.status(200).json({
+      message: exceptCurrent
+        ? "All other sessions revoked successfully"
+        : "All sessions revoked successfully",
+      status: "Success",
+    });
+  } catch (error) {
+    console.error("Revoke all sessions error:", error);
+    return res.status(500).json({
+      message: "Failed to revoke sessions",
+      status: "Failed",
+    });
+  }
+};
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions };

@@ -137,6 +137,15 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Questions list room management
+  socket.on("join_questions_list", () => {
+    socket.join("questions_list");
+  });
+
+  socket.on("leave_questions_list", () => {
+    socket.leave("questions_list");
+  });
+
   socket.on("get_question", async (question_id) => {
     socket.join(question_id)
     let question = null
@@ -300,6 +309,13 @@ io.on("connection", (socket) => {
         }
       }
       io.to(payload.question_id).emit('get_answer_for_question', answer);
+
+      // Broadcast answer count update to questions list
+      if (answer.status === 'Success') {
+        io.to("questions_list").emit("question_answer_count_updated", {
+          question_id: payload.question_id
+        });
+      }
     }
 
   })
@@ -376,7 +392,46 @@ io.on("connection", (socket) => {
     }
     io.to(payload.question_id).emit("update_likes_response", updatedQuestion)
 
+    // Broadcast like count update to questions list
+    if (updatedQuestion.status === 'Success') {
+      io.to("questions_list").emit("question_likes_updated", {
+        question_id: payload.question_id,
+        liked_by: updatedQuestion.data.liked_by
+      });
+    }
+
   })
+
+  // Delete question via socket
+  socket.on("delete_question", async (payload) => {
+    try {
+      const updated = await questionModel.findByIdAndUpdate(
+        payload.question_id,
+        { access: false },
+        { new: true }
+      );
+      if (updated) {
+        io.to("questions_list").emit("question_deleted", {
+          question_id: payload.question_id
+        });
+        socket.emit("delete_question_response", {
+          status: 'Success',
+          message: "Question deleted successfully"
+        });
+      } else {
+        socket.emit("delete_question_response", {
+          status: 'Failed',
+          message: "Question not found"
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting question:", error);
+      socket.emit("delete_question_response", {
+        status: 'Failed',
+        message: "Failed to delete question"
+      });
+    }
+  });
 
   socket.off("setup", () => {
     console.log("USER DISCONNECTED");

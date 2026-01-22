@@ -3,6 +3,7 @@ const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const mongoose = require("mongoose");
 const User = require("../models/userModel");
 const { customSession } = require("better-auth/plugins");
+const { passkey } = require("@better-auth/passkey");
 const { projection } = require("../constants");
 
 let _auth;
@@ -247,6 +248,13 @@ const getAuth = () => {
                 },
             },
             plugins: [
+                passkey({
+                    rpID: process.env.APP_ENV === 'PROD' ? 'hushwork.vercel.app' : 'localhost',
+                    rpName: 'Hushwork',
+                    origin: process.env.APP_ENV === 'PROD'
+                        ? 'https://hushwork.vercel.app'
+                        : 'http://localhost:3005',
+                }),
                 customSession(async ({ user, session }) => {
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
                         if (projection[key] === 1) {
