@@ -277,7 +277,10 @@ const projection = {
     followings: 1,
     followers: 1,
     id: 1,
-    _id: 1
+    _id: 1,
+    avatar_config: 1,
+    qr_config: 1,
+    user_public_profile_pic: 1
 };
 
 

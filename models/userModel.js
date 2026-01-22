@@ -131,6 +131,24 @@ const userSchema = mongoose.Schema({
   secondary_email_domain: {
     type: String,
     trim: true,
+  },
+  avatar_config: {
+    type: {
+      style: { type: String, default: "avataaars" },
+      seed: { type: String },
+      options: { type: Object, default: {} }
+    },
+    default: { style: "avataaars", seed: null, options: {} }
+  },
+  qr_config: {
+    type: {
+      fgColor: { type: String, default: "#000000" },
+      bgColor: { type: String, default: "#ffffff" },
+      level: { type: String, enum: ['L', 'M', 'Q', 'H'], default: 'M' },
+      includeMargin: { type: Boolean, default: true },
+      style: { type: String, enum: ['squares', 'dots'], default: 'squares' }
+    },
+    default: { fgColor: "#000000", bgColor: "#ffffff", level: "M", includeMargin: true, style: "squares" }
   }
 }, { timestaps: true });
 

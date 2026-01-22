@@ -13,7 +13,9 @@ const {
   getUserInfo,
   listUserSessions,
   revokeSession,
-  revokeAllSessions
+  revokeAllSessions,
+  updateAvatarConfig,
+  updateQRConfig
 } = require("../controllers/userControllers");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -36,6 +38,10 @@ router.route("/reject-follow-request").post(protect, rejectFollowRequest);
 router.route("/sessions").get(protect, listUserSessions);
 router.route("/sessions/revoke").post(protect, revokeSession);
 router.route("/sessions/revoke-all").post(protect, revokeAllSessions);
+
+// Avatar and QR Code Configuration
+router.route("/update-avatar").post(protect, updateAvatarConfig);
+router.route("/update-qr-config").post(protect, updateQRConfig);
 
 
 module.exports = router;

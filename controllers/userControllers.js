@@ -77,6 +77,8 @@ const responseFormatterForAuth = (result) => {
     public_user_name: result.public_user_name,
     is_secondary_email_id_verified: result.is_secondary_email_id_verified,
     user_public_profile_pic: result.user_public_profile_pic,
+    avatar_config: result.avatar_config,
+    qr_config: result.qr_config,
   }
 }
 
@@ -501,4 +503,90 @@ const revokeAllSessions = async (req, res) => {
   }
 };
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions };
+const updateAvatarConfig = async (req, res) => {
+  try {
+    const { _id, avatar_config } = req.body;
+
+    if (!_id || !avatar_config) {
+      return res.status(400).json({ message: "User ID and avatar config are required", status: "Failed" });
+    }
+
+    const validStyles = ['avataaars', 'bottts', 'lorelei', 'notionists', 'adventurer', 'fun-emoji', 'personas', 'big-smile', 'micah', 'thumbs'];
+    if (avatar_config.style && !validStyles.includes(avatar_config.style)) {
+      return res.status(400).json({ message: "Invalid avatar style", status: "Failed" });
+    }
+
+    const updateOperation = {
+      $set: { avatar_config }
+    };
+
+    const redis = getRedisInstance();
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${_id}`;
+    if (redis) {
+      await redis.del(userInfoRedisKey);
+    }
+
+    const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
+
+    if (updatedData) {
+      return res.status(200).json({
+        message: "Avatar configuration updated successfully",
+        status: "Success",
+        result: { avatar_config: updatedData.avatar_config }
+      });
+    } else {
+      return res.status(404).json({ message: "User not found", status: "Failed" });
+    }
+  } catch (error) {
+    console.error("Update avatar config error:", error);
+    return res.status(500).json({ message: "Something went wrong", status: "Failed" });
+  }
+};
+
+const updateQRConfig = async (req, res) => {
+  try {
+    const { _id, qr_config } = req.body;
+
+    if (!_id || !qr_config) {
+      return res.status(400).json({ message: "User ID and QR config are required", status: "Failed" });
+    }
+
+    const validLevels = ['L', 'M', 'Q', 'H'];
+    const validStyles = ['squares', 'dots'];
+
+    if (qr_config.level && !validLevels.includes(qr_config.level)) {
+      return res.status(400).json({ message: "Invalid QR error correction level", status: "Failed" });
+    }
+
+    if (qr_config.style && !validStyles.includes(qr_config.style)) {
+      return res.status(400).json({ message: "Invalid QR style", status: "Failed" });
+    }
+
+    const updateOperation = {
+      $set: { qr_config }
+    };
+
+    const redis = getRedisInstance();
+    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${_id}`;
+    if (redis) {
+      await redis.del(userInfoRedisKey);
+    }
+
+    const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
+
+    if (updatedData) {
+      return res.status(200).json({
+        message: "QR code configuration updated successfully",
+        status: "Success",
+        result: { qr_config: updatedData.qr_config }
+      });
+    } else {
+      return res.status(404).json({ message: "User not found", status: "Failed" });
+    }
+  } catch (error) {
+    console.error("Update QR config error:", error);
+    return res.status(500).json({ message: "Something went wrong", status: "Failed" });
+  }
+};
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig };
