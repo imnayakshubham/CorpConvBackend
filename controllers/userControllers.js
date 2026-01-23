@@ -5,7 +5,8 @@ const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require(
 const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
-const getRedisInstance = require("../redisClient/redisClient.js");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 
 
@@ -189,11 +190,10 @@ const updateUserProfile = async (req, res) => {
       },
     };
 
-    const redis = getRedisInstance()
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
-    if (redis) {
-      await redis.del(userInfoRedisKey);
-    }
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', req.body._id);
+    await cache.del(userInfoCacheKey);
+
     const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
     if (updatedData) {
       return res.status(200).json({
@@ -214,26 +214,22 @@ const getUserInfo = async (req, res) => {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
     }
 
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
-    const redis = getRedisInstance()
-    if (redis) {
-      const cachedData = await redis.get(userInfoRedisKey)
+    // Try to get from cache
+    const cacheKey = cache.generateKey('user', 'info', userId);
+    const cachedData = await cache.get(cacheKey);
 
+    if (cachedData) {
       if (cachedData) {
-        const parsedCachedData = JSON.parse(cachedData)
-        if (parsedCachedData) {
-          return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
-        } else {
-          return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: parsedCachedData })
-        }
+        return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: cachedData })
+      } else {
+        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: cachedData })
       }
     }
 
-
     const user = await User.findOne({ _id: userId, access: true }, projection)
-    if (redis) {
-      await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
-    }
+
+    // Cache the result
+    await cache.set(cacheKey, user, TTL.USER_PROFILE);
 
     if (user) {
       return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
@@ -537,11 +533,9 @@ const updateAvatarConfig = async (req, res) => {
       $set: { avatar_config }
     };
 
-    const redis = getRedisInstance();
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${_id}`;
-    if (redis) {
-      await redis.del(userInfoRedisKey);
-    }
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', _id);
+    await cache.del(userInfoCacheKey);
 
     const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
 
@@ -643,11 +637,9 @@ const updateQRConfig = async (req, res) => {
       $set: { qr_config }
     };
 
-    const redis = getRedisInstance();
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${_id}`;
-    if (redis) {
-      await redis.del(userInfoRedisKey);
-    }
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', _id);
+    await cache.del(userInfoCacheKey);
 
     const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
 

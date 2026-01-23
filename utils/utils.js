@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { default: mongoose } = require("mongoose");
-const { jobPostSites } = require("../constants");
+const { jobPostSites, verifiedLinkSources } = require("../constants");
 
 const generateToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET_KEY, {
@@ -40,6 +40,10 @@ const isJobVerified = (link) => {
     return jobPostSites.some(keyword => link.includes(keyword));
 }
 
+const isVerifiedSource = (link) => {
+    return verifiedLinkSources.some(keyword => link.toLowerCase().includes(keyword.toLowerCase()));
+}
+
 const populateChildComments = async (comments) => {
     for (const comment of comments) {
         await comment.populate('commented_by', "public_user_name is_email_verified avatar_config")
@@ -57,4 +61,4 @@ const populateChildComments = async (comments) => {
     }
 };
 
-module.exports = { generateToken, toTitleCase, randomIdGenerator, generateUserId, keepOnlyNumbers, isJobVerified, populateChildComments };
+module.exports = { generateToken, toTitleCase, randomIdGenerator, generateUserId, keepOnlyNumbers, isJobVerified, isVerifiedSource, populateChildComments };

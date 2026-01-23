@@ -1,5 +1,7 @@
 const QuestionModel = require("../models/questionModel")
 const { getIo } = require("../utils/socketManger")
+const cache = require("../redisClient/cacheHelper")
+const TTL = require("../redisClient/cacheTTL")
 
 
 
@@ -8,6 +10,9 @@ const createquestion = async (req, res) => {
         const question_posted_by = req.user._id
         const newQuestion = await QuestionModel.create({ question_posted_by })
         if (newQuestion) {
+            // Invalidate questions list cache
+            await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`)
+
             // Populate and broadcast to questions_list room
             const populatedQuestion = await newQuestion.populate(
                 'question_posted_by',
@@ -47,6 +52,22 @@ const getquestions = async (req, res) => {
         const sortBy = req.query.sortBy || 'newest';
         const filter = req.query.filter || 'all';
         const userId = req.query.userId || null;
+
+        // Only cache first page with no search/filter (standard list view)
+        const shouldCache = !cursor && !search.trim() && filter === 'all';
+        const cacheKey = shouldCache ? cache.generateKey('questions', 'list', sortBy, filter) : null;
+
+        // Try to get from cache for first page
+        if (shouldCache) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.status(200).json({
+                    status: 'Success',
+                    data: cached,
+                    message: 'Questions fetched successfully (Cached)'
+                });
+            }
+        }
 
         // Build query
         let query = { access: true };
@@ -113,9 +134,16 @@ const getquestions = async (req, res) => {
             ? resultQuestions[resultQuestions.length - 1].createdAt
             : null;
 
+        const responseData = { questions: resultQuestions, nextCursor, hasMore };
+
+        // Cache first page results
+        if (shouldCache) {
+            await cache.set(cacheKey, responseData, TTL.QUESTIONS_LIST);
+        }
+
         return res.status(200).json({
             status: 'Success',
-            data: { questions: resultQuestions, nextCursor, hasMore },
+            data: responseData,
             message: 'Questions fetched successfully'
         });
     } catch (error) {
@@ -133,6 +161,11 @@ const deletequestion = async (req, res) => {
         const _id = req.params.id
         const updatedQuestion = await QuestionModel.findByIdAndUpdate(_id, { access: false }, { new: true })
         if (updatedQuestion) {
+            // Invalidate caches
+            const questionKey = cache.generateKey('question', _id);
+            await cache.del(questionKey);
+            await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
+
             return res.status(201).json({
                 status: 'Success',
                 data: null,
@@ -158,6 +191,18 @@ const deletequestion = async (req, res) => {
 const getquestionbyid = async (req, res) => {
     try {
         const _id = req.params.id
+
+        // Try to get from cache
+        const cacheKey = cache.generateKey('question', _id);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: "Question Fetched successfully (Cached)"
+            });
+        }
+
         const question = await QuestionModel.findById(_id)
             .populate("question_posted_by", "public_user_name user_public_profile_pic")
             .populate({
@@ -169,6 +214,9 @@ const getquestionbyid = async (req, res) => {
             })
 
         if (question) {
+            // Cache the question
+            await cache.set(cacheKey, question.toObject(), TTL.QUESTION_DETAIL);
+
             return res.status(200).json({
                 status: 'Success',
                 data: question,

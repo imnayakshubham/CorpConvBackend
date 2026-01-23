@@ -1,4 +1,6 @@
 const { Survey, Submission } = require("../models/surveyModel");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 
 // CREATE Survey API
 const createSurvey = async (req, res) => {
@@ -26,6 +28,10 @@ const createSurvey = async (req, res) => {
 
         const savedSurvey = await newSurvey.save();
 
+        // Invalidate user's surveys list cache
+        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
+        await cache.del(surveysListKey);
+
         return res.status(201).json({
             status: 'Success',
             data: savedSurvey,
@@ -44,8 +50,22 @@ const createSurvey = async (req, res) => {
 // LIST Surveys API
 const listSurveys = async (req, res) => {
     try {
+        // Try to get from cache
+        const cacheKey = cache.generateKey('surveys', 'user', req.user._id);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: 'Surveys retrieved successfully (Cached)'
+            });
+        }
+
         const surveys = await Survey.find({ created_by: req.user._id, access: true }).sort({ createdAt: -1 })
             .select('survey_title survey_description status submissions view_count createdAt')
+
+        // Cache the surveys list
+        await cache.set(cacheKey, surveys, TTL.SURVEYS_LIST);
 
         return res.status(200).json({
             status: 'Success',
@@ -79,6 +99,11 @@ const archiveSurvey = async (req, res) => {
         survey.access = false;
 
         await survey.save();
+
+        // Invalidate caches
+        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
+        const surveyDetailKey = cache.generateKey('survey', surveyId);
+        await cache.del(surveysListKey, surveyDetailKey);
 
         return res.status(200).json({
             status: 'Success',
@@ -129,6 +154,11 @@ const editSurvey = async (req, res) => {
 
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, { ...updatedPayload }, { new: true })
 
+        // Invalidate caches
+        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
+        const surveyDetailKey = cache.generateKey('survey', surveyId);
+        await cache.del(surveysListKey, surveyDetailKey);
+
         return res.status(200).json({
             status: 'Success',
             data: updatedSurvey,
@@ -148,6 +178,17 @@ const getSurvey = async (req, res) => {
     try {
         const surveyId = req.params.id;
 
+        // Try to get from cache
+        const cacheKey = cache.generateKey('survey', surveyId);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: 'Survey Fetch successfully (Cached)'
+            });
+        }
+
         const survey = await Survey.findById(surveyId);
 
         if (!survey) {
@@ -158,6 +199,8 @@ const getSurvey = async (req, res) => {
             });
         }
 
+        // Cache the survey
+        await cache.set(cacheKey, survey.toObject(), TTL.SURVEY_DETAIL);
 
         return res.status(200).json({
             status: 'Success',

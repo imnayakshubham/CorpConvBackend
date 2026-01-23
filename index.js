@@ -3,7 +3,7 @@ const express = require("express");
 const connectDB = require("./config/db");
 const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
-const jobRoutes = require("./routes/jobRoutes");
+const linkRoutes = require("./routes/linkRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 
 const postRoutes = require("./routes/postRoutes");
@@ -83,7 +83,7 @@ app.all("/api/auth/*", (req, res) => {
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
-app.use("/api/job", jobRoutes);
+app.use("/api/link", linkRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);

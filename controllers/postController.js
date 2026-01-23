@@ -1,8 +1,9 @@
 const Post = require("../models/postModel");
 const Comment = require("../models/commentModel");
-const getRedisInstance = require("../redisClient/redisClient");
 const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 
 
 const createPost = async (req, res) => {
@@ -17,6 +18,12 @@ const createPost = async (req, res) => {
         const post = await Post.create(postPayload)
         const postData = await post.populate("posted_by", "public_user_name is_email_verified avatar_config")
         if (postData) {
+            // Invalidate posts caches
+            const postsKey = cache.generateKey('posts', 'all');
+            const userPostsKey = cache.generateKey('posts', 'user', req.user._id);
+            const categoriesKey = cache.generateKey('posts', 'categories');
+            await cache.del(postsKey, userPostsKey, categoriesKey);
+
             const io = getIo()
             io.emit('listen_post_creation', postData)
 
@@ -55,6 +62,12 @@ const updatePost = async (req, res) => {
             await populateChildComments(postData.comments)
 
             if (postData) {
+                // Invalidate posts caches
+                const postsKey = cache.generateKey('posts', 'all');
+                const userPostsKey = cache.generateKey('posts', 'user', post.posted_by);
+                const categoriesKey = cache.generateKey('posts', 'categories');
+                await cache.del(postsKey, userPostsKey, categoriesKey);
+
                 return res.status(200).json({
                     status: 'Success',
                     data: postData,
@@ -105,19 +118,16 @@ const fetchPosts = async (req, res) => {
 
         // For non-paginated requests with caching (backward compatibility)
         if (!cursor && !req.query?.limit) {
-            const redis = getRedisInstance();
-            const postedByRedisKey = user_id ? `${process.env.APP_ENV}_posted_by_${user_id}` : `${process.env.APP_ENV}_posts`;
+            const cacheKey = user_id
+                ? cache.generateKey('posts', 'user', user_id)
+                : cache.generateKey('posts', 'all');
 
-            let parsedCachedData = null;
-            if (redis) {
-                const cachedData = await redis.get(postedByRedisKey);
-                parsedCachedData = JSON.parse(cachedData);
-            }
+            const cachedData = await cache.get(cacheKey);
 
-            if (parsedCachedData) {
+            if (cachedData) {
                 return res.status(200).json({
                     status: 'Success',
-                    data: parsedCachedData,
+                    data: cachedData,
                     message: "Posts fetched successfully (Cached)"
                 });
             }
@@ -167,11 +177,10 @@ const fetchPosts = async (req, res) => {
 
         // Cache non-paginated requests
         if (!cursor && !req.query?.limit) {
-            const redis = getRedisInstance();
-            const postedByRedisKey = user_id ? `${process.env.APP_ENV}_posted_by_${user_id}` : `${process.env.APP_ENV}_posts`;
-            if (redis) {
-                await redis.set(postedByRedisKey, JSON.stringify(resultPosts), 'EX', 21600);
-            }
+            const cacheKey = user_id
+                ? cache.generateKey('posts', 'user', user_id)
+                : cache.generateKey('posts', 'all');
+            await cache.set(cacheKey, resultPosts, TTL.POSTS_LIST);
         }
 
         return res.status(200).json({
@@ -253,6 +262,11 @@ const deletePost = async (req, res) => {
         if (post) {
             const postData = await Post.findByIdAndDelete(req.body._id);
             if (postData) {
+                // Invalidate posts caches
+                const postsKey = cache.generateKey('posts', 'all');
+                const userPostsKey = cache.generateKey('posts', 'user', post.posted_by);
+                await cache.del(postsKey, userPostsKey);
+
                 return res.status(200).json({
                     status: 'Success',
                     data: null,
@@ -308,6 +322,17 @@ const getPost = async (req, res) => {
 
 const getCategories = async (req, res) => {
     try {
+        // Try to get from cache
+        const cacheKey = cache.generateKey('posts', 'categories');
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                cached: true
+            });
+        }
+
         const categories = await Post.distinct('category');
         const predefinedCategories = [
             'company_review', 'random', 'reading',
@@ -326,6 +351,10 @@ const getCategories = async (req, res) => {
         });
 
         const uniqueCategories = Array.from(categoryMap.values()).sort();
+
+        // Cache the categories
+        await cache.set(cacheKey, uniqueCategories, TTL.CATEGORIES);
+
         return res.status(200).json({
             status: 'Success',
             data: uniqueCategories

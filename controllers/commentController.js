@@ -2,6 +2,8 @@ const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
 const { populateChildComments } = require("../utils/utils");
 const { getIo } = require("../utils/socketManger");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 
 
 
@@ -25,6 +27,10 @@ const postComments = async (req, res) => {
             { $addToSet: { comments: newComment._id } },
             { new: true }
         );
+
+        // Invalidate comments cache for this post
+        const commentsKey = cache.generateKey('comments', 'post', post_id);
+        await cache.del(commentsKey);
 
         // Populate the new comment with user info
         const populatedComment = await Comment.findById(newComment._id)
@@ -68,6 +74,11 @@ const postReplyComments = async (req, res) => {
             { new: true }
         );
 
+        // Invalidate caches for this post and parent comment replies
+        const commentsKey = cache.generateKey('comments', 'post', post_id);
+        const repliesKey = cache.generateKey('comments', 'replies', parent_comment_id);
+        await cache.del(commentsKey, repliesKey);
+
         // Populate the new reply comment with user info
         const populatedReply = await Comment.findById(newComment._id)
             .populate('commented_by', 'public_user_name is_email_verified avatar_config');
@@ -91,7 +102,7 @@ const postReplyComments = async (req, res) => {
     }
 };
 
-// app.get('/api/comments/:post_id', 
+// app.get('/api/comments/:post_id',
 
 const getComment = async (req, res) => {
     try {
@@ -162,7 +173,7 @@ const likeComment = async (req, res) => {
     }
 }
 
-// app.put('/api/comments/:comment_id', 
+// app.put('/api/comments/:comment_id',
 const updateComment = async (req, res) => {
     try {
         const comment_id = req.params.comment_id;
@@ -185,9 +196,20 @@ const deleteComment = async (req, res) => {
             { _id: comment_id },
             { $set: { access: false } },
             { new: true }
-        ).select('_id post_id access');
+        ).select('_id post_id access parent_comment_id');
 
         if (updatedComment) {
+            // Invalidate caches
+            const commentsKey = cache.generateKey('comments', 'post', post_id || updatedComment.post_id);
+            const keysToDelete = [commentsKey];
+
+            // If this comment has a parent, also invalidate replies cache
+            if (updatedComment.parent_comment_id) {
+                const repliesKey = cache.generateKey('comments', 'replies', updatedComment.parent_comment_id);
+                keysToDelete.push(repliesKey);
+            }
+            await cache.del(keysToDelete);
+
             // Minimal payload for response
             const minimalPayload = {
                 comment_id,
@@ -224,6 +246,22 @@ const getPostComments = async (req, res) => {
         const { post_id } = req.params;
         const { limit = 10, cursor } = req.query;
 
+        // Only cache first page (no cursor)
+        const shouldCache = !cursor;
+        const cacheKey = shouldCache ? cache.generateKey('comments', 'post', post_id) : null;
+
+        // Try to get from cache for first page
+        if (shouldCache) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.json({
+                    status: true,
+                    data: cached,
+                    cached: true
+                });
+            }
+        }
+
         const query = {
             post_id,
             parent_comment_id: { $exists: false },
@@ -254,13 +292,20 @@ const getPostComments = async (req, res) => {
         const hasMore = comments.length > limitNum;
         const nextCursor = hasMore ? comments[limitNum - 1]._id : null;
 
+        const responseData = {
+            comments: commentsWithReplyCount,
+            nextCursor,
+            hasMore
+        };
+
+        // Cache first page results
+        if (shouldCache) {
+            await cache.set(cacheKey, responseData, TTL.COMMENTS_LIST);
+        }
+
         res.json({
             status: true,
-            data: {
-                comments: commentsWithReplyCount,
-                nextCursor,
-                hasMore
-            }
+            data: responseData
         });
     } catch (error) {
         console.error(error);
@@ -273,6 +318,22 @@ const getCommentReplies = async (req, res) => {
     try {
         const { comment_id } = req.params;
         const { limit = 5, cursor } = req.query;
+
+        // Only cache first page (no cursor)
+        const shouldCache = !cursor;
+        const cacheKey = shouldCache ? cache.generateKey('comments', 'replies', comment_id) : null;
+
+        // Try to get from cache for first page
+        if (shouldCache) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.json({
+                    status: true,
+                    data: cached,
+                    cached: true
+                });
+            }
+        }
 
         const query = {
             parent_comment_id: comment_id,
@@ -303,13 +364,20 @@ const getCommentReplies = async (req, res) => {
         const hasMore = replies.length > limitNum;
         const nextCursor = hasMore ? replies[limitNum - 1]._id : null;
 
+        const responseData = {
+            replies: repliesWithCount,
+            nextCursor,
+            hasMore
+        };
+
+        // Cache first page results
+        if (shouldCache) {
+            await cache.set(cacheKey, responseData, TTL.COMMENTS_LIST);
+        }
+
         res.json({
             status: true,
-            data: {
-                replies: repliesWithCount,
-                nextCursor,
-                hasMore
-            }
+            data: responseData
         });
     } catch (error) {
         console.error(error);
