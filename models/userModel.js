@@ -141,14 +141,18 @@ const userSchema = mongoose.Schema({
     default: { style: "avataaars", seed: null, options: {} }
   },
   qr_config: {
-    type: {
-      fgColor: { type: String, default: "#000000" },
-      bgColor: { type: String, default: "#ffffff" },
-      level: { type: String, enum: ['L', 'M', 'Q', 'H'], default: 'M' },
-      includeMargin: { type: Boolean, default: true },
-      style: { type: String, enum: ['squares', 'dots'], default: 'squares' }
-    },
-    default: { fgColor: "#000000", bgColor: "#ffffff", level: "M", includeMargin: true, style: "squares" }
+    type: mongoose.Schema.Types.Mixed,
+    default: {
+      width: 200,
+      margin: 10,
+      shape: 'square',
+      dotsOptions: { type: 'rounded', color: '#000000', gradient: null },
+      cornersSquareOptions: { type: 'extra-rounded', color: '#000000', gradient: null },
+      cornersDotOptions: { type: 'dot', color: '#000000', gradient: null },
+      backgroundOptions: { color: '#ffffff', gradient: null },
+      imageOptions: null,
+      qrOptions: { errorCorrectionLevel: 'M' }
+    }
   }
 }, { timestaps: true });
 

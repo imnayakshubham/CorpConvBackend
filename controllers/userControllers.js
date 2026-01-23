@@ -516,6 +516,23 @@ const updateAvatarConfig = async (req, res) => {
       return res.status(400).json({ message: "Invalid avatar style", status: "Failed" });
     }
 
+    // Validate transform options if present
+    if (avatar_config.options) {
+      const { scale, radius, rotate } = avatar_config.options;
+
+      if (scale !== undefined && (typeof scale !== 'number' || scale < 0 || scale > 200)) {
+        return res.status(400).json({ message: "Invalid scale value (must be 0-200)", status: "Failed" });
+      }
+
+      if (radius !== undefined && (typeof radius !== 'number' || radius < 0 || radius > 50)) {
+        return res.status(400).json({ message: "Invalid radius value (must be 0-50)", status: "Failed" });
+      }
+
+      if (rotate !== undefined && ![0, 90, 180, 270].includes(rotate)) {
+        return res.status(400).json({ message: "Invalid rotate value (must be 0, 90, 180, or 270)", status: "Failed" });
+      }
+    }
+
     const updateOperation = {
       $set: { avatar_config }
     };
@@ -551,15 +568,75 @@ const updateQRConfig = async (req, res) => {
       return res.status(400).json({ message: "User ID and QR config are required", status: "Failed" });
     }
 
-    const validLevels = ['L', 'M', 'Q', 'H'];
-    const validStyles = ['squares', 'dots'];
+    // Validate dot types
+    const validDotTypes = ['rounded', 'dots', 'classy', 'classy-rounded', 'square', 'extra-rounded'];
+    const validCornerSquareTypes = ['dot', 'square', 'extra-rounded'];
+    const validCornerDotTypes = ['dot', 'square'];
+    const validErrorLevels = ['L', 'M', 'Q', 'H'];
+    const validShapes = ['square', 'circle'];
 
-    if (qr_config.level && !validLevels.includes(qr_config.level)) {
+    // Validate shape
+    if (qr_config.shape && !validShapes.includes(qr_config.shape)) {
+      return res.status(400).json({ message: "Invalid QR shape", status: "Failed" });
+    }
+
+    // Validate dotsOptions
+    if (qr_config.dotsOptions?.type && !validDotTypes.includes(qr_config.dotsOptions.type)) {
+      return res.status(400).json({ message: "Invalid dots type", status: "Failed" });
+    }
+
+    // Validate cornersSquareOptions
+    if (qr_config.cornersSquareOptions?.type && !validCornerSquareTypes.includes(qr_config.cornersSquareOptions.type)) {
+      return res.status(400).json({ message: "Invalid corner square type", status: "Failed" });
+    }
+
+    // Validate cornersDotOptions
+    if (qr_config.cornersDotOptions?.type && !validCornerDotTypes.includes(qr_config.cornersDotOptions.type)) {
+      return res.status(400).json({ message: "Invalid corner dot type", status: "Failed" });
+    }
+
+    // Validate error correction level
+    if (qr_config.qrOptions?.errorCorrectionLevel && !validErrorLevels.includes(qr_config.qrOptions.errorCorrectionLevel)) {
       return res.status(400).json({ message: "Invalid QR error correction level", status: "Failed" });
     }
 
-    if (qr_config.style && !validStyles.includes(qr_config.style)) {
-      return res.status(400).json({ message: "Invalid QR style", status: "Failed" });
+    // Validate margin
+    if (qr_config.margin !== undefined && (typeof qr_config.margin !== 'number' || qr_config.margin < 0 || qr_config.margin > 100)) {
+      return res.status(400).json({ message: "Invalid margin value (must be 0-100)", status: "Failed" });
+    }
+
+    // Validate gradient structure if present
+    const validateGradient = (gradient, fieldName) => {
+      if (!gradient) return null;
+      if (gradient.type && !['linear', 'radial'].includes(gradient.type)) {
+        return `Invalid ${fieldName} gradient type`;
+      }
+      if (gradient.colorStops && !Array.isArray(gradient.colorStops)) {
+        return `Invalid ${fieldName} gradient colorStops`;
+      }
+      return null;
+    };
+
+    const gradientErrors = [
+      validateGradient(qr_config.dotsOptions?.gradient, 'dots'),
+      validateGradient(qr_config.cornersSquareOptions?.gradient, 'cornerSquare'),
+      validateGradient(qr_config.cornersDotOptions?.gradient, 'cornerDot'),
+      validateGradient(qr_config.backgroundOptions?.gradient, 'background'),
+    ].filter(Boolean);
+
+    if (gradientErrors.length > 0) {
+      return res.status(400).json({ message: gradientErrors[0], status: "Failed" });
+    }
+
+    // Validate imageOptions if present
+    if (qr_config.imageOptions) {
+      const { imageSize, margin } = qr_config.imageOptions;
+      if (imageSize !== undefined && (typeof imageSize !== 'number' || imageSize < 0.1 || imageSize > 0.5)) {
+        return res.status(400).json({ message: "Invalid logo image size (must be 0.1-0.5)", status: "Failed" });
+      }
+      if (margin !== undefined && (typeof margin !== 'number' || margin < 0 || margin > 50)) {
+        return res.status(400).json({ message: "Invalid logo margin (must be 0-50)", status: "Failed" });
+      }
     }
 
     const updateOperation = {
