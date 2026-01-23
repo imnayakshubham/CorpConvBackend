@@ -28,7 +28,7 @@ const postComments = async (req, res) => {
 
         // Populate the new comment with user info
         const populatedComment = await Comment.findById(newComment._id)
-            .populate('commented_by', 'public_user_name is_email_verified');
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config');
 
         res.status(201).json({
             status: 'Success',
@@ -70,7 +70,7 @@ const postReplyComments = async (req, res) => {
 
         // Populate the new reply comment with user info
         const populatedReply = await Comment.findById(newComment._id)
-            .populate('commented_by', 'public_user_name is_email_verified');
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config');
 
         res.status(201).json({
             status: 'Success',
@@ -238,7 +238,7 @@ const getPostComments = async (req, res) => {
         const comments = await Comment.find(query)
             .sort({ createdAt: -1 })
             .limit(limitNum + 1)
-            .populate('commented_by', 'public_user_name is_email_verified user_public_profile_pic');
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config user_public_profile_pic');
 
         // Add reply_count for each comment (not full replies)
         const commentsWithReplyCount = await Promise.all(
@@ -287,7 +287,7 @@ const getCommentReplies = async (req, res) => {
         const replies = await Comment.find(query)
             .sort({ createdAt: -1 })
             .limit(limitNum + 1)
-            .populate('commented_by', 'public_user_name is_email_verified user_public_profile_pic');
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config user_public_profile_pic');
 
         // Add reply_count for nested replies
         const repliesWithCount = await Promise.all(

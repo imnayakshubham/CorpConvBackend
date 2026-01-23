@@ -59,7 +59,7 @@ const createJob = asyncHandler(async (req, res) => {
         await deleteCachedDataInRedis(jobsPostedByRedisKey)
 
         const job = await Job.create(jobPayload)
-        const jobData = await job.populate("job_posted_by", "public_user_name is_email_verified")
+        const jobData = await job.populate("job_posted_by", "public_user_name is_email_verified avatar_config")
         if (jobData) {
             const io = getIo()
             io.emit('listen_job_creation', jobData)
@@ -112,7 +112,7 @@ const fetchJobs = asyncHandler(async (req, res) => {
                 message: "Jobs fetched successfully (Cached)"
             })
         } else {
-            const jobs = await Job.find(query).sort({ updatedAt: -1 }).populate('job_posted_by', 'public_user_name is_email_verified')
+            const jobs = await Job.find(query).sort({ updatedAt: -1 }).populate('job_posted_by', 'public_user_name is_email_verified avatar_config')
 
             if (redis) {
                 await redis.set(jobsPostedByRedisKey, JSON.stringify(jobs), 'EX', 21600); //Cached for 6 hours
@@ -153,7 +153,7 @@ const updateJob = asyncHandler(async (req, res) => {
                 data: null
             })
         }
-        const job = await Job.findByIdAndUpdate(req.body.job_id, { $set: { job_data: await jobMetaData(req.body.job_post_link) } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
+        const job = await Job.findByIdAndUpdate(req.body.job_id, { $set: { job_data: await jobMetaData(req.body.job_post_link) } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified avatar_config")
 
         const jobsPostedByRedisKey = [`${process.env.APP_ENV}_job_posted_by_${req.user._id}`, `${process.env.APP_ENV}_jobs`]
         await deleteCachedDataInRedis(jobsPostedByRedisKey)
@@ -233,7 +233,7 @@ const likeDislikeJob = asyncHandler(async (req, res) => {
 
 
             if (job.liked_by.includes(req.user._id)) {
-                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $pull: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
+                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $pull: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified avatar_config")
                 io.emit('listen_job_like', jobData)
 
                 if (jobData) {
@@ -245,7 +245,7 @@ const likeDislikeJob = asyncHandler(async (req, res) => {
                 }
 
             } else {
-                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $set: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
+                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $set: { liked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified avatar_config")
                 io.emit('listen_job_like', jobData)
                 if (jobData) {
                     return res.status(200).json({
@@ -288,7 +288,7 @@ const bookMarkJob = asyncHandler(async (req, res) => {
         if (job) {
             const io = getIo()
             if (job.bookmarked_by.includes(req.user._id)) {
-                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $pull: { bookmarked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
+                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $pull: { bookmarked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified avatar_config")
                 io.emit('listen_job_bookmark', jobData)
                 if (jobData) {
                     return res.status(200).json({
@@ -304,7 +304,7 @@ const bookMarkJob = asyncHandler(async (req, res) => {
                     })
                 }
             } else {
-                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $set: { bookmarked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified")
+                const jobData = await Job.findByIdAndUpdate(req.body.job_id, { $set: { bookmarked_by: req.user._id } }, { new: true }).populate("job_posted_by", "public_user_name is_email_verified avatar_config")
                 io.emit('listen_job_bookmark', jobData)
                 if (jobData) {
                     return res.status(200).json({

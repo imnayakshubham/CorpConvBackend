@@ -15,7 +15,7 @@ const createPost = async (req, res) => {
         }
 
         const post = await Post.create(postPayload)
-        const postData = await post.populate("posted_by", "public_user_name is_email_verified")
+        const postData = await post.populate("posted_by", "public_user_name is_email_verified avatar_config")
         if (postData) {
             const io = getIo()
             io.emit('listen_post_creation', postData)
@@ -48,7 +48,7 @@ const updatePost = async (req, res) => {
     try {
         const post = await Post.findOne({ _id: req.body._id });
         if (post) {
-            const postData = await Post.findByIdAndUpdate(req.body._id, { content: req.body.content, category: req.body.category }, { new: true }).populate("posted_by", "public_user_name is_email_verified").populate({
+            const postData = await Post.findByIdAndUpdate(req.body._id, { content: req.body.content, category: req.body.category }, { new: true }).populate("posted_by", "public_user_name is_email_verified avatar_config").populate({
                 path: 'comments',
                 match: { access: { $ne: false } },
             });
@@ -127,13 +127,13 @@ const fetchPosts = async (req, res) => {
         let postsQuery = Post.find(query)
             .sort({ createdAt: -1 })
             .limit(limit + 1) // Fetch one extra to check if there are more
-            .populate("posted_by", "public_user_name is_email_verified");
+            .populate("posted_by", "public_user_name is_email_verified avatar_config");
 
         if (include_comments) {
             postsQuery = postsQuery.populate({
                 path: 'comments',
                 match: { access: { $ne: false } },
-                populate: { path: 'commented_by', select: 'public_user_name is_email_verified' }
+                populate: { path: 'commented_by', select: 'public_user_name is_email_verified avatar_config' }
             });
         }
 
@@ -279,7 +279,7 @@ const deletePost = async (req, res) => {
 
 const getPost = async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified").populate({
+        const post = await Post.findById(req.params.id).populate("posted_by", "public_user_name is_email_verified avatar_config").populate({
             path: 'comments',
             match: { access: { $ne: false } },
         });
