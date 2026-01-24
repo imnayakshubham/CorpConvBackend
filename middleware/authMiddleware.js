@@ -15,7 +15,6 @@ const protect = asyncHandler(async (req, res, next) => {
         headers: req.headers,
       });
 
-      console.log(session)
 
       if (session) {
         req.user = session.user;
