@@ -160,6 +160,23 @@ const notificationSettingsSchema = new mongoose.Schema({
     webhook_enabled: { type: Boolean, default: false }
 }, { _id: false });
 
+// Form settings schema (navigation buttons, success message, etc.)
+const formSettingsSchema = new mongoose.Schema({
+    show_back_button: { type: Boolean, default: true },
+    back_button_text: { type: String, default: 'Previous' },
+    next_button_text: { type: String, default: 'Next' },
+    submit_button_text: { type: String, default: 'Submit' },
+    success_message: { type: String, default: 'Thank you for your submission!' },
+    redirect_url: { type: String },
+    public_title: { type: String },
+    form_description: { type: String },
+    max_submissions: { type: Number },
+    submission_deadline: { type: Date },
+    one_submission_per_user: { type: Boolean, default: false },
+    require_login: { type: Boolean, default: false },
+    captcha_enabled: { type: Boolean, default: false },
+}, { _id: false });
+
 const surveySchema = new mongoose.Schema({
     survey_title: {
         type: String,
@@ -218,6 +235,11 @@ const surveySchema = new mongoose.Schema({
     // Notification settings
     notifications: {
         type: notificationSettingsSchema,
+        default: () => ({})
+    },
+    // Form settings (navigation buttons, success message, etc.)
+    form_settings: {
+        type: formSettingsSchema,
         default: () => ({})
     },
     reported_by: [

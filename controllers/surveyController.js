@@ -174,6 +174,51 @@ const editSurvey = async (req, res) => {
     }
 };
 
+// UNPUBLISH Survey (change status from published to draft)
+const unpublishSurvey = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+        const survey = await Survey.findById(surveyId);
+
+        if (!survey) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Survey not found',
+                data: null
+            });
+        }
+
+        if (survey.status !== 'published') {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'Survey is not published',
+                data: null
+            });
+        }
+
+        survey.status = 'draft';
+        await survey.save();
+
+        // Invalidate caches
+        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
+        const surveyDetailKey = cache.generateKey('survey', surveyId);
+        await cache.del(surveysListKey, surveyDetailKey);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: survey,
+            message: 'Survey unpublished successfully'
+        });
+    } catch (error) {
+        console.log({ error });
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Server Error: Unable to unpublish survey',
+            data: null
+        });
+    }
+};
+
 const getSurvey = async (req, res) => {
     try {
         const surveyId = req.params.id;
@@ -504,6 +549,7 @@ module.exports = {
     createSurvey,
     listSurveys,
     archiveSurvey,
+    unpublishSurvey,
     editSurvey,
     getSurvey,
     surveySubmission,
