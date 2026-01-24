@@ -204,12 +204,13 @@ const getquestionbyid = async (req, res) => {
         }
 
         const question = await QuestionModel.findById(_id)
-            .populate("question_posted_by", "public_user_name user_public_profile_pic")
+            .populate("question_posted_by", "public_user_name user_public_profile_pic avatar_config")
             .populate({
                 path: "answers",
+                match: { access: true },
                 populate: {
                     path: "answered_by",
-                    select: "public_user_name user_public_profile_pic"
+                    select: "public_user_name user_public_profile_pic avatar_config"
                 }
             })
 

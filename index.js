@@ -27,7 +27,27 @@ const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
+const cache = require("./redisClient/cacheHelper");
+const TTL = require("./redisClient/cacheTTL");
 
+// Helper function to fetch and update question cache
+async function updateQuestionCache(questionId) {
+  const cacheKey = cache.generateKey('question', questionId);
+  const question = await questionModel.findById(questionId)
+    .populate("question_posted_by", "public_user_name user_public_profile_pic avatar_config")
+    .populate({
+      path: "answers",
+      match: { access: true },
+      populate: {
+        path: "answered_by",
+        select: "public_user_name user_public_profile_pic avatar_config"
+      }
+    });
+  if (question) {
+    await cache.set(cacheKey, question.toObject(), TTL.QUESTION_DETAIL);
+  }
+  return question;
+}
 
 connectDB();
 const { getAuth } = require("./utils/auth");
@@ -146,6 +166,19 @@ io.on("connection", (socket) => {
     socket.leave("questions_list");
   });
 
+  // Question-specific room management
+  socket.on("join_question_room", (question_id) => {
+    if (question_id) {
+      socket.join(question_id);
+    }
+  });
+
+  socket.on("leave_question_room", (question_id) => {
+    if (question_id) {
+      socket.leave(question_id);
+    }
+  });
+
   socket.on("get_question", async (question_id) => {
     socket.join(question_id)
     let question = null
@@ -191,6 +224,9 @@ io.on("connection", (socket) => {
     try {
       updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
       if (updatedAnswer) {
+        // Update question cache with fresh data
+        await updateQuestionCache(payload.question_id);
+
         updatedAnswer = {
           status: 'Success',
           data: updatedAnswer,
@@ -288,6 +324,9 @@ io.on("connection", (socket) => {
             $addToSet: { answers: answerToAquestion._id }
           });
 
+          // Update question cache with fresh data
+          await updateQuestionCache(payload.question_id);
+
           answer = {
             status: 'Success',
             data: answerToAquestion,
@@ -326,6 +365,9 @@ io.on("connection", (socket) => {
       updatedQuestion = await questionModel.findByIdAndUpdate(payload.question_id, { question: payload.question }, { new: true })
 
       if (updatedQuestion) {
+        // Update question cache with fresh data
+        await updateQuestionCache(payload.question_id);
+
         updatedQuestion = {
           status: 'Success',
           data: updatedQuestion,
@@ -376,6 +418,9 @@ io.on("connection", (socket) => {
       // Save the updated question
       updatedQuestion = await question.save();
 
+      // Update question cache with fresh data
+      await updateQuestionCache(payload.question_id);
+
       updatedQuestion = {
         status: 'Success',
         data: updatedQuestion,
@@ -411,6 +456,10 @@ io.on("connection", (socket) => {
         { new: true }
       );
       if (updated) {
+        // Invalidate question cache
+        const cacheKey = cache.generateKey('question', payload.question_id);
+        await cache.del(cacheKey);
+
         io.to("questions_list").emit("question_deleted", {
           question_id: payload.question_id
         });
