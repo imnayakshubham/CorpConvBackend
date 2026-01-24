@@ -49,6 +49,11 @@ async function updateQuestionCache(questionId) {
   return question;
 }
 
+// Helper function to invalidate questions list cache
+async function invalidateQuestionsListCache() {
+  await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
+}
+
 connectDB();
 const { getAuth } = require("./utils/auth");
 const app = express();
@@ -226,6 +231,7 @@ io.on("connection", (socket) => {
       if (updatedAnswer) {
         // Update question cache with fresh data
         await updateQuestionCache(payload.question_id);
+        await invalidateQuestionsListCache();
 
         updatedAnswer = {
           status: 'Success',
@@ -326,6 +332,7 @@ io.on("connection", (socket) => {
 
           // Update question cache with fresh data
           await updateQuestionCache(payload.question_id);
+          await invalidateQuestionsListCache();
 
           answer = {
             status: 'Success',
@@ -367,6 +374,7 @@ io.on("connection", (socket) => {
       if (updatedQuestion) {
         // Update question cache with fresh data
         await updateQuestionCache(payload.question_id);
+        await invalidateQuestionsListCache();
 
         updatedQuestion = {
           status: 'Success',
@@ -389,6 +397,14 @@ io.on("connection", (socket) => {
       }
     }
     io.to(payload.question_id).emit("update_title_response", updatedQuestion)
+
+    // Broadcast title update to questions list
+    if (updatedQuestion.status === 'Success') {
+      io.to("questions_list").emit("question_title_updated", {
+        question_id: payload.question_id,
+        question: payload.question
+      });
+    }
   });
 
 
@@ -420,6 +436,7 @@ io.on("connection", (socket) => {
 
       // Update question cache with fresh data
       await updateQuestionCache(payload.question_id);
+      await invalidateQuestionsListCache();
 
       updatedQuestion = {
         status: 'Success',
@@ -459,6 +476,7 @@ io.on("connection", (socket) => {
         // Invalidate question cache
         const cacheKey = cache.generateKey('question', payload.question_id);
         await cache.del(cacheKey);
+        await invalidateQuestionsListCache();
 
         io.to("questions_list").emit("question_deleted", {
           question_id: payload.question_id
