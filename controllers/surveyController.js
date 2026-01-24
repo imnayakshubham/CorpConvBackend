@@ -377,6 +377,50 @@ const surveySubmission = async (req, res) => {
             });
         }
 
+        // Validate Turnstile CAPTCHA if enabled
+        if (survey.form_settings?.captcha_enabled) {
+            const turnstileToken = req.body.turnstile_token;
+
+            if (!turnstileToken) {
+                return res.status(400).json({
+                    status: 'Failed',
+                    message: 'CAPTCHA verification required',
+                    data: null
+                });
+            }
+
+            try {
+                const verifyResponse = await fetch(
+                    'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            secret: process.env.TURNSTILE_SECRET_KEY,
+                            response: turnstileToken,
+                            remoteip: req.ip
+                        })
+                    }
+                );
+                const verifyResult = await verifyResponse.json();
+
+                if (!verifyResult.success) {
+                    return res.status(400).json({
+                        status: 'Failed',
+                        message: 'CAPTCHA verification failed',
+                        data: null
+                    });
+                }
+            } catch (error) {
+                console.error('Turnstile verification error:', error);
+                return res.status(500).json({
+                    status: 'Failed',
+                    message: 'CAPTCHA verification error',
+                    data: null
+                });
+            }
+        }
+
         // Check response limits
         if (survey.response_settings?.max_responses) {
             const currentResponseCount = survey.submissions?.length || 0;
