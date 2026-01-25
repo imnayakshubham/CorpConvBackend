@@ -348,14 +348,16 @@ const sendFollowRequest = async (req, res) => {
         const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
         if (notification) {
           const io = getIo()
+          console.log({ notification })
           io.to(receiverId).emit('follow_request_send_notication', notification);
-
         }
-
       }
     }
 
-    // const result = await User.findById(senderId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    // Invalidate Redis cache for both users
+    const senderCacheKey = cache.generateKey('user', 'info', senderId);
+    const receiverCacheKey = cache.generateKey('user', 'info', receiverId);
+    await cache.del(senderCacheKey, receiverCacheKey);
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: [] });
   } catch (error) {
@@ -380,6 +382,11 @@ const acceptFollowRequest = async (req, res) => {
       $addToSet: { followers: userId },
     }, { upsert: true, new: true });
 
+    // Invalidate Redis cache for both users
+    const userCacheKey = cache.generateKey('user', 'info', userId);
+    const requesterCacheKey = cache.generateKey('user', 'info', requesterId);
+    await cache.del(userCacheKey, requesterCacheKey);
+
     const result = await User.findById(userId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: result });
@@ -396,6 +403,11 @@ const rejectFollowRequest = async (req, res) => {
     await User.findByIdAndUpdate(userId, {
       $pull: { pending_followings: requesterId },
     }, { upsert: true, new: true });
+
+    // Invalidate Redis cache for both users
+    const userCacheKey = cache.generateKey('user', 'info', userId);
+    const requesterCacheKey = cache.generateKey('user', 'info', requesterId);
+    await cache.del(userCacheKey, requesterCacheKey);
 
     res.status(200).json({ success: true });
   } catch (error) {
