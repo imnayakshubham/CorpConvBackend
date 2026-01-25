@@ -15,9 +15,11 @@ const {
   revokeSession,
   revokeAllSessions,
   updateAvatarConfig,
-  updateQRConfig
+  updateQRConfig,
+  trackProfileView,
+  getUserAnalytics
 } = require("../controllers/userControllers");
-const { protect } = require("../middleware/authMiddleware");
+const { protect, optionalAuth } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -42,6 +44,10 @@ router.route("/sessions/revoke-all").post(protect, revokeAllSessions);
 // Avatar and QR Code Configuration
 router.route("/update-avatar").post(protect, updateAvatarConfig);
 router.route("/update-qr-config").post(protect, updateQRConfig);
+
+// Analytics routes
+router.route("/track-profile-view/:id").post(optionalAuth, trackProfileView);
+router.route("/analytics").get(protect, getUserAnalytics);
 
 
 module.exports = router;

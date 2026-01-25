@@ -153,6 +153,10 @@ const userSchema = mongoose.Schema({
       imageOptions: null,
       qrOptions: { errorCorrectionLevel: 'M' }
     }
+  },
+  profile_views: {
+    type: Number,
+    default: 0
   }
 }, { timestaps: true });
 

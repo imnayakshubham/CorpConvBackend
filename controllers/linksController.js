@@ -548,6 +548,168 @@ const getCategories = asyncHandler(async (req, res) => {
     }
 });
 
+// Track link view (increment view_count)
+const trackLinkView = asyncHandler(async (req, res) => {
+    try {
+        const { link_id } = req.body;
+
+        if (!link_id) {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'Link ID is required',
+                data: null
+            });
+        }
+
+        const link = await Link.findByIdAndUpdate(
+            link_id,
+            { $inc: { view_count: 1 } },
+            { new: true }
+        );
+
+        if (!link) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Link not found',
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { view_count: link.view_count },
+            message: 'View tracked successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to track view',
+            data: null
+        });
+    }
+});
+
+// Track link click (increment click_count)
+const trackLinkClick = asyncHandler(async (req, res) => {
+    try {
+        const { link_id } = req.body;
+
+        if (!link_id) {
+            return res.status(400).json({
+                status: 'Failed',
+                message: 'Link ID is required',
+                data: null
+            });
+        }
+
+        const link = await Link.findByIdAndUpdate(
+            link_id,
+            { $inc: { click_count: 1 } },
+            { new: true }
+        );
+
+        if (!link) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Link not found',
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { click_count: link.click_count },
+            message: 'Click tracked successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to track click',
+            data: null
+        });
+    }
+});
+
+// Get link analytics for the authenticated user
+const getLinkAnalytics = asyncHandler(async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get all links by the user
+        const links = await Link.find({ posted_by: userId, access: true })
+            .sort({ updatedAt: -1 })
+            .select('link_data category view_count click_count liked_by bookmarked_by createdAt');
+
+        // Calculate aggregate stats
+        const totalViews = links.reduce((sum, link) => sum + (link.view_count || 0), 0);
+        const totalClicks = links.reduce((sum, link) => sum + (link.click_count || 0), 0);
+        const totalLikes = links.reduce((sum, link) => sum + (link.liked_by?.length || 0), 0);
+        const totalBookmarks = links.reduce((sum, link) => sum + (link.bookmarked_by?.length || 0), 0);
+
+        // Get top performing links (by views)
+        const topLinks = [...links]
+            .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
+            .slice(0, 5)
+            .map(link => ({
+                _id: link._id,
+                title: link.link_data?.title || 'Untitled',
+                url: link.link_data?.url,
+                category: link.category,
+                view_count: link.view_count || 0,
+                click_count: link.click_count || 0,
+                likes: link.liked_by?.length || 0,
+                bookmarks: link.bookmarked_by?.length || 0
+            }));
+
+        // Analytics by category
+        const categoryStats = links.reduce((acc, link) => {
+            const cat = link.category || 'other';
+            if (!acc[cat]) {
+                acc[cat] = { count: 0, views: 0, clicks: 0 };
+            }
+            acc[cat].count++;
+            acc[cat].views += link.view_count || 0;
+            acc[cat].clicks += link.click_count || 0;
+            return acc;
+        }, {});
+
+        return res.status(200).json({
+            status: 'Success',
+            data: {
+                summary: {
+                    total_links: links.length,
+                    total_views: totalViews,
+                    total_clicks: totalClicks,
+                    total_likes: totalLikes,
+                    total_bookmarks: totalBookmarks,
+                    click_through_rate: totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(2) : 0
+                },
+                top_links: topLinks,
+                category_stats: categoryStats,
+                all_links: links.map(link => ({
+                    _id: link._id,
+                    title: link.link_data?.title || 'Untitled',
+                    url: link.link_data?.url,
+                    category: link.category,
+                    view_count: link.view_count || 0,
+                    click_count: link.click_count || 0,
+                    likes: link.liked_by?.length || 0,
+                    bookmarks: link.bookmarked_by?.length || 0,
+                    created_at: link.createdAt
+                }))
+            },
+            message: 'Analytics fetched successfully'
+        });
+    } catch (error) {
+        console.error('Link analytics error:', error);
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to fetch analytics',
+            data: null
+        });
+    }
+});
+
 module.exports = {
     createLink,
     fetchLinks,
@@ -555,5 +717,8 @@ module.exports = {
     deleteLink,
     likeDislikeLink,
     bookmarkLink,
-    getCategories
+    getCategories,
+    trackLinkView,
+    trackLinkClick,
+    getLinkAnalytics
 };

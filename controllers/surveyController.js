@@ -756,6 +756,280 @@ const getAvailableTags = async (_req, res) => {
     }
 };
 
+// Track survey view (increment view_count)
+const trackSurveyView = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+
+        const survey = await Survey.findByIdAndUpdate(
+            surveyId,
+            { $inc: { view_count: 1 } },
+            { new: true }
+        );
+
+        if (!survey) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Survey not found',
+                data: null
+            });
+        }
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { view_count: survey.view_count },
+            message: 'View tracked successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to track view',
+            data: null
+        });
+    }
+};
+
+// Helper function to aggregate field responses for analytics
+const aggregateFieldResponses = (surveyForm, submissions) => {
+    const fieldAnalytics = [];
+
+    surveyForm.forEach(field => {
+        const fieldId = field.field_id || field._id?.toString();
+        const fieldData = {
+            field_id: fieldId,
+            label: field.label,
+            input_type: field.input_type,
+            total_responses: 0,
+            analytics: null
+        };
+
+        // Get all responses for this field
+        const responses = [];
+        submissions.forEach(submission => {
+            const response = submission.responses?.find(r => r.field_id === fieldId);
+            if (response && response.value !== undefined && response.value !== null && response.value !== '') {
+                responses.push(response.value);
+                fieldData.total_responses++;
+            }
+        });
+
+        // Generate analytics based on field type
+        switch (field.input_type) {
+            case 'radio':
+            case 'select':
+                // Count occurrences of each option
+                const optionCounts = {};
+                field.user_select_options?.forEach(opt => {
+                    optionCounts[opt.value] = { label: opt.label, count: 0 };
+                });
+                responses.forEach(val => {
+                    if (optionCounts[val]) {
+                        optionCounts[val].count++;
+                    }
+                });
+                const total = responses.length;
+                fieldData.analytics = {
+                    type: 'pie',
+                    data: Object.entries(optionCounts).map(([value, data]) => ({
+                        label: data.label,
+                        value: value,
+                        count: data.count,
+                        percentage: total > 0 ? ((data.count / total) * 100).toFixed(1) : 0
+                    }))
+                };
+                break;
+
+            case 'checkbox':
+                // Count occurrences of each option (multiple selections possible)
+                const checkboxCounts = {};
+                field.user_select_options?.forEach(opt => {
+                    checkboxCounts[opt.value] = { label: opt.label, count: 0 };
+                });
+                responses.forEach(val => {
+                    if (Array.isArray(val)) {
+                        val.forEach(v => {
+                            if (checkboxCounts[v]) {
+                                checkboxCounts[v].count++;
+                            }
+                        });
+                    }
+                });
+                const checkboxTotal = submissions.length;
+                fieldData.analytics = {
+                    type: 'bar',
+                    data: Object.entries(checkboxCounts).map(([value, data]) => ({
+                        label: data.label,
+                        value: value,
+                        count: data.count,
+                        percentage: checkboxTotal > 0 ? ((data.count / checkboxTotal) * 100).toFixed(1) : 0
+                    }))
+                };
+                break;
+
+            case 'rating':
+            case 'slider':
+                // Calculate average and histogram
+                const numericValues = responses.map(v => Number(v)).filter(v => !isNaN(v));
+                if (numericValues.length > 0) {
+                    const avg = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                    const min = Math.min(...numericValues);
+                    const max = Math.max(...numericValues);
+
+                    // Create histogram
+                    const histogram = {};
+                    numericValues.forEach(v => {
+                        histogram[v] = (histogram[v] || 0) + 1;
+                    });
+
+                    fieldData.analytics = {
+                        type: 'bar',
+                        average: avg.toFixed(2),
+                        min,
+                        max,
+                        histogram: Object.entries(histogram)
+                            .map(([value, count]) => ({ value: Number(value), count }))
+                            .sort((a, b) => a.value - b.value)
+                    };
+                }
+                break;
+
+            case 'text':
+            case 'textarea':
+                // Calculate response stats
+                const textLengths = responses.map(v => String(v).length);
+                fieldData.analytics = {
+                    type: 'text',
+                    total_responses: responses.length,
+                    avg_length: textLengths.length > 0
+                        ? Math.round(textLengths.reduce((a, b) => a + b, 0) / textLengths.length)
+                        : 0,
+                    sample_responses: responses.slice(0, 5) // First 5 responses as sample
+                };
+                break;
+
+            default:
+                fieldData.analytics = {
+                    type: 'other',
+                    total_responses: responses.length
+                };
+        }
+
+        fieldAnalytics.push(fieldData);
+    });
+
+    return fieldAnalytics;
+};
+
+// Get comprehensive survey analytics
+const getSurveyAnalytics = async (req, res) => {
+    try {
+        const surveyId = req.params.id;
+
+        // Get survey with form structure
+        const survey = await Survey.findById(surveyId);
+
+        if (!survey) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Survey not found',
+                data: null
+            });
+        }
+
+        // Authorization check: Only survey creator can view analytics
+        if (survey.created_by.toString() !== req.user._id.toString()) {
+            return res.status(403).json({
+                status: 'Failed',
+                message: 'You do not have permission to view analytics for this survey',
+                data: null
+            });
+        }
+
+        // Get all submissions
+        const submissions = await Submission.find({
+            survey_id: surveyId,
+            access: true,
+            is_partial: false
+        });
+
+        const totalResponses = submissions.length;
+        const completionRate = survey.view_count > 0
+            ? ((totalResponses / survey.view_count) * 100).toFixed(2)
+            : 0;
+
+        // Quiz analytics (if quiz mode is enabled)
+        let quizAnalytics = null;
+        if (survey.quiz_settings?.enabled) {
+            const scores = submissions.map(s => s.percentage_score || 0);
+            const passingScore = survey.quiz_settings.passing_score || 0;
+            const passedCount = scores.filter(s => s >= passingScore).length;
+
+            // Score distribution histogram
+            const scoreRanges = [
+                { label: '0-20%', min: 0, max: 20, count: 0 },
+                { label: '21-40%', min: 21, max: 40, count: 0 },
+                { label: '41-60%', min: 41, max: 60, count: 0 },
+                { label: '61-80%', min: 61, max: 80, count: 0 },
+                { label: '81-100%', min: 81, max: 100, count: 0 }
+            ];
+            scores.forEach(score => {
+                const range = scoreRanges.find(r => score >= r.min && score <= r.max);
+                if (range) range.count++;
+            });
+
+            quizAnalytics = {
+                average_score: scores.length > 0
+                    ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2)
+                    : 0,
+                highest_score: scores.length > 0 ? Math.max(...scores) : 0,
+                lowest_score: scores.length > 0 ? Math.min(...scores) : 0,
+                pass_rate: totalResponses > 0 ? ((passedCount / totalResponses) * 100).toFixed(2) : 0,
+                passing_score: passingScore,
+                score_distribution: scoreRanges
+            };
+        }
+
+        // Field-level analytics
+        const fieldAnalytics = aggregateFieldResponses(survey.survey_form || [], submissions);
+
+        // Response timeline (submissions per day)
+        const timelineData = submissions.reduce((acc, sub) => {
+            const date = new Date(sub.createdAt).toISOString().split('T')[0];
+            acc[date] = (acc[date] || 0) + 1;
+            return acc;
+        }, {});
+        const timeline = Object.entries(timelineData)
+            .map(([date, count]) => ({ date, count }))
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        return res.status(200).json({
+            status: 'Success',
+            data: {
+                summary: {
+                    survey_id: surveyId,
+                    survey_title: survey.survey_title,
+                    view_count: survey.view_count || 0,
+                    total_responses: totalResponses,
+                    completion_rate: completionRate,
+                    status: survey.status,
+                    created_at: survey.createdAt
+                },
+                quiz_analytics: quizAnalytics,
+                field_analytics: fieldAnalytics,
+                timeline
+            },
+            message: 'Analytics fetched successfully'
+        });
+    } catch (error) {
+        console.error('Survey analytics error:', error);
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to fetch analytics',
+            data: null
+        });
+    }
+};
+
 module.exports = {
     createSurvey,
     listSurveys,
@@ -765,5 +1039,7 @@ module.exports = {
     getSurvey,
     surveySubmission,
     getSurveySubmission,
-    getAvailableTags
+    getAvailableTags,
+    trackSurveyView,
+    getSurveyAnalytics
 }

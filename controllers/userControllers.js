@@ -658,4 +658,126 @@ const updateQRConfig = async (req, res) => {
   }
 };
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig };
+// Track profile view (increment profile_views, skip self-views)
+const trackProfileView = async (req, res) => {
+  try {
+    const profileUserId = req.params.id;
+    const viewerUserId = req.user?._id?.toString();
+
+    // Skip self-views
+    if (viewerUserId && viewerUserId === profileUserId) {
+      return res.status(200).json({
+        status: 'Success',
+        data: null,
+        message: 'Self-view not tracked'
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      profileUserId,
+      { $inc: { profile_views: 1 } },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'Failed',
+        message: 'User not found',
+        data: null
+      });
+    }
+
+    return res.status(200).json({
+      status: 'Success',
+      data: { profile_views: user.profile_views },
+      message: 'Profile view tracked successfully'
+    });
+  } catch (error) {
+    console.error('Track profile view error:', error);
+    return res.status(500).json({
+      status: 'Failed',
+      message: 'Failed to track profile view',
+      data: null
+    });
+  }
+};
+
+// Get comprehensive user analytics (engagement across posts, links, surveys)
+const getUserAnalytics = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const Post = require('../models/postModel');
+    const Link = require('../models/linkModel');
+    const { Survey, Submission } = require('../models/surveyModel');
+
+    // Get user profile views
+    const user = await User.findById(userId, { profile_views: 1, followers: 1, followings: 1, createdAt: 1 });
+
+    // Get posts analytics
+    const posts = await Post.find({ posted_by: userId });
+    const totalPostUpvotes = posts.reduce((sum, post) => sum + (post.upvoted_by?.length || 0), 0);
+    const totalPostComments = posts.reduce((sum, post) => sum + (post.comments?.length || 0), 0);
+
+    // Get links analytics
+    const links = await Link.find({ posted_by: userId, access: true });
+    const totalLinkViews = links.reduce((sum, link) => sum + (link.view_count || 0), 0);
+    const totalLinkClicks = links.reduce((sum, link) => sum + (link.click_count || 0), 0);
+    const totalLinkLikes = links.reduce((sum, link) => sum + (link.liked_by?.length || 0), 0);
+    const totalLinkBookmarks = links.reduce((sum, link) => sum + (link.bookmarked_by?.length || 0), 0);
+
+    // Get surveys analytics
+    const surveys = await Survey.find({ created_by: userId, access: true });
+    const totalSurveyViews = surveys.reduce((sum, survey) => sum + (survey.view_count || 0), 0);
+    const totalSurveyResponses = surveys.reduce((sum, survey) => sum + (survey.submissions?.length || 0), 0);
+
+    // Calculate engagement scores
+    const totalEngagement = totalPostUpvotes + totalPostComments + totalLinkLikes + totalLinkBookmarks + totalSurveyResponses;
+    const totalReach = (user.profile_views || 0) + totalLinkViews + totalSurveyViews;
+
+    return res.status(200).json({
+      status: 'Success',
+      data: {
+        profile: {
+          profile_views: user.profile_views || 0,
+          followers_count: user.followers?.length || 0,
+          following_count: user.followings?.length || 0,
+          member_since: user.createdAt
+        },
+        posts: {
+          total_posts: posts.length,
+          total_upvotes: totalPostUpvotes,
+          total_comments: totalPostComments
+        },
+        links: {
+          total_links: links.length,
+          total_views: totalLinkViews,
+          total_clicks: totalLinkClicks,
+          total_likes: totalLinkLikes,
+          total_bookmarks: totalLinkBookmarks,
+          click_through_rate: totalLinkViews > 0 ? ((totalLinkClicks / totalLinkViews) * 100).toFixed(2) : 0
+        },
+        surveys: {
+          total_surveys: surveys.length,
+          total_views: totalSurveyViews,
+          total_responses: totalSurveyResponses,
+          completion_rate: totalSurveyViews > 0 ? ((totalSurveyResponses / totalSurveyViews) * 100).toFixed(2) : 0
+        },
+        summary: {
+          total_engagement: totalEngagement,
+          total_reach: totalReach,
+          engagement_rate: totalReach > 0 ? ((totalEngagement / totalReach) * 100).toFixed(2) : 0
+        }
+      },
+      message: 'User analytics fetched successfully'
+    });
+  } catch (error) {
+    console.error('User analytics error:', error);
+    return res.status(500).json({
+      status: 'Failed',
+      message: 'Failed to fetch analytics',
+      data: null
+    });
+  }
+};
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics };

@@ -48,6 +48,14 @@ const linkSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    view_count: {
+        type: Number,
+        default: 0
+    },
+    click_count: {
+        type: Number,
+        default: 0
+    }
 }, { timestamps: true });
 
 // Indexes for better query performance
