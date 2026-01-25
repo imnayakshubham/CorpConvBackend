@@ -115,6 +115,7 @@ app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/feedback", require("./routes/feedbackRoutes"));
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
