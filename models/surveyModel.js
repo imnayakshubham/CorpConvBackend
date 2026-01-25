@@ -259,6 +259,15 @@ const surveySchema = new mongoose.Schema({
     access: { type: Boolean, default: true }
 }, { timestamps: true });
 
+// Indexes for efficient querying
+surveySchema.index({ survey_title: 'text', survey_description: 'text', tags: 'text' }, {
+    weights: { survey_title: 10, tags: 5, survey_description: 1 },
+    name: 'survey_text_search'
+});
+surveySchema.index({ status: 1, createdAt: -1 });
+surveySchema.index({ created_by: 1, createdAt: -1 });
+surveySchema.index({ tags: 1 });
+
 surveySchema.pre('save', function (next) {
     try {
         console.log("Pre-save hook triggered");

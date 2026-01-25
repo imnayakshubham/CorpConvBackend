@@ -28,9 +28,9 @@ const createSurvey = async (req, res) => {
 
         const savedSurvey = await newSurvey.save();
 
-        // Invalidate user's surveys list cache
-        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
-        await cache.del(surveysListKey);
+        // Invalidate surveys list cache (all patterns)
+        await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
+        await cache.del(cache.generateKey('surveys', 'tags'));
 
         return res.status(201).json({
             status: 'Success',
@@ -47,32 +47,157 @@ const createSurvey = async (req, res) => {
     }
 }
 
-// LIST Surveys API
+// LIST Surveys API with search, filtering, and pagination
 const listSurveys = async (req, res) => {
     try {
-        // Try to get from cache
-        const cacheKey = cache.generateKey('surveys', 'user', req.user._id);
-        const cached = await cache.get(cacheKey);
-        if (cached) {
-            return res.status(200).json({
-                status: 'Success',
-                data: cached,
-                message: 'Surveys retrieved successfully (Cached)'
-            });
+        const {
+            view = 'all',      // 'my' or 'all'
+            search,
+            status,            // comma-separated: 'draft,published'
+            tags,              // comma-separated: 'tag1,tag2'
+            dateFrom,
+            dateTo,
+            createdBy,
+            sortBy = 'newest', // 'newest', 'oldest', 'mostResponses', 'alphabetical'
+            limit = 12,
+            cursor             // ISO date string for cursor-based pagination
+        } = req.query;
+
+        // Build query
+        const query = { access: true };
+
+        // View logic
+        if (view === 'my') {
+            // Requires auth
+            if (!req.user) {
+                return res.status(401).json({
+                    status: 'Failed',
+                    message: 'Authentication required for "My Surveys" view',
+                    data: null
+                });
+            }
+            query.created_by = req.user._id;
+        } else {
+            // 'all' view - only published surveys
+            query.status = 'published';
         }
 
-        const surveys = await Survey.find({ created_by: req.user._id, access: true }).sort({ createdAt: -1 })
-            .select('survey_title survey_description status submissions view_count createdAt')
+        // Search filter (regex-based for partial matching)
+        if (search && search.trim()) {
+            const searchRegex = new RegExp(search.trim(), 'i');
+            query.$or = [
+                { survey_title: searchRegex },
+                { survey_description: searchRegex },
+                { tags: searchRegex }
+            ];
+        }
 
-        // Cache the surveys list
-        await cache.set(cacheKey, surveys, TTL.SURVEYS_LIST);
+        // Status filter (for 'my' view)
+        if (status && view === 'my') {
+            const statusList = status.split(',').filter(s => ['draft', 'published', 'archived'].includes(s));
+            if (statusList.length > 0) {
+                query.status = { $in: statusList };
+            }
+        }
+
+        // Tags filter
+        if (tags) {
+            const tagList = tags.split(',').filter(Boolean);
+            if (tagList.length > 0) {
+                query.tags = { $in: tagList };
+            }
+        }
+
+        // Date range filter
+        if (dateFrom || dateTo) {
+            query.createdAt = {};
+            if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+            if (dateTo) query.createdAt.$lte = new Date(dateTo);
+        }
+
+        // Created by filter (for 'all' view)
+        if (createdBy && view === 'all') {
+            query.created_by = createdBy;
+        }
+
+        // Cursor-based pagination
+        if (cursor) {
+            const cursorDate = new Date(cursor);
+            if (sortBy === 'oldest') {
+                query.createdAt = { ...query.createdAt, $gt: cursorDate };
+            } else {
+                query.createdAt = { ...query.createdAt, $lt: cursorDate };
+            }
+        }
+
+        // Sort options
+        let sortOptions = {};
+        switch (sortBy) {
+            case 'oldest':
+                sortOptions = { createdAt: 1 };
+                break;
+            case 'mostResponses':
+                sortOptions = { 'submissions': -1, createdAt: -1 };
+                break;
+            case 'alphabetical':
+                sortOptions = { survey_title: 1 };
+                break;
+            case 'newest':
+            default:
+                sortOptions = { createdAt: -1 };
+                break;
+        }
+
+        // Check cache for first page only (no cursor, no search, no complex filters)
+        const isFirstPage = !cursor && !search && !tags && !dateFrom && !dateTo && !createdBy;
+        const cacheKey = view === 'my'
+            ? cache.generateKey('surveys', 'list', 'my', req.user?._id, status || 'all', sortBy)
+            : cache.generateKey('surveys', 'list', 'all', sortBy);
+
+        if (isFirstPage) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.status(200).json({
+                    status: 'Success',
+                    data: cached,
+                    message: 'Surveys retrieved successfully (Cached)'
+                });
+            }
+        }
+
+        // Fetch surveys
+        const parsedLimit = Math.min(parseInt(limit) || 12, 50);
+        const surveys = await Survey.find(query)
+            .sort(sortOptions)
+            .limit(parsedLimit + 1) // Fetch one extra to determine hasMore
+            .select('survey_title survey_description status submissions tags view_count createdAt created_by')
+            .populate('created_by', 'name avatarUrl');
+
+        // Determine pagination
+        const hasMore = surveys.length > parsedLimit;
+        const resultSurveys = hasMore ? surveys.slice(0, parsedLimit) : surveys;
+        const nextCursor = hasMore && resultSurveys.length > 0
+            ? resultSurveys[resultSurveys.length - 1].createdAt.toISOString()
+            : null;
+
+        const responseData = {
+            surveys: resultSurveys,
+            nextCursor,
+            hasMore
+        };
+
+        // Cache first page results
+        if (isFirstPage) {
+            await cache.set(cacheKey, responseData, TTL.SURVEYS_LIST);
+        }
 
         return res.status(200).json({
             status: 'Success',
-            data: surveys,
+            data: responseData,
             message: 'Surveys retrieved successfully'
         });
     } catch (error) {
+        console.error('List surveys error:', error);
         return res.status(500).json({
             status: 'Failed',
             message: 'Server Error: Unable to fetch surveys',
@@ -101,9 +226,9 @@ const archiveSurvey = async (req, res) => {
         await survey.save();
 
         // Invalidate caches
-        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
-        const surveyDetailKey = cache.generateKey('survey', surveyId);
-        await cache.del(surveysListKey, surveyDetailKey);
+        await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
+        await cache.del(cache.generateKey('surveys', 'tags'));
+        await cache.del(cache.generateKey('survey', surveyId));
 
         return res.status(200).json({
             status: 'Success',
@@ -155,9 +280,9 @@ const editSurvey = async (req, res) => {
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, { ...updatedPayload }, { new: true })
 
         // Invalidate caches
-        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
-        const surveyDetailKey = cache.generateKey('survey', surveyId);
-        await cache.del(surveysListKey, surveyDetailKey);
+        await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
+        await cache.del(cache.generateKey('surveys', 'tags'));
+        await cache.del(cache.generateKey('survey', surveyId));
 
         return res.status(200).json({
             status: 'Success',
@@ -200,9 +325,9 @@ const unpublishSurvey = async (req, res) => {
         await survey.save();
 
         // Invalidate caches
-        const surveysListKey = cache.generateKey('surveys', 'user', req.user._id);
-        const surveyDetailKey = cache.generateKey('survey', surveyId);
-        await cache.del(surveysListKey, surveyDetailKey);
+        await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
+        await cache.del(cache.generateKey('surveys', 'tags'));
+        await cache.del(cache.generateKey('survey', surveyId));
 
         return res.status(200).json({
             status: 'Success',
@@ -589,6 +714,48 @@ const getSurveySubmission = async (req, res) => {
 };
 
 
+// GET Available Tags API
+const getAvailableTags = async (_req, res) => {
+    try {
+        // Try to get from cache
+        const cacheKey = cache.generateKey('surveys', 'tags');
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: 'Tags retrieved successfully (Cached)'
+            });
+        }
+
+        // Aggregate unique tags with counts from published surveys only
+        const tagsAggregation = await Survey.aggregate([
+            { $match: { status: 'published', access: true } },
+            { $unwind: '$tags' },
+            { $group: { _id: '$tags', count: { $sum: 1 } } },
+            { $sort: { count: -1, _id: 1 } },
+            { $limit: 50 },
+            { $project: { _id: 0, tag: '$_id', count: 1 } }
+        ]);
+
+        // Cache the tags
+        await cache.set(cacheKey, tagsAggregation, TTL.SURVEYS_LIST);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: tagsAggregation,
+            message: 'Tags retrieved successfully'
+        });
+    } catch (error) {
+        console.error('Get tags error:', error);
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Server Error: Unable to fetch tags',
+            data: null
+        });
+    }
+};
+
 module.exports = {
     createSurvey,
     listSurveys,
@@ -597,5 +764,6 @@ module.exports = {
     editSurvey,
     getSurvey,
     surveySubmission,
-    getSurveySubmission
+    getSurveySubmission,
+    getAvailableTags
 }
