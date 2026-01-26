@@ -327,7 +327,8 @@ const updateLink = asyncHandler(async (req, res) => {
         }
 
         // Update caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id);
+        const userLinksKey = cache.generateKey('links', 'user', req.user._id, 'all');
+
         const allLinksKey = cache.generateKey('links', 'all');
         const categoriesKey = cache.generateKey('links', 'categories');
 
