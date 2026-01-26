@@ -291,11 +291,40 @@ const updateLink = asyncHandler(async (req, res) => {
             { new: true }
         ).populate("posted_by", "public_user_name is_email_verified avatar_config");
 
-        // Invalidate caches
+        // Update caches
         const userLinksKey = cache.generateKey('links', 'user', req.user._id);
         const allLinksKey = cache.generateKey('links', 'all');
         const categoriesKey = cache.generateKey('links', 'categories');
-        await cache.del(userLinksKey, allLinksKey, categoriesKey);
+
+        // Helper to update link list cache
+        const updateLinkCache = async (key) => {
+            const cachedData = await cache.get(key);
+            if (cachedData && Array.isArray(cachedData)) {
+                // Remove old version and add new version at top (sorted by updatedAt)
+                const updatedList = cachedData.filter(l => l._id.toString() !== link._id.toString());
+                updatedList.unshift(link);
+                await cache.set(key, updatedList, TTL.LINKS_LIST);
+            }
+        };
+
+        // Helper to update categories cache
+        const updateCategoryCache = async (key) => {
+            const cachedCategories = await cache.get(key);
+            if (cachedCategories && Array.isArray(cachedCategories)) {
+                // Add new category if not present
+                if (link.category && !cachedCategories.includes(link.category)) {
+                    cachedCategories.push(link.category);
+                    cachedCategories.sort();
+                    await cache.set(key, cachedCategories, TTL.LINK_CATEGORIES);
+                }
+            }
+        };
+
+        await Promise.all([
+            updateLinkCache(userLinksKey),
+            updateLinkCache(allLinksKey),
+            updateCategoryCache(categoriesKey)
+        ]);
 
         if (link) {
             const io = getIo();
