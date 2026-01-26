@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const Link = require('../models/linkModel');
+const Category = require('../models/categoryModel');
 const { getIo } = require('../utils/socketManger');
 const axios = require("axios");
 const { load } = require("cheerio");
@@ -161,9 +162,27 @@ const createLink = asyncHandler(async (req, res) => {
         const userLinksKey = cache.generateKey('links', 'user', req.user._id);
         const allLinksKey = cache.generateKey('links', 'all');
         const categoriesKey = cache.generateKey('links', 'categories');
-        await cache.del(userLinksKey, allLinksKey, categoriesKey);
+        const linkCategoriesKey = cache.generateKey('links', 'categories', validatedCategory);
+        await cache.del(userLinksKey, allLinksKey, categoriesKey, linkCategoriesKey);
 
         const link = await Link.create(linkPayload);
+
+        // Ensure category is tracked in the separate collection
+        if (validatedCategory) {
+            await Category.findOneAndUpdate(
+                { name: validatedCategory.toLowerCase() },
+                {
+                    $setOnInsert: {
+                        name: validatedCategory.toLowerCase(),
+                        display_name: validatedCategory,
+                        created_by: req.user._id,
+                        source: 'links'
+                    }
+                },
+                { upsert: true }
+            );
+        }
+
         const linkData = await link.populate("posted_by", "public_user_name is_email_verified avatar_config");
 
         if (linkData) {
@@ -290,6 +309,22 @@ const updateLink = asyncHandler(async (req, res) => {
             { $set: updateData },
             { new: true }
         ).populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+        // Ensure category is tracked if updated
+        if (updateData.category) {
+            await Category.findOneAndUpdate(
+                { name: updateData.category.toLowerCase() },
+                {
+                    $setOnInsert: {
+                        name: updateData.category.toLowerCase(),
+                        display_name: updateData.category,
+                        created_by: req.user._id,
+                        source: 'links'
+                    }
+                },
+                { upsert: true }
+            );
+        }
 
         // Update caches
         const userLinksKey = cache.generateKey('links', 'user', req.user._id);
@@ -547,14 +582,18 @@ const getCategories = asyncHandler(async (req, res) => {
             });
         }
 
-        // Get unique categories from database
-        const dbCategories = await Link.distinct('category');
+        // Get categories from the new Category collection
+        const dbCategories = await Category.find({}).sort({ display_name: 1 });
+        const categoryNames = dbCategories.map(c => c.display_name);
 
         // Merge with predefined categories and deduplicate
         const categoryMap = new Map();
-        [...PREDEFINED_CATEGORIES, ...dbCategories].forEach(cat => {
+        [...PREDEFINED_CATEGORIES, ...categoryNames].forEach(cat => {
             if (cat?.trim()) {
-                categoryMap.set(cat.toLowerCase().trim(), cat.trim());
+                const lower = cat.toLowerCase().trim();
+                if (!categoryMap.has(lower)) {
+                    categoryMap.set(lower, cat.trim());
+                }
             }
         });
 

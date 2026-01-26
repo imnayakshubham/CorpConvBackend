@@ -1,4 +1,5 @@
 const Post = require("../models/postModel");
+const Category = require("../models/categoryModel");
 const Comment = require("../models/commentModel");
 const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
@@ -16,6 +17,23 @@ const createPost = async (req, res) => {
         }
 
         const post = await Post.create(postPayload)
+
+        // Ensure category is tracked in the separate collection
+        if (req.body.category) {
+            await Category.findOneAndUpdate(
+                { name: req.body.category.toLowerCase() },
+                {
+                    $setOnInsert: {
+                        name: req.body.category.toLowerCase(),
+                        display_name: req.body.category,
+                        created_by: req.user._id,
+                        source: 'post'
+                    }
+                },
+                { upsert: true }
+            );
+        }
+
         const postData = await post.populate("posted_by", "public_user_name is_email_verified avatar_config")
         if (postData) {
             // Invalidate posts caches
@@ -59,6 +77,22 @@ const updatePost = async (req, res) => {
                 path: 'comments',
                 match: { access: { $ne: false } },
             });
+
+            // Ensure category is tracked if updated
+            if (req.body.category) {
+                await Category.findOneAndUpdate(
+                    { name: req.body.category.toLowerCase() },
+                    {
+                        $setOnInsert: {
+                            name: req.body.category.toLowerCase(),
+                            display_name: req.body.category,
+                            created_by: req.user._id,
+                            source: 'post'
+                        }
+                    },
+                    { upsert: true }
+                );
+            }
             await populateChildComments(postData.comments)
 
             if (postData) {
@@ -333,7 +367,10 @@ const getCategories = async (req, res) => {
             });
         }
 
-        const categories = await Post.distinct('category');
+        // Get categories from the new Category collection
+        const dbCategories = await Category.find({}).sort({ display_name: 1 });
+        const dbCategoryNames = dbCategories.map(c => c.display_name);
+
         const predefinedCategories = [
             'company_review', 'random', 'reading',
             'learning', 'thoughts', 'project', 'Watching'
@@ -341,7 +378,7 @@ const getCategories = async (req, res) => {
 
         // Merge and deduplicate (case-insensitive)
         const categoryMap = new Map();
-        [...predefinedCategories, ...categories].forEach(cat => {
+        [...predefinedCategories, ...dbCategoryNames].forEach(cat => {
             if (cat && cat.trim()) {
                 const lowerKey = cat.toLowerCase().trim();
                 if (!categoryMap.has(lowerKey)) {
