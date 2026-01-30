@@ -5,8 +5,9 @@ const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require(
 const { default: mongoose } = require("mongoose");
 const { getIo } = require("../utils/socketManger");
 const Notifications = require("../models/notificationModel");
-const getRedisInstance = require("../redisClient/redisClient.js");
-const { tokenkeyName, cookieOptions } = require("../constants/index.js");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
+const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 
 
 
@@ -77,6 +78,8 @@ const responseFormatterForAuth = (result) => {
     public_user_name: result.public_user_name,
     is_secondary_email_id_verified: result.is_secondary_email_id_verified,
     user_public_profile_pic: result.user_public_profile_pic,
+    avatar_config: result.avatar_config,
+    qr_config: result.qr_config,
   }
 }
 
@@ -187,9 +190,10 @@ const updateUserProfile = async (req, res) => {
       },
     };
 
-    const redis = getRedisInstance()
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${req.body._id}`
-    const result = await redis.del(userInfoRedisKey);
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', req.body._id);
+    await cache.del(userInfoCacheKey);
+
     const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
     if (updatedData) {
       return res.status(200).json({
@@ -210,35 +214,22 @@ const getUserInfo = async (req, res) => {
       return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
     }
 
-    const userInfoRedisKey = `${process.env.APP_ENV}_user_info_${userId}`
-    const redis = getRedisInstance()
-    const cachedData = await redis.get(userInfoRedisKey)
+    // Try to get from cache
+    const cacheKey = cache.generateKey('user', 'info', userId);
+    const cachedData = await cache.get(cacheKey);
 
     if (cachedData) {
-      const parsedCachedData = JSON.parse(cachedData)
-      if (parsedCachedData) {
-        return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: parsedCachedData })
+      if (cachedData) {
+        return res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: cachedData })
       } else {
-        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: parsedCachedData })
+        return res.status(404).json({ message: "Sorry, it appears this user doesn't exist. (Cached)", status: "Failed", result: cachedData })
       }
     }
 
-    const projection = {
-      user_job_role: 1,
-      is_anonymous: 1,
-      is_email_verified: 1,
-      user_bio: 1,
-      user_current_company_name: 1,
-      user_id: 1,
-      user_job_experience: 1,
-      user_location: 1,
-      public_user_name: 1,
-      followings: 1,
-      followers: 1,
-    };
-
     const user = await User.findOne({ _id: userId, access: true }, projection)
-    await redis.set(userInfoRedisKey, JSON.stringify(user), 'EX', 21600);
+
+    // Cache the result
+    await cache.set(cacheKey, user, TTL.USER_PROFILE);
 
     if (user) {
       return res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
@@ -357,14 +348,16 @@ const sendFollowRequest = async (req, res) => {
         const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
         if (notification) {
           const io = getIo()
+          console.log({ notification })
           io.to(receiverId).emit('follow_request_send_notication', notification);
-
         }
-
       }
     }
 
-    // const result = await User.findById(senderId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
+    // Invalidate Redis cache for both users
+    const senderCacheKey = cache.generateKey('user', 'info', senderId);
+    const receiverCacheKey = cache.generateKey('user', 'info', receiverId);
+    await cache.del(senderCacheKey, receiverCacheKey);
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: [] });
   } catch (error) {
@@ -389,6 +382,11 @@ const acceptFollowRequest = async (req, res) => {
       $addToSet: { followers: userId },
     }, { upsert: true, new: true });
 
+    // Invalidate Redis cache for both users
+    const userCacheKey = cache.generateKey('user', 'info', userId);
+    const requesterCacheKey = cache.generateKey('user', 'info', requesterId);
+    await cache.del(userCacheKey, requesterCacheKey);
+
     const result = await User.findById(userId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: result });
@@ -406,6 +404,11 @@ const rejectFollowRequest = async (req, res) => {
       $pull: { pending_followings: requesterId },
     }, { upsert: true, new: true });
 
+    // Invalidate Redis cache for both users
+    const userCacheKey = cache.generateKey('user', 'info', userId);
+    const requesterCacheKey = cache.generateKey('user', 'info', requesterId);
+    await cache.del(userCacheKey, requesterCacheKey);
+
     res.status(200).json({ success: true });
   } catch (error) {
     console.error(error);
@@ -413,4 +416,380 @@ const rejectFollowRequest = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo };
+// Session Management
+const listUserSessions = async (req, res) => {
+  try {
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    const sessions = await auth.api.listSessions({
+      headers: req.headers,
+    });
+
+    if (sessions) {
+      return res.status(200).json({
+        message: "Sessions retrieved successfully",
+        status: "Success",
+        result: sessions,
+      });
+    }
+
+    return res.status(200).json({
+      message: "No sessions found",
+      status: "Success",
+      result: [],
+    });
+  } catch (error) {
+    console.error("List sessions error:", error);
+    return res.status(500).json({
+      message: "Failed to retrieve sessions",
+      status: "Failed",
+    });
+  }
+};
+
+const revokeSession = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        message: "Session token is required",
+        status: "Failed",
+      });
+    }
+
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    await auth.api.revokeSession({
+      headers: req.headers,
+      body: { token },
+    });
+
+    return res.status(200).json({
+      message: "Session revoked successfully",
+      status: "Success",
+    });
+  } catch (error) {
+    console.error("Revoke session error:", error);
+    return res.status(500).json({
+      message: "Failed to revoke session",
+      status: "Failed",
+    });
+  }
+};
+
+const revokeAllSessions = async (req, res) => {
+  try {
+    const { exceptCurrent } = req.body;
+    const { getAuth } = require("../utils/auth");
+    const auth = getAuth();
+
+    if (exceptCurrent) {
+      await auth.api.revokeOtherSessions({
+        headers: req.headers,
+      });
+    } else {
+      await auth.api.revokeSessions({
+        headers: req.headers,
+      });
+    }
+
+    return res.status(200).json({
+      message: exceptCurrent
+        ? "All other sessions revoked successfully"
+        : "All sessions revoked successfully",
+      status: "Success",
+    });
+  } catch (error) {
+    console.error("Revoke all sessions error:", error);
+    return res.status(500).json({
+      message: "Failed to revoke sessions",
+      status: "Failed",
+    });
+  }
+};
+
+const updateAvatarConfig = async (req, res) => {
+  try {
+    const { _id, avatar_config } = req.body;
+
+    if (!_id || !avatar_config) {
+      return res.status(400).json({ message: "User ID and avatar config are required", status: "Failed" });
+    }
+
+    const validStyles = ['avataaars', 'bottts', 'lorelei', 'notionists', 'adventurer', 'fun-emoji', 'personas', 'big-smile', 'micah', 'thumbs'];
+    if (avatar_config.style && !validStyles.includes(avatar_config.style)) {
+      return res.status(400).json({ message: "Invalid avatar style", status: "Failed" });
+    }
+
+    // Validate transform options if present
+    if (avatar_config.options) {
+      const { scale, radius, rotate } = avatar_config.options;
+
+      if (scale !== undefined && (typeof scale !== 'number' || scale < 0 || scale > 200)) {
+        return res.status(400).json({ message: "Invalid scale value (must be 0-200)", status: "Failed" });
+      }
+
+      if (radius !== undefined && (typeof radius !== 'number' || radius < 0 || radius > 50)) {
+        return res.status(400).json({ message: "Invalid radius value (must be 0-50)", status: "Failed" });
+      }
+
+      if (rotate !== undefined && ![0, 90, 180, 270].includes(rotate)) {
+        return res.status(400).json({ message: "Invalid rotate value (must be 0, 90, 180, or 270)", status: "Failed" });
+      }
+    }
+
+    const updateOperation = {
+      $set: { avatar_config }
+    };
+
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', _id);
+    await cache.del(userInfoCacheKey);
+
+    const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
+
+    if (updatedData) {
+      return res.status(200).json({
+        message: "Avatar configuration updated successfully",
+        status: "Success",
+        result: { avatar_config: updatedData.avatar_config }
+      });
+    } else {
+      return res.status(404).json({ message: "User not found", status: "Failed" });
+    }
+  } catch (error) {
+    console.error("Update avatar config error:", error);
+    return res.status(500).json({ message: "Something went wrong", status: "Failed" });
+  }
+};
+
+const updateQRConfig = async (req, res) => {
+  try {
+    const { _id, qr_config } = req.body;
+
+    if (!_id || !qr_config) {
+      return res.status(400).json({ message: "User ID and QR config are required", status: "Failed" });
+    }
+
+    // Validate dot types
+    const validDotTypes = ['rounded', 'dots', 'classy', 'classy-rounded', 'square', 'extra-rounded'];
+    const validCornerSquareTypes = ['dot', 'square', 'extra-rounded'];
+    const validCornerDotTypes = ['dot', 'square'];
+    const validErrorLevels = ['L', 'M', 'Q', 'H'];
+    const validShapes = ['square', 'circle'];
+
+    // Validate shape
+    if (qr_config.shape && !validShapes.includes(qr_config.shape)) {
+      return res.status(400).json({ message: "Invalid QR shape", status: "Failed" });
+    }
+
+    // Validate dotsOptions
+    if (qr_config.dotsOptions?.type && !validDotTypes.includes(qr_config.dotsOptions.type)) {
+      return res.status(400).json({ message: "Invalid dots type", status: "Failed" });
+    }
+
+    // Validate cornersSquareOptions
+    if (qr_config.cornersSquareOptions?.type && !validCornerSquareTypes.includes(qr_config.cornersSquareOptions.type)) {
+      return res.status(400).json({ message: "Invalid corner square type", status: "Failed" });
+    }
+
+    // Validate cornersDotOptions
+    if (qr_config.cornersDotOptions?.type && !validCornerDotTypes.includes(qr_config.cornersDotOptions.type)) {
+      return res.status(400).json({ message: "Invalid corner dot type", status: "Failed" });
+    }
+
+    // Validate error correction level
+    if (qr_config.qrOptions?.errorCorrectionLevel && !validErrorLevels.includes(qr_config.qrOptions.errorCorrectionLevel)) {
+      return res.status(400).json({ message: "Invalid QR error correction level", status: "Failed" });
+    }
+
+    // Validate margin
+    if (qr_config.margin !== undefined && (typeof qr_config.margin !== 'number' || qr_config.margin < 0 || qr_config.margin > 100)) {
+      return res.status(400).json({ message: "Invalid margin value (must be 0-100)", status: "Failed" });
+    }
+
+    // Validate gradient structure if present
+    const validateGradient = (gradient, fieldName) => {
+      if (!gradient) return null;
+      if (gradient.type && !['linear', 'radial'].includes(gradient.type)) {
+        return `Invalid ${fieldName} gradient type`;
+      }
+      if (gradient.colorStops && !Array.isArray(gradient.colorStops)) {
+        return `Invalid ${fieldName} gradient colorStops`;
+      }
+      return null;
+    };
+
+    const gradientErrors = [
+      validateGradient(qr_config.dotsOptions?.gradient, 'dots'),
+      validateGradient(qr_config.cornersSquareOptions?.gradient, 'cornerSquare'),
+      validateGradient(qr_config.cornersDotOptions?.gradient, 'cornerDot'),
+      validateGradient(qr_config.backgroundOptions?.gradient, 'background'),
+    ].filter(Boolean);
+
+    if (gradientErrors.length > 0) {
+      return res.status(400).json({ message: gradientErrors[0], status: "Failed" });
+    }
+
+    // Validate imageOptions if present
+    if (qr_config.imageOptions) {
+      const { imageSize, margin } = qr_config.imageOptions;
+      if (imageSize !== undefined && (typeof imageSize !== 'number' || imageSize < 0.1 || imageSize > 0.5)) {
+        return res.status(400).json({ message: "Invalid logo image size (must be 0.1-0.5)", status: "Failed" });
+      }
+      if (margin !== undefined && (typeof margin !== 'number' || margin < 0 || margin > 50)) {
+        return res.status(400).json({ message: "Invalid logo margin (must be 0-50)", status: "Failed" });
+      }
+    }
+
+    const updateOperation = {
+      $set: { qr_config }
+    };
+
+    // Invalidate user cache
+    const userInfoCacheKey = cache.generateKey('user', 'info', _id);
+    await cache.del(userInfoCacheKey);
+
+    const updatedData = await User.findByIdAndUpdate(_id, updateOperation, { new: true });
+
+    if (updatedData) {
+      return res.status(200).json({
+        message: "QR code configuration updated successfully",
+        status: "Success",
+        result: { qr_config: updatedData.qr_config }
+      });
+    } else {
+      return res.status(404).json({ message: "User not found", status: "Failed" });
+    }
+  } catch (error) {
+    console.error("Update QR config error:", error);
+    return res.status(500).json({ message: "Something went wrong", status: "Failed" });
+  }
+};
+
+// Track profile view (increment profile_views, skip self-views)
+const trackProfileView = async (req, res) => {
+  try {
+    const profileUserId = req.params.id;
+    const viewerUserId = req.user?._id?.toString();
+
+    // Skip self-views
+    if (viewerUserId && viewerUserId === profileUserId) {
+      return res.status(200).json({
+        status: 'Success',
+        data: null,
+        message: 'Self-view not tracked'
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      profileUserId,
+      { $inc: { profile_views: 1 } },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'Failed',
+        message: 'User not found',
+        data: null
+      });
+    }
+
+    return res.status(200).json({
+      status: 'Success',
+      data: { profile_views: user.profile_views },
+      message: 'Profile view tracked successfully'
+    });
+  } catch (error) {
+    console.error('Track profile view error:', error);
+    return res.status(500).json({
+      status: 'Failed',
+      message: 'Failed to track profile view',
+      data: null
+    });
+  }
+};
+
+// Get comprehensive user analytics (engagement across posts, links, surveys)
+const getUserAnalytics = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const Post = require('../models/postModel');
+    const Link = require('../models/linkModel');
+    const { Survey, Submission } = require('../models/surveyModel');
+
+    // Get user profile views
+    const user = await User.findById(userId, { profile_views: 1, followers: 1, followings: 1, createdAt: 1 });
+
+    // Get posts analytics
+    const posts = await Post.find({ posted_by: userId });
+    const totalPostUpvotes = posts.reduce((sum, post) => sum + (post.upvoted_by?.length || 0), 0);
+    const totalPostComments = posts.reduce((sum, post) => sum + (post.comments?.length || 0), 0);
+
+    // Get links analytics
+    const links = await Link.find({ posted_by: userId, access: true });
+    const totalLinkViews = links.reduce((sum, link) => sum + (link.view_count || 0), 0);
+    const totalLinkClicks = links.reduce((sum, link) => sum + (link.click_count || 0), 0);
+    const totalLinkLikes = links.reduce((sum, link) => sum + (link.liked_by?.length || 0), 0);
+    const totalLinkBookmarks = links.reduce((sum, link) => sum + (link.bookmarked_by?.length || 0), 0);
+
+    // Get surveys analytics
+    const surveys = await Survey.find({ created_by: userId, access: true });
+    const totalSurveyViews = surveys.reduce((sum, survey) => sum + (survey.view_count || 0), 0);
+    const totalSurveyResponses = surveys.reduce((sum, survey) => sum + (survey.submissions?.length || 0), 0);
+
+    // Calculate engagement scores
+    const totalEngagement = totalPostUpvotes + totalPostComments + totalLinkLikes + totalLinkBookmarks + totalSurveyResponses;
+    const totalReach = (user.profile_views || 0) + totalLinkViews + totalSurveyViews;
+
+    return res.status(200).json({
+      status: 'Success',
+      data: {
+        profile: {
+          profile_views: user.profile_views || 0,
+          followers_count: user.followers?.length || 0,
+          following_count: user.followings?.length || 0,
+          member_since: user.createdAt
+        },
+        posts: {
+          total_posts: posts.length,
+          total_upvotes: totalPostUpvotes,
+          total_comments: totalPostComments
+        },
+        links: {
+          total_links: links.length,
+          total_views: totalLinkViews,
+          total_clicks: totalLinkClicks,
+          total_likes: totalLinkLikes,
+          total_bookmarks: totalLinkBookmarks,
+          click_through_rate: totalLinkViews > 0 ? ((totalLinkClicks / totalLinkViews) * 100).toFixed(2) : 0
+        },
+        surveys: {
+          total_surveys: surveys.length,
+          total_views: totalSurveyViews,
+          total_responses: totalSurveyResponses,
+          completion_rate: totalSurveyViews > 0 ? ((totalSurveyResponses / totalSurveyViews) * 100).toFixed(2) : 0
+        },
+        summary: {
+          total_engagement: totalEngagement,
+          total_reach: totalReach,
+          engagement_rate: totalReach > 0 ? ((totalEngagement / totalReach) * 100).toFixed(2) : 0
+        }
+      },
+      message: 'User analytics fetched successfully'
+    });
+  } catch (error) {
+    console.error('User analytics error:', error);
+    return res.status(500).json({
+      status: 'Failed',
+      message: 'Failed to fetch analytics',
+      data: null
+    });
+  }
+};
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics };

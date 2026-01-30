@@ -10,9 +10,16 @@ const {
   acceptFollowRequest,
   rejectFollowRequest,
   getfollowersList,
-  getUserInfo
+  getUserInfo,
+  listUserSessions,
+  revokeSession,
+  revokeAllSessions,
+  updateAvatarConfig,
+  updateQRConfig,
+  trackProfileView,
+  getUserAnalytics
 } = require("../controllers/userControllers");
-const { protect } = require("../middleware/authMiddleware");
+const { protect, optionalAuth } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -28,6 +35,19 @@ router.route("/update-profile").post(protect, updateUserProfile);
 router.route("/send-follow-request").post(protect, sendFollowRequest);
 router.route("/accept-follow-request").post(protect, acceptFollowRequest);
 router.route("/reject-follow-request").post(protect, rejectFollowRequest);
+
+// Session Management
+router.route("/sessions").get(protect, listUserSessions);
+router.route("/sessions/revoke").post(protect, revokeSession);
+router.route("/sessions/revoke-all").post(protect, revokeAllSessions);
+
+// Avatar and QR Code Configuration
+router.route("/update-avatar").post(protect, updateAvatarConfig);
+router.route("/update-qr-config").post(protect, updateQRConfig);
+
+// Analytics routes
+router.route("/track-profile-view/:id").post(optionalAuth, trackProfileView);
+router.route("/analytics").get(protect, getUserAnalytics);
 
 
 module.exports = router;

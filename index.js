@@ -1,9 +1,9 @@
+require("dotenv").config();
 const express = require("express");
 const connectDB = require("./config/db");
-const dotenv = require("dotenv");
 const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
-const jobRoutes = require("./routes/jobRoutes");
+const linkRoutes = require("./routes/linkRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 
 const postRoutes = require("./routes/postRoutes");
@@ -12,6 +12,9 @@ const commentRoutes = require("./routes/commentRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
+const uploadRoutes = require("./routes/uploadRoutes");
+const { toNodeHandler } = require("better-auth/node");
+// auth is required later after DB connection
 
 
 const cors = require("cors");
@@ -24,9 +27,35 @@ const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
 const getRedisInstance = require("./redisClient/redisClient");
+const cache = require("./redisClient/cacheHelper");
+const TTL = require("./redisClient/cacheTTL");
 
-dotenv.config();
+// Helper function to fetch and update question cache
+async function updateQuestionCache(questionId) {
+  const cacheKey = cache.generateKey('question', questionId);
+  const question = await questionModel.findById(questionId)
+    .populate("question_posted_by", "public_user_name user_public_profile_pic avatar_config")
+    .populate({
+      path: "answers",
+      match: { access: true },
+      populate: {
+        path: "answered_by",
+        select: "public_user_name user_public_profile_pic avatar_config"
+      }
+    });
+  if (question) {
+    await cache.set(cacheKey, question.toObject(), TTL.QUESTION_DETAIL);
+  }
+  return question;
+}
+
+// Helper function to invalidate questions list cache
+async function invalidateQuestionsListCache() {
+  await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
+}
+
 connectDB();
+const { getAuth } = require("./utils/auth");
 const app = express();
 
 app.set('trust proxy', 1);
@@ -72,15 +101,24 @@ app.get("/api/init", (req, res) => {
   }
 });
 
+app.all("/api/auth/*", (req, res) => {
+  return toNodeHandler(getAuth())(req, res);
+});
+
 app.use("/api", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
-app.use("/api/job", jobRoutes);
+app.use("/api/link", linkRoutes);
 app.use("/api/post", postRoutes);
 app.use("/api/comment", commentRoutes);
 app.use("/api/question", questionRoutes);
 app.use("/api/survey", surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/feedback", require("./routes/feedbackRoutes"));
+
+// Serve uploaded files statically
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 
 app.get("/", (req, res) => {
@@ -105,15 +143,13 @@ initializeSocket(server);
 
 
 const redis = getRedisInstance();
-
-(async () => {
-  try {
-    await redis.ping(); // Test connection
-    console.log('Redis connection ready');
-  } catch (error) {
-    console.error('Failed to connect to Redis:', error);
-  }
-})();
+if (redis) {
+  redis.ping().then(() => {
+    console.log('Redis ping successful');
+  }).catch((err) => {
+    console.warn('Redis ping failed, continuing without Redis cache features.');
+  });
+}
 
 const io = getIo()
 
@@ -124,6 +160,28 @@ io.on("connection", (socket) => {
     if (userData?._id) {
       socket.join(userData._id);
       socket.emit("connected");
+    }
+  });
+
+  // Questions list room management
+  socket.on("join_questions_list", () => {
+    socket.join("questions_list");
+  });
+
+  socket.on("leave_questions_list", () => {
+    socket.leave("questions_list");
+  });
+
+  // Question-specific room management
+  socket.on("join_question_room", (question_id) => {
+    if (question_id) {
+      socket.join(question_id);
+    }
+  });
+
+  socket.on("leave_question_room", (question_id) => {
+    if (question_id) {
+      socket.leave(question_id);
     }
   });
 
@@ -172,6 +230,10 @@ io.on("connection", (socket) => {
     try {
       updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
       if (updatedAnswer) {
+        // Update question cache with fresh data
+        await updateQuestionCache(payload.question_id);
+        await invalidateQuestionsListCache();
+
         updatedAnswer = {
           status: 'Success',
           data: updatedAnswer,
@@ -269,6 +331,10 @@ io.on("connection", (socket) => {
             $addToSet: { answers: answerToAquestion._id }
           });
 
+          // Update question cache with fresh data
+          await updateQuestionCache(payload.question_id);
+          await invalidateQuestionsListCache();
+
           answer = {
             status: 'Success',
             data: answerToAquestion,
@@ -290,6 +356,13 @@ io.on("connection", (socket) => {
         }
       }
       io.to(payload.question_id).emit('get_answer_for_question', answer);
+
+      // Broadcast answer count update to questions list
+      if (answer.status === 'Success') {
+        io.to("questions_list").emit("question_answer_count_updated", {
+          question_id: payload.question_id
+        });
+      }
     }
 
   })
@@ -300,6 +373,10 @@ io.on("connection", (socket) => {
       updatedQuestion = await questionModel.findByIdAndUpdate(payload.question_id, { question: payload.question }, { new: true })
 
       if (updatedQuestion) {
+        // Update question cache with fresh data
+        await updateQuestionCache(payload.question_id);
+        await invalidateQuestionsListCache();
+
         updatedQuestion = {
           status: 'Success',
           data: updatedQuestion,
@@ -321,6 +398,14 @@ io.on("connection", (socket) => {
       }
     }
     io.to(payload.question_id).emit("update_title_response", updatedQuestion)
+
+    // Broadcast title update to questions list
+    if (updatedQuestion.status === 'Success') {
+      io.to("questions_list").emit("question_title_updated", {
+        question_id: payload.question_id,
+        question: payload.question
+      });
+    }
   });
 
 
@@ -350,6 +435,10 @@ io.on("connection", (socket) => {
       // Save the updated question
       updatedQuestion = await question.save();
 
+      // Update question cache with fresh data
+      await updateQuestionCache(payload.question_id);
+      await invalidateQuestionsListCache();
+
       updatedQuestion = {
         status: 'Success',
         data: updatedQuestion,
@@ -366,7 +455,51 @@ io.on("connection", (socket) => {
     }
     io.to(payload.question_id).emit("update_likes_response", updatedQuestion)
 
+    // Broadcast like count update to questions list
+    if (updatedQuestion.status === 'Success') {
+      io.to("questions_list").emit("question_likes_updated", {
+        question_id: payload.question_id,
+        liked_by: updatedQuestion.data.liked_by
+      });
+    }
+
   })
+
+  // Delete question via socket
+  socket.on("delete_question", async (payload) => {
+    try {
+      const updated = await questionModel.findByIdAndUpdate(
+        payload.question_id,
+        { access: false },
+        { new: true }
+      );
+      if (updated) {
+        // Invalidate question cache
+        const cacheKey = cache.generateKey('question', payload.question_id);
+        await cache.del(cacheKey);
+        await invalidateQuestionsListCache();
+
+        io.to("questions_list").emit("question_deleted", {
+          question_id: payload.question_id
+        });
+        socket.emit("delete_question_response", {
+          status: 'Success',
+          message: "Question deleted successfully"
+        });
+      } else {
+        socket.emit("delete_question_response", {
+          status: 'Failed',
+          message: "Question not found"
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting question:", error);
+      socket.emit("delete_question_response", {
+        status: 'Failed',
+        message: "Failed to delete question"
+      });
+    }
+  });
 
   socket.off("setup", () => {
     console.log("USER DISCONNECTED");

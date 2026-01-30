@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const Chat = require("../models/chatModel");
 const User = require("../models/userModel");
 const mongoose = require('mongoose');
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 
 const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -41,6 +43,12 @@ const accessChat = asyncHandler(async (req, res) => {
       };
 
       const createdChat = await Chat.create(chatData);
+
+      // Invalidate chats cache for both users
+      const currentUserChatsKey = cache.generateKey('chats', 'user', req.user._id);
+      const otherUserChatsKey = cache.generateKey('chats', 'user', userId);
+      await cache.del(currentUserChatsKey, otherUserChatsKey);
+
       const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
         "users",
         "-token"
@@ -56,6 +64,12 @@ const accessChat = asyncHandler(async (req, res) => {
 
 const fetchChats = asyncHandler(async (req, res) => {
   try {
+    // Try to get from cache
+    const cacheKey = cache.generateKey('chats', 'user', req.user._id);
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.status(200).send({ status: "Success", message: "chats found for the user. (Cached)", result: cached });
+    }
 
     const results = await Chat.find({ users: { $elemMatch: { $eq: req.user._id } } })
       .populate({
@@ -75,6 +89,8 @@ const fetchChats = asyncHandler(async (req, res) => {
         select: "public_user_name user_job_experience user_current_company_name",
       });
 
+      // Cache the results
+      await cache.set(cacheKey, results, TTL.CHATS_LIST);
 
       return res.status(200).send({ status: "Success", message: "chats found for the user.", result: results });
 
@@ -83,7 +99,7 @@ const fetchChats = asyncHandler(async (req, res) => {
     }
   } catch (error) {
     console.log({ error })
-    return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: results });
+    return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: [] });
   }
 });
 
@@ -112,6 +128,12 @@ const createGroupChat = asyncHandler(async (req, res) => {
       isGroupChat: true,
       groupAdmin: req.user,
     });
+
+    // Invalidate chats cache for all users in the group
+    const cacheKeysToDelete = users.map(user =>
+      cache.generateKey('chats', 'user', user._id || user)
+    );
+    await cache.del(cacheKeysToDelete);
 
     const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
       .populate("users", "-password")
@@ -146,6 +168,12 @@ const renameGroup = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Chat Not Found");
   } else {
+    // Invalidate chats cache for all users in the group
+    const cacheKeysToDelete = updatedChat.users.map(user =>
+      cache.generateKey('chats', 'user', user._id)
+    );
+    await cache.del(cacheKeysToDelete);
+
     res.json(updatedChat);
   }
 });
@@ -174,6 +202,13 @@ const removeFromGroup = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Chat Not Found");
   } else {
+    // Invalidate chats cache for all users including removed user
+    const cacheKeysToDelete = [
+      ...removed.users.map(user => cache.generateKey('chats', 'user', user._id)),
+      cache.generateKey('chats', 'user', userId)
+    ];
+    await cache.del(cacheKeysToDelete);
+
     res.json(removed);
   }
 });
@@ -202,6 +237,12 @@ const addToGroup = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Chat Not Found");
   } else {
+    // Invalidate chats cache for all users in the group
+    const cacheKeysToDelete = added.users.map(user =>
+      cache.generateKey('chats', 'user', user._id)
+    );
+    await cache.del(cacheKeysToDelete);
+
     res.json(added);
   }
 });

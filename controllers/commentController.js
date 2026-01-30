@@ -1,6 +1,9 @@
 const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
 const { populateChildComments } = require("../utils/utils");
+const { getIo } = require("../utils/socketManger");
+const cache = require("../redisClient/cacheHelper");
+const TTL = require("../redisClient/cacheTTL");
 
 
 
@@ -19,24 +22,32 @@ const postComments = async (req, res) => {
         });
 
         // Update Post's comments array
-        const post = await Post.findByIdAndUpdate(
+        await Post.findByIdAndUpdate(
             post_id,
             { $addToSet: { comments: newComment._id } },
             { new: true }
         );
 
-        // Populate comments in the updated post
-        const updatedPost = await Post.findById(post_id).populate("posted_by", "public_user_name is_email_verified").populate({
-            path: 'comments',
-            match: { access: { $ne: false } },
-        });
-        await populateChildComments(updatedPost.comments)
+        // Invalidate comments cache for this post
+        const commentsKey = cache.generateKey('comments', 'post', post_id);
+        await cache.del(commentsKey);
+
+        // Populate the new comment with user info
+        const populatedComment = await Comment.findById(newComment._id)
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config');
 
         res.status(201).json({
             status: 'Success',
             message: 'Comment added successfully',
-            data: updatedPost,
+            data: {
+                comment: populatedComment,
+                post_id
+            },
         });
+
+        // Emit socket event for real-time updates
+        const io = getIo();
+        io.emit('listen_comment_created', { post_id, comment: populatedComment });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -45,39 +56,53 @@ const postComments = async (req, res) => {
 
 const postReplyComments = async (req, res) => {
     try {
-        const { post_id, parent_comment_id, comment_id, comment } = req.body;
+        const { post_id, parent_comment_id, comment } = req.body;
         const commented_by = req.user._id;
 
-        // Create a new comment
+        // Create a new comment as a reply
         const newComment = await Comment.create({
             comment,
             commented_by,
             post_id,
-            parent_comment_id: comment_id,
+            parent_comment_id,
         });
 
-        // new comment to a child comment of comment_id
+        // Add new comment to the child comments of parent
+        await Comment.findByIdAndUpdate(
+            parent_comment_id,
+            { $addToSet: { nested_comments: newComment._id } },
+            { new: true }
+        );
 
-        const addToChildComments = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { nested_comments: newComment._id } }, { new: true })
+        // Invalidate caches for this post and parent comment replies
+        const commentsKey = cache.generateKey('comments', 'post', post_id);
+        const repliesKey = cache.generateKey('comments', 'replies', parent_comment_id);
+        await cache.del(commentsKey, repliesKey);
 
-        const updatedPost = await Post.findById(post_id).populate("posted_by", "public_user_name is_email_verified").populate({
-            path: 'comments',
-            match: { access: { $ne: false } },
-        });
-        await populateChildComments(updatedPost.comments)
+        // Populate the new reply comment with user info
+        const populatedReply = await Comment.findById(newComment._id)
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config');
 
         res.status(201).json({
             status: 'Success',
-            message: 'Comment added successfully',
-            data: updatedPost,
+            message: 'Reply added successfully',
+            data: {
+                comment: populatedReply,
+                post_id,
+                parent_comment_id
+            },
         });
+
+        // Emit socket event for real-time updates
+        const io = getIo();
+        io.emit('listen_comment_reply', { post_id, comment: populatedReply, parent_comment_id });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
     }
 };
 
-// app.get('/api/comments/:post_id', 
+// app.get('/api/comments/:post_id',
 
 const getComment = async (req, res) => {
     try {
@@ -94,68 +119,61 @@ const getComment = async (req, res) => {
 const likeComment = async (req, res) => {
     const { comment_id, parent_comment_id, post_id } = req.body;
     try {
-        const post = await Post.findById(post_id);
-        if (post) {
-            if (parent_comment_id && comment_id) {
-                const commentData = await Comment.findOne({
-                    $and: [
-                        { _id: comment_id },
-                        { parent_comment_id }
-                    ]
-                });
-                if (commentData) {
-                    let updatedData = null
-                    if (commentData.upvoted_by.includes(req.user._id)) {
-                        updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } }, { new: true })
-                    } else {
-                        updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true })
-                    }
-
-                    if (updatedData) {
-                        const updatedPost = await Post.findById(post_id).populate("posted_by", "public_user_name is_email_verified").populate({
-                            path: 'comments',
-                            match: { access: { $ne: false } },
-                        });
-                        await populateChildComments(updatedPost.comments)
-
-                        return res.status(200).json({
-                            status: 'Success',
-                            data: updatedPost,
-                            message: "Comment Upvote added successfully"
-                        })
-                    }
-                }
-            } else {
-                const commentData = await Comment.findById(comment_id)
-                let updatedData = null
-                if (commentData.upvoted_by.includes(req.user._id)) {
-                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $pull: { upvoted_by: req.user._id } }, { new: true })
-                } else {
-                    updatedData = await Comment.findByIdAndUpdate(comment_id, { $addToSet: { upvoted_by: req.user._id } }, { new: true })
-                }
-
-                if (updatedData) {
-                    const updatedPost = await Post.findById(post_id).populate("posted_by", "public_user_name is_email_verified").populate({
-                        path: 'comments',
-                        match: { access: { $ne: false } },
-                    });
-                    await populateChildComments(updatedPost.comments)
-
-                    return res.status(200).json({
-                        status: 'Success',
-                        data: updatedPost,
-                        message: "Comment Upvote added successfully"
-                    })
-                }
-            }
+        const commentData = await Comment.findById(comment_id);
+        if (!commentData) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'Comment not found',
+                data: null
+            });
         }
 
-    } catch (error) {
+        const userId = req.user._id;
+        const isAlreadyUpvoted = commentData.upvoted_by.includes(userId);
+        const action = isAlreadyUpvoted ? 'removed' : 'added';
 
+        // Update upvote status
+        const updateOp = isAlreadyUpvoted
+            ? { $pull: { upvoted_by: userId } }
+            : { $addToSet: { upvoted_by: userId } };
+
+        const updatedComment = await Comment.findByIdAndUpdate(
+            comment_id,
+            updateOp,
+            { new: true }
+        ).select('upvoted_by');
+
+        if (updatedComment) {
+            // Minimal payload for response
+            const minimalPayload = {
+                comment_id,
+                post_id,
+                upvoted_by: updatedComment.upvoted_by,
+                action,
+                user_id: userId.toString()
+            };
+
+            // Emit socket event for real-time updates
+            const io = getIo();
+            io.emit('listen_comment_like', minimalPayload);
+
+            return res.status(200).json({
+                status: 'Success',
+                data: minimalPayload,
+                message: action === 'removed' ? "Comment Upvote removed successfully" : "Comment Upvote added successfully"
+            });
+        }
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Internal Server Error',
+            data: null
+        });
     }
 }
 
-// app.put('/api/comments/:comment_id', 
+// app.put('/api/comments/:comment_id',
 const updateComment = async (req, res) => {
     try {
         const comment_id = req.params.comment_id;
@@ -172,30 +190,49 @@ const updateComment = async (req, res) => {
 
 const deleteComment = async (req, res) => {
     try {
-        const comment_id = req.body.comment_id;
+        const { comment_id, post_id } = req.body;
 
         const updatedComment = await Comment.findByIdAndUpdate(
             { _id: comment_id },
             { $set: { access: false } },
             { new: true }
-        );
+        ).select('_id post_id access parent_comment_id');
 
         if (updatedComment) {
-            const updatedPost = await Post.findById(updatedComment.post_id).populate("posted_by", "public_user_name is_email_verified")
-                .populate({
-                    path: 'comments',
-                    match: { access: { $ne: false } },
-                });
+            // Invalidate caches
+            const commentsKey = cache.generateKey('comments', 'post', post_id || updatedComment.post_id);
+            const keysToDelete = [commentsKey];
 
-            await populateChildComments(updatedPost.comments)
+            // If this comment has a parent, also invalidate replies cache
+            if (updatedComment.parent_comment_id) {
+                const repliesKey = cache.generateKey('comments', 'replies', updatedComment.parent_comment_id);
+                keysToDelete.push(repliesKey);
+            }
+            await cache.del(keysToDelete);
+
+            // Minimal payload for response
+            const minimalPayload = {
+                comment_id,
+                post_id: post_id || updatedComment.post_id,
+                deleted: true
+            };
+
+            // Emit socket event for real-time updates
+            const io = getIo();
+            io.emit('listen_comment_deleted', minimalPayload);
 
             return res.status(200).json({
                 status: 'Success',
-                data: updatedPost,
+                data: minimalPayload,
                 message: "Comment deleted successfully"
-            })
+            });
         }
-        return res.json({ message: 'Comment deleted successfully' });
+
+        return res.status(404).json({
+            status: 'Failed',
+            message: 'Comment not found',
+            data: null
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -203,40 +240,150 @@ const deleteComment = async (req, res) => {
 }
 
 
-const getCommentReplies = async (req, res) => {
+// Fetch top-level comments for a post with pagination
+const getPostComments = async (req, res) => {
     try {
-        const payload = req.params
+        const { post_id } = req.params;
+        const { limit = 10, cursor } = req.query;
 
-        const comment = await Comment.find({ post_id: payload.post_id, _id: payload.comment_id })
-        console.log("before", comment)
+        // Only cache first page (no cursor)
+        const shouldCache = !cursor;
+        const cacheKey = shouldCache ? cache.generateKey('comments', 'post', post_id) : null;
 
-        await populateChildComments(comment)
-
-
-
-        if (comment[0]) {
-            return res.status(200).json({
-                status: 'Success',
-                message: 'Comment fetched successfully',
-                data: comment[0],
-            });
-        } else {
-            return res.status(400).json({
-                status: 'Failed',
-                message: 'Comment fetched Failed',
-                data: null,
-            });
+        // Try to get from cache for first page
+        if (shouldCache) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.json({
+                    status: true,
+                    data: cached,
+                    cached: true
+                });
+            }
         }
 
+        const query = {
+            post_id,
+            parent_comment_id: { $exists: false },
+            access: { $ne: false }
+        };
 
+        if (cursor) {
+            query._id = { $lt: cursor };
+        }
 
+        const limitNum = parseInt(limit);
+        const comments = await Comment.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum + 1)
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config user_public_profile_pic');
+
+        // Add reply_count for each comment (not full replies)
+        const commentsWithReplyCount = await Promise.all(
+            comments.slice(0, limitNum).map(async (comment) => {
+                const replyCount = await Comment.countDocuments({
+                    parent_comment_id: comment._id,
+                    access: { $ne: false }
+                });
+                return { ...comment.toObject(), reply_count: replyCount };
+            })
+        );
+
+        const hasMore = comments.length > limitNum;
+        const nextCursor = hasMore ? comments[limitNum - 1]._id : null;
+
+        const responseData = {
+            comments: commentsWithReplyCount,
+            nextCursor,
+            hasMore
+        };
+
+        // Cache first page results
+        if (shouldCache) {
+            await cache.set(cacheKey, responseData, TTL.COMMENTS_LIST);
+        }
+
+        res.json({
+            status: true,
+            data: responseData
+        });
     } catch (error) {
-
         console.error(error);
-        return res.status(500).json({ message: 'Internal Server Error' });
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
 
+// Fetch replies for a specific comment with pagination
+const getCommentReplies = async (req, res) => {
+    try {
+        const { comment_id } = req.params;
+        const { limit = 5, cursor } = req.query;
+
+        // Only cache first page (no cursor)
+        const shouldCache = !cursor;
+        const cacheKey = shouldCache ? cache.generateKey('comments', 'replies', comment_id) : null;
+
+        // Try to get from cache for first page
+        if (shouldCache) {
+            const cached = await cache.get(cacheKey);
+            if (cached) {
+                return res.json({
+                    status: true,
+                    data: cached,
+                    cached: true
+                });
+            }
+        }
+
+        const query = {
+            parent_comment_id: comment_id,
+            access: { $ne: false }
+        };
+
+        if (cursor) {
+            query._id = { $lt: cursor };
+        }
+
+        const limitNum = parseInt(limit);
+        const replies = await Comment.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum + 1)
+            .populate('commented_by', 'public_user_name is_email_verified avatar_config user_public_profile_pic');
+
+        // Add reply_count for nested replies
+        const repliesWithCount = await Promise.all(
+            replies.slice(0, limitNum).map(async (reply) => {
+                const replyCount = await Comment.countDocuments({
+                    parent_comment_id: reply._id,
+                    access: { $ne: false }
+                });
+                return { ...reply.toObject(), reply_count: replyCount };
+            })
+        );
+
+        const hasMore = replies.length > limitNum;
+        const nextCursor = hasMore ? replies[limitNum - 1]._id : null;
+
+        const responseData = {
+            replies: repliesWithCount,
+            nextCursor,
+            hasMore
+        };
+
+        // Cache first page results
+        if (shouldCache) {
+            await cache.set(cacheKey, responseData, TTL.COMMENTS_LIST);
+        }
+
+        res.json({
+            status: true,
+            data: responseData
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
 
-module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies };
+module.exports = { postComments, getComment, updateComment, deleteComment, postReplyComments, likeComment, deleteComment, getCommentReplies, getPostComments };
