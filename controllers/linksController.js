@@ -8,6 +8,73 @@ const { isVerifiedSource } = require('../utils/utils');
 const cache = require('../redisClient/cacheHelper');
 const TTL = require('../redisClient/cacheTTL');
 
+// --- Link cache helpers ---
+
+// Get all cache keys that may contain a given link
+const getLinkCacheKeys = (ownerId, category) => {
+    const keys = [
+        cache.generateKey('links', 'all'),
+        cache.generateKey('links', 'user', ownerId, 'all'),
+    ];
+    if (category) {
+        keys.push(cache.generateKey('links', 'user', ownerId, category));
+        keys.push(cache.generateKey('links', 'category', category));
+    }
+    return keys;
+};
+
+// Add a link to the front of each cached list
+const addLinkToCacheLists = async (keys, link) => {
+    await Promise.all(keys.map(async (key) => {
+        const data = await cache.get(key);
+        if (data && Array.isArray(data)) {
+            data.unshift(link);
+            await cache.set(key, data, TTL.LINKS_LIST);
+        }
+    }));
+};
+
+// Replace a link in each cached list
+const updateLinkInCacheLists = async (keys, updatedLink) => {
+    await Promise.all(keys.map(async (key) => {
+        const data = await cache.get(key);
+        if (data && Array.isArray(data)) {
+            const index = data.findIndex(l => l._id.toString() === updatedLink._id.toString());
+            if (index !== -1) {
+                data[index] = updatedLink;
+                await cache.set(key, data, TTL.LINKS_LIST);
+            }
+        }
+    }));
+};
+
+// Remove a link from each cached list
+const removeLinkFromCacheLists = async (keys, linkId) => {
+    await Promise.all(keys.map(async (key) => {
+        const data = await cache.get(key);
+        if (data && Array.isArray(data)) {
+            const filtered = data.filter(l => l._id.toString() !== linkId.toString());
+            if (filtered.length !== data.length) {
+                await cache.set(key, filtered, TTL.LINKS_LIST);
+            }
+        }
+    }));
+};
+
+// Add a category to the categories cache if not already present
+const addCategoryToCache = async (category) => {
+    if (!category) return;
+    const key = cache.generateKey('links', 'categories');
+    const data = await cache.get(key);
+    if (data && Array.isArray(data)) {
+        if (!data.some(c => c.toLowerCase() === category.toLowerCase())) {
+            data.push(category);
+            data.sort();
+            await cache.set(key, data, TTL.LINK_CATEGORIES);
+        }
+    }
+};
+
 // Predefined categories
 const PREDEFINED_CATEGORIES = [
     'jobs', 'learning', 'tools', 'resources', 'news',
@@ -158,13 +225,6 @@ const createLink = asyncHandler(async (req, res) => {
             category: validatedCategory
         };
 
-        // Invalidate caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id);
-        const allLinksKey = cache.generateKey('links', 'all');
-        const categoriesKey = cache.generateKey('links', 'categories');
-        const linkCategoriesKey = cache.generateKey('links', 'categories', validatedCategory);
-        await cache.del(userLinksKey, allLinksKey, categoriesKey, linkCategoriesKey);
-
         const link = await Link.create(linkPayload);
 
         // Ensure category is tracked in the separate collection
@@ -184,6 +244,13 @@ const createLink = asyncHandler(async (req, res) => {
         }
 
         const linkData = await link.populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+        // Update caches — add new link to all relevant cached lists
+        const cacheKeys = getLinkCacheKeys(req.user._id, validatedCategory);
+        await Promise.all([
+            addLinkToCacheLists(cacheKeys, linkData),
+            addCategoryToCache(validatedCategory),
+        ]);
 
         if (linkData) {
             const io = getIo();
@@ -327,40 +394,39 @@ const updateLink = asyncHandler(async (req, res) => {
         }
 
         // Update caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id, 'all');
+        const oldCategory = linkExists.category;
+        const newCategory = link.category;
+        const ownerId = req.user._id;
 
-        const allLinksKey = cache.generateKey('links', 'all');
-        const categoriesKey = cache.generateKey('links', 'categories');
+        // Update the link in global + user:all caches
+        const baseKeys = [
+            cache.generateKey('links', 'all'),
+            cache.generateKey('links', 'user', ownerId, 'all'),
+        ];
+        await updateLinkInCacheLists(baseKeys, link);
 
-        // Helper to update link list cache
-        const updateLinkCache = async (key) => {
-            const cachedData = await cache.get(key);
-            if (cachedData && Array.isArray(cachedData)) {
-                // Remove old version and add new version at top (sorted by updatedAt)
-                const updatedList = cachedData.filter(l => l._id.toString() !== link._id.toString());
-                updatedList.unshift(link);
-                await cache.set(key, updatedList, TTL.LINKS_LIST);
+        if (oldCategory !== newCategory) {
+            // Category changed: remove from old category caches, add to new
+            if (oldCategory) {
+                await removeLinkFromCacheLists([
+                    cache.generateKey('links', 'category', oldCategory),
+                    cache.generateKey('links', 'user', ownerId, oldCategory),
+                ], link._id);
             }
-        };
-
-        // Helper to update categories cache
-        const updateCategoryCache = async (key) => {
-            const cachedCategories = await cache.get(key);
-            if (cachedCategories && Array.isArray(cachedCategories)) {
-                // Add new category if not present
-                if (link.category && !cachedCategories.includes(link.category)) {
-                    cachedCategories.push(link.category);
-                    cachedCategories.sort();
-                    await cache.set(key, cachedCategories, TTL.LINK_CATEGORIES);
-                }
+            if (newCategory) {
+                await addLinkToCacheLists([
+                    cache.generateKey('links', 'category', newCategory),
+                    cache.generateKey('links', 'user', ownerId, newCategory),
+                ], link);
+                await addCategoryToCache(newCategory);
             }
-        };
-
-        await Promise.all([
-            updateLinkCache(userLinksKey),
-            updateLinkCache(allLinksKey),
-            updateCategoryCache(categoriesKey)
-        ]);
+        } else if (newCategory) {
+            // Same category: update in-place
+            await updateLinkInCacheLists([
+                cache.generateKey('links', 'category', newCategory),
+                cache.generateKey('links', 'user', ownerId, newCategory),
+            ], link);
+        }
 
         if (link) {
             const io = getIo();
@@ -407,11 +473,9 @@ const deleteLink = asyncHandler(async (req, res) => {
             });
         }
 
-        // Invalidate caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id);
-        const allLinksKey = cache.generateKey('links', 'all');
-        const categoriesKey = cache.generateKey('links', 'categories');
-        await cache.del(userLinksKey, allLinksKey, categoriesKey);
+        // Remove from all relevant cached lists
+        const cacheKeys = getLinkCacheKeys(req.user._id, linkExists.category);
+        await removeLinkFromCacheLists(cacheKeys, req.body.link_id);
 
         const link = await Link.findByIdAndDelete({ _id: req.body.link_id });
         if (link) {
@@ -440,11 +504,6 @@ const likeDislikeLink = asyncHandler(async (req, res) => {
     try {
         const link = await Link.findById(req.body.link_id);
 
-        // Invalidate caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id);
-        const allLinksKey = cache.generateKey('links', 'all');
-        await cache.del(userLinksKey, allLinksKey);
-
         if (link) {
             const io = getIo();
 
@@ -454,6 +513,10 @@ const likeDislikeLink = asyncHandler(async (req, res) => {
                     { $pull: { liked_by: req.user._id } },
                     { new: true }
                 ).populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+                // Update cached lists with new liked_by data
+                const cacheKeys = getLinkCacheKeys(link.posted_by, linkData.category);
+                await updateLinkInCacheLists(cacheKeys, linkData);
 
                 io.emit('listen_link_like', linkData);
 
@@ -470,6 +533,10 @@ const likeDislikeLink = asyncHandler(async (req, res) => {
                     { $addToSet: { liked_by: req.user._id } },
                     { new: true }
                 ).populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+                // Update cached lists with new liked_by data
+                const cacheKeys = getLinkCacheKeys(link.posted_by, linkData.category);
+                await updateLinkInCacheLists(cacheKeys, linkData);
 
                 io.emit('listen_link_like', linkData);
 
@@ -501,11 +568,6 @@ const bookmarkLink = asyncHandler(async (req, res) => {
     try {
         const link = await Link.findById(req.body.link_id);
 
-        // Invalidate caches
-        const userLinksKey = cache.generateKey('links', 'user', req.user._id);
-        const allLinksKey = cache.generateKey('links', 'all');
-        await cache.del(userLinksKey, allLinksKey);
-
         if (link) {
             const io = getIo();
 
@@ -515,6 +577,10 @@ const bookmarkLink = asyncHandler(async (req, res) => {
                     { $pull: { bookmarked_by: req.user._id } },
                     { new: true }
                 ).populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+                // Update cached lists with new bookmarked_by data
+                const cacheKeys = getLinkCacheKeys(link.posted_by, linkData.category);
+                await updateLinkInCacheLists(cacheKeys, linkData);
 
                 io.emit('listen_link_bookmark', linkData);
 
@@ -537,6 +603,10 @@ const bookmarkLink = asyncHandler(async (req, res) => {
                     { $addToSet: { bookmarked_by: req.user._id } },
                     { new: true }
                 ).populate("posted_by", "public_user_name is_email_verified avatar_config");
+
+                // Update cached lists with new bookmarked_by data
+                const cacheKeys = getLinkCacheKeys(link.posted_by, linkData.category);
+                await updateLinkInCacheLists(cacheKeys, linkData);
 
                 io.emit('listen_link_bookmark', linkData);
 
