@@ -13,8 +13,15 @@ const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
-const { toNodeHandler } = require("better-auth/node");
-// auth is required later after DB connection
+// Dynamic import for ESM-only better-auth/node
+let _toNodeHandler;
+const getToNodeHandler = async () => {
+  if (!_toNodeHandler) {
+    const mod = await import("better-auth/node");
+    _toNodeHandler = mod.toNodeHandler;
+  }
+  return _toNodeHandler;
+};
 
 
 const cors = require("cors");
@@ -101,8 +108,10 @@ app.get("/api/init", (req, res) => {
   }
 });
 
-app.all("/api/auth/*", (req, res) => {
-  return toNodeHandler(getAuth())(req, res);
+app.all("/api/auth/*", async (req, res) => {
+  const toNodeHandler = await getToNodeHandler();
+  const auth = await getAuth();
+  return toNodeHandler(auth)(req, res);
 });
 
 app.use("/api", userRoutes);

@@ -1,18 +1,20 @@
-const { betterAuth } = require("better-auth");
-const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const mongoose = require("mongoose");
 const User = require("../models/userModel");
-const { customSession } = require("better-auth/plugins");
-const { passkey } = require("@better-auth/passkey");
 const { projection } = require("../constants");
 
 let _auth;
 
-const getAuth = () => {
+const getAuth = async () => {
     if (!_auth) {
         if (!mongoose.connection.db) {
             throw new Error("Database not connected yet. Cannot initialize Better Auth.");
         }
+
+        // Dynamic imports for ESM-only packages
+        const { betterAuth } = await import("better-auth");
+        const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
+        const { customSession } = await import("better-auth/plugins");
+        const { passkey } = await import("@better-auth/passkey");
 
         mongoose.connection.db.collection("verification").deleteMany({ id: null })
 

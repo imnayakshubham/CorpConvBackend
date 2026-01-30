@@ -420,7 +420,7 @@ const rejectFollowRequest = async (req, res) => {
 const listUserSessions = async (req, res) => {
   try {
     const { getAuth } = require("../utils/auth");
-    const auth = getAuth();
+    const auth = await getAuth();
 
     const sessions = await auth.api.listSessions({
       headers: req.headers,
@@ -460,7 +460,7 @@ const revokeSession = async (req, res) => {
     }
 
     const { getAuth } = require("../utils/auth");
-    const auth = getAuth();
+    const auth = await getAuth();
 
     await auth.api.revokeSession({
       headers: req.headers,
@@ -484,7 +484,7 @@ const revokeAllSessions = async (req, res) => {
   try {
     const { exceptCurrent } = req.body;
     const { getAuth } = require("../utils/auth");
-    const auth = getAuth();
+    const auth = await getAuth();
 
     if (exceptCurrent) {
       await auth.api.revokeOtherSessions({
