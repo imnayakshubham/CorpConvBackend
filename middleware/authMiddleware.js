@@ -9,7 +9,7 @@ const protect = asyncHandler(async (req, res, next) => {
 
   // 1. Try Better Auth
   try {
-    const auth = getAuth();
+    const auth = await getAuth();
     if (auth) {
       const session = await auth.api.getSession({
         headers: req.headers,
@@ -69,7 +69,7 @@ const optionalAuth = asyncHandler(async (req, _res, next) => {
 
   // 1. Try Better Auth
   try {
-    const auth = getAuth();
+    const auth = await getAuth();
     if (auth) {
       const session = await auth.api.getSession({
         headers: req.headers,
