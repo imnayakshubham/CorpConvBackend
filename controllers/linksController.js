@@ -339,7 +339,7 @@ const fetchLinks = asyncHandler(async (req, res) => {
 
 const updateLink = asyncHandler(async (req, res) => {
     try {
-        const { link_id, url, category } = req.body;
+        const { link_id, url, category, title, description } = req.body;
 
         const linkExists = await Link.findOne({ _id: link_id });
         if (!linkExists) {
@@ -360,11 +360,27 @@ const updateLink = asyncHandler(async (req, res) => {
         }
 
         const updateData = {};
+        const stripHtml = (str) => (str || '').replace(/<[^>]*>/g, '').trim();
 
         if (url) {
             const validatedUrl = validateUrl(url);
             updateData.link_data = await fetchLinkMetadata(validatedUrl);
             updateData.is_verified_source = isVerifiedSource(validatedUrl);
+            // Overlay user-provided overrides on the freshly fetched metadata
+            if (typeof title === 'string') {
+                updateData.link_data.title = stripHtml(title).substring(0, 200);
+            }
+            if (typeof description === 'string') {
+                updateData.link_data.description = stripHtml(description).substring(0, 500);
+            }
+        } else {
+            // URL unchanged — use dot notation to update individual fields
+            if (typeof title === 'string') {
+                updateData['link_data.title'] = stripHtml(title).substring(0, 200);
+            }
+            if (typeof description === 'string') {
+                updateData['link_data.description'] = stripHtml(description).substring(0, 500);
+            }
         }
 
         if (category) {
