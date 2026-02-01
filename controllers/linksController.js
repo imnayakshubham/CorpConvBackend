@@ -725,9 +725,9 @@ const trackLinkView = asyncHandler(async (req, res) => {
         );
 
         if (!link) {
-            return res.status(404).json({
-                status: 'Failed',
-                message: 'Link not found',
+            return res.status(200).json({
+                status: 'Success',
+                message: 'Link not found, view not tracked',
                 data: null
             });
         }
