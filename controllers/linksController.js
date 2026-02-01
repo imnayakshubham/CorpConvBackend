@@ -495,6 +495,12 @@ const deleteLink = asyncHandler(async (req, res) => {
         const cacheKeys = getLinkCacheKeys(req.user._id, linkExists.category);
         await removeLinkFromCacheLists(cacheKeys, req.body.link_id);
 
+        // Also clear affiliate caches if this is an affiliate link
+        if (linkExists.is_affiliate_link) {
+            const affiliateCacheKeys = getAffiliateCacheKeys(req.user._id, linkExists.category);
+            await removeLinkFromCacheLists(affiliateCacheKeys, req.body.link_id);
+        }
+
         const link = await Link.findByIdAndDelete({ _id: req.body.link_id });
         if (link) {
             return res.status(200).json({
