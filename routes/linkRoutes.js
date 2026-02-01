@@ -11,7 +11,12 @@ const {
     getCategories,
     trackLinkView,
     trackLinkClick,
-    getLinkAnalytics
+    getLinkAnalytics,
+    createAffiliateLink,
+    fetchAffiliateLinks,
+    updateAffiliateLink,
+    getAffiliateLinkById,
+    getAffiliateLinkAnalytics,
 } = require("../controllers/linksController");
 
 const router = express.Router();
@@ -27,6 +32,14 @@ router.route("/categories").get(getCategories);
 router.route("/track-view").post(trackLinkView);
 router.route("/track-click").post(trackLinkClick);
 router.route("/analytics").get(protect, getLinkAnalytics);
+
+// Affiliate link routes
+router.route("/affiliate/create").post(protect, createAffiliateLink);
+router.route("/affiliate/update").post(protect, updateAffiliateLink);
+router.route("/affiliate/analytics").get(protect, getAffiliateLinkAnalytics);
+router.route("/affiliate/analytics/:link_id").get(protect, getAffiliateLinkAnalytics);
+router.route("/affiliate/:id").get(getAffiliateLinkById);
+router.route("/affiliate").get(fetchAffiliateLinks);
 
 router.route("/").get(fetchLinks);
 

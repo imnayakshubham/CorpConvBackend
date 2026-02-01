@@ -240,6 +240,12 @@ const getAuth = async () => {
             },
 
             advanced: {
+                useSecureCookies: true,          // always Secure
+                defaultCookieAttributes: {
+                    sameSite: "none",              // must be None to send cookie in cross-site redirects
+                    secure: true,                  // Secure required with SameSite=None
+                    httpOnly: true,
+                },
                 crossOrigin: true,
                 database: {
                     idField: "_id",

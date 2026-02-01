@@ -129,6 +129,10 @@ app.use("/api/feedback", require("./routes/feedbackRoutes"));
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
+// Short link redirect for affiliate links
+const { redirectAndTrack } = require("./controllers/linksController");
+app.get("/r/:slug", redirectAndTrack);
+
 
 app.get("/", (req, res) => {
   res.send(`Hello World!`);
