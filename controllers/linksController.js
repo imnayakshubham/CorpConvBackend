@@ -63,6 +63,20 @@ const removeLinkFromCacheLists = async (keys, linkId) => {
     }));
 };
 
+// Update specific fields on a link in each cached list (preserves populated data)
+const updateFieldsInCacheLists = async (keys, linkId, updates) => {
+    await Promise.all(keys.map(async (key) => {
+        const data = await cache.get(key);
+        if (data && Array.isArray(data)) {
+            const index = data.findIndex(l => l._id.toString() === linkId.toString());
+            if (index !== -1) {
+                Object.assign(data[index], updates);
+                await cache.set(key, data, TTL.LINKS_LIST);
+            }
+        }
+    }));
+};
+
 // Add a category to the categories cache if not already present
 const addCategoryToCache = async (category) => {
     if (!category) return;
@@ -473,7 +487,7 @@ const updateLink = asyncHandler(async (req, res) => {
 
 const deleteLink = asyncHandler(async (req, res) => {
     try {
-        const linkExists = await Link.findOne({ _id: req.body.link_id });
+        const linkExists = await Link.findOne({ _id: req.body.link_id, access: true })
         if (!linkExists) {
             return res.status(400).json({
                 status: 'Failed',
@@ -738,6 +752,15 @@ const trackLinkView = asyncHandler(async (req, res) => {
             });
         }
 
+        // Optimistic cache update
+        const cacheKeys = getLinkCacheKeys(link.posted_by, link.category);
+        await updateFieldsInCacheLists(cacheKeys, link._id, { view_count: link.view_count });
+
+        if (link.is_affiliate_link) {
+            const affiliateCacheKeys = getAffiliateCacheKeys(link.posted_by, link.category);
+            await updateFieldsInCacheLists(affiliateCacheKeys, link._id, { view_count: link.view_count });
+        }
+
         return res.status(200).json({
             status: 'Success',
             data: { view_count: link.view_count },
@@ -779,6 +802,15 @@ const trackLinkClick = asyncHandler(async (req, res) => {
             });
         }
 
+        // Optimistic cache update
+        const cacheKeys = getLinkCacheKeys(link.posted_by, link.category);
+        await updateFieldsInCacheLists(cacheKeys, link._id, { click_count: link.click_count });
+
+        if (link.is_affiliate_link) {
+            const affiliateCacheKeys = getAffiliateCacheKeys(link.posted_by, link.category);
+            await updateFieldsInCacheLists(affiliateCacheKeys, link._id, { click_count: link.click_count });
+        }
+
         return res.status(200).json({
             status: 'Success',
             data: { click_count: link.click_count },
@@ -797,6 +829,16 @@ const trackLinkClick = asyncHandler(async (req, res) => {
 const getLinkAnalytics = asyncHandler(async (req, res) => {
     try {
         const userId = req.user._id;
+
+        const cacheKey = cache.generateKey('links', 'analytics', userId);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: 'Analytics fetched successfully (Cached)'
+            });
+        }
 
         // Get all links by the user
         const links = await Link.find({ posted_by: userId, access: true })
@@ -836,31 +878,35 @@ const getLinkAnalytics = asyncHandler(async (req, res) => {
             return acc;
         }, {});
 
+        const analyticsData = {
+            summary: {
+                total_links: links.length,
+                total_views: totalViews,
+                total_clicks: totalClicks,
+                total_likes: totalLikes,
+                total_bookmarks: totalBookmarks,
+                click_through_rate: totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(2) : 0
+            },
+            top_links: topLinks,
+            category_stats: categoryStats,
+            all_links: links.map(link => ({
+                _id: link._id,
+                title: link.link_data?.title || 'Untitled',
+                url: link.link_data?.url,
+                category: link.category,
+                view_count: link.view_count || 0,
+                click_count: link.click_count || 0,
+                likes: link.liked_by?.length || 0,
+                bookmarks: link.bookmarked_by?.length || 0,
+                created_at: link.createdAt
+            }))
+        };
+
+        await cache.set(cacheKey, analyticsData, TTL.AFFILIATE_ANALYTICS);
+
         return res.status(200).json({
             status: 'Success',
-            data: {
-                summary: {
-                    total_links: links.length,
-                    total_views: totalViews,
-                    total_clicks: totalClicks,
-                    total_likes: totalLikes,
-                    total_bookmarks: totalBookmarks,
-                    click_through_rate: totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(2) : 0
-                },
-                top_links: topLinks,
-                category_stats: categoryStats,
-                all_links: links.map(link => ({
-                    _id: link._id,
-                    title: link.link_data?.title || 'Untitled',
-                    url: link.link_data?.url,
-                    category: link.category,
-                    view_count: link.view_count || 0,
-                    click_count: link.click_count || 0,
-                    likes: link.liked_by?.length || 0,
-                    bookmarks: link.bookmarked_by?.length || 0,
-                    created_at: link.createdAt
-                }))
-            },
+            data: analyticsData,
             message: 'Analytics fetched successfully'
         });
     } catch (error) {
@@ -1233,7 +1279,21 @@ const redirectAndTrack = asyncHandler(async (req, res) => {
         }
 
         // Increment click_count on the link
-        await Link.findByIdAndUpdate(link._id, { $inc: { click_count: 1 } });
+        const updatedLink = await Link.findByIdAndUpdate(
+            link._id,
+            { $inc: { click_count: 1 } },
+            { new: true }
+        );
+
+        if (updatedLink) {
+            const cacheKeys = getLinkCacheKeys(updatedLink.posted_by, updatedLink.category);
+            await updateFieldsInCacheLists(cacheKeys, updatedLink._id, { click_count: updatedLink.click_count });
+
+            if (updatedLink.is_affiliate_link) {
+                const affiliateCacheKeys = getAffiliateCacheKeys(updatedLink.posted_by, updatedLink.category);
+                await updateFieldsInCacheLists(affiliateCacheKeys, updatedLink._id, { click_count: updatedLink.click_count });
+            }
+        }
 
         return res.redirect(302, link.link_data.url);
     } catch (error) {
@@ -1248,6 +1308,16 @@ const redirectAndTrack = asyncHandler(async (req, res) => {
 
 const getAffiliateLinkById = asyncHandler(async (req, res) => {
     try {
+        const cacheKey = cache.generateKey('affiliate', 'detail', req.params.id);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cached,
+                message: 'Affiliate link fetched successfully (Cached)'
+            });
+        }
+
         const link = await Link.findOne({
             _id: req.params.id,
             is_affiliate_link: true,
@@ -1261,6 +1331,8 @@ const getAffiliateLinkById = asyncHandler(async (req, res) => {
                 data: null
             });
         }
+
+        await cache.set(cacheKey, link, TTL.AFFILIATE_LINK_DETAIL);
 
         return res.status(200).json({
             status: 'Success',
@@ -1283,6 +1355,16 @@ const getAffiliateLinkAnalytics = asyncHandler(async (req, res) => {
 
         if (link_id) {
             // Per-link analytics
+            const perLinkCacheKey = cache.generateKey('affiliate', 'analytics', link_id);
+            const cachedPerLink = await cache.get(perLinkCacheKey);
+            if (cachedPerLink) {
+                return res.status(200).json({
+                    status: 'Success',
+                    data: cachedPerLink,
+                    message: 'Affiliate link analytics fetched successfully (Cached)'
+                });
+            }
+
             const link = await Link.findOne({ _id: link_id, posted_by: userId, is_affiliate_link: true });
             if (!link) {
                 return res.status(404).json({
@@ -1312,27 +1394,41 @@ const getAffiliateLinkAnalytics = asyncHandler(async (req, res) => {
             const referrals = await Referral.find({ link_id: link._id })
                 .sort({ click_count: -1 });
 
+            const perLinkData = {
+                link_id: link._id,
+                title: link.link_data?.title || 'Untitled',
+                slug: link.slug,
+                total_clicks: totalClicks,
+                unique_clicks: uniqueClicks,
+                daily_clicks: dailyClicks.map(d => ({ date: d._id, count: d.count, unique_count: d.unique_count })),
+                referrals: referrals.map(r => ({
+                    referral_user_id: r.referral_user_id,
+                    click_count: r.click_count,
+                    first_click_at: r.first_click_at,
+                    last_click_at: r.last_click_at
+                }))
+            };
+
+            await cache.set(perLinkCacheKey, perLinkData, TTL.AFFILIATE_ANALYTICS);
+
             return res.status(200).json({
                 status: 'Success',
-                data: {
-                    link_id: link._id,
-                    title: link.link_data?.title || 'Untitled',
-                    slug: link.slug,
-                    total_clicks: totalClicks,
-                    unique_clicks: uniqueClicks,
-                    daily_clicks: dailyClicks.map(d => ({ date: d._id, count: d.count, unique_count: d.unique_count })),
-                    referrals: referrals.map(r => ({
-                        referral_user_id: r.referral_user_id,
-                        click_count: r.click_count,
-                        first_click_at: r.first_click_at,
-                        last_click_at: r.last_click_at
-                    }))
-                },
+                data: perLinkData,
                 message: 'Affiliate link analytics fetched successfully'
             });
         }
 
         // All affiliate links summary for user
+        const summaryCacheKey = cache.generateKey('affiliate', 'analytics', 'summary', userId);
+        const cachedSummary = await cache.get(summaryCacheKey);
+        if (cachedSummary) {
+            return res.status(200).json({
+                status: 'Success',
+                data: cachedSummary,
+                message: 'Affiliate analytics fetched successfully (Cached)'
+            });
+        }
+
         const links = await Link.find({ posted_by: userId, is_affiliate_link: true, access: true })
             .sort({ updatedAt: -1 })
             .select('link_data category slug campaign tags click_count view_count liked_by bookmarked_by createdAt');
@@ -1384,30 +1480,34 @@ const getAffiliateLinkAnalytics = asyncHandler(async (req, res) => {
             { $sort: { _id: 1 } }
         ]);
 
+        const summaryData = {
+            summary: {
+                total_links: links.length,
+                total_clicks: totalClicksFromDb,
+                unique_clicks: uniqueClicksFromDb,
+                total_referrals: totalReferrals,
+            },
+            top_performers: topPerformers,
+            campaign_stats: campaignStats,
+            category_stats: categoryStats,
+            daily_clicks: dailyClicks.map(d => ({ date: d._id, count: d.count })),
+            all_links: links.map(link => ({
+                _id: link._id,
+                title: link.link_data?.title || 'Untitled',
+                slug: link.slug,
+                category: link.category,
+                campaign: link.campaign,
+                click_count: link.click_count || 0,
+                view_count: link.view_count || 0,
+                created_at: link.createdAt
+            }))
+        };
+
+        await cache.set(summaryCacheKey, summaryData, TTL.AFFILIATE_ANALYTICS);
+
         return res.status(200).json({
             status: 'Success',
-            data: {
-                summary: {
-                    total_links: links.length,
-                    total_clicks: totalClicksFromDb,
-                    unique_clicks: uniqueClicksFromDb,
-                    total_referrals: totalReferrals,
-                },
-                top_performers: topPerformers,
-                campaign_stats: campaignStats,
-                category_stats: categoryStats,
-                daily_clicks: dailyClicks.map(d => ({ date: d._id, count: d.count })),
-                all_links: links.map(link => ({
-                    _id: link._id,
-                    title: link.link_data?.title || 'Untitled',
-                    slug: link.slug,
-                    category: link.category,
-                    campaign: link.campaign,
-                    click_count: link.click_count || 0,
-                    view_count: link.view_count || 0,
-                    created_at: link.createdAt
-                }))
-            },
+            data: summaryData,
             message: 'Affiliate analytics fetched successfully'
         });
     } catch (error) {
