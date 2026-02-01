@@ -24,7 +24,9 @@ const { protect, optionalAuth } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 router.route("/user").get(protect, allUsers);
-router.route("/user/:id").get(getUserInfo)
+// Analytics routes (must be before /user/:id to avoid route conflict)
+router.route("/user/analytics").get(protect, getUserAnalytics);
+router.route("/user/:id").get(getUserInfo);
 router.route("/followers").get(protect, getfollowersList);
 router.post("/auth", authUser);
 router.route("/users").post(fetchUsers);
@@ -45,9 +47,8 @@ router.route("/sessions/revoke-all").post(protect, revokeAllSessions);
 router.route("/update-avatar").post(protect, updateAvatarConfig);
 router.route("/update-qr-config").post(protect, updateQRConfig);
 
-// Analytics routes
+// Profile view tracking
 router.route("/track-profile-view/:id").post(optionalAuth, trackProfileView);
-router.route("/analytics").get(protect, getUserAnalytics);
 
 
 module.exports = router;
