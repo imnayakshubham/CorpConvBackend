@@ -55,12 +55,42 @@ const linkSchema = new mongoose.Schema({
     click_count: {
         type: Number,
         default: 0
-    }
+    },
+    is_affiliate_link: {
+        type: Boolean,
+        default: false,
+    },
+    slug: {
+        type: String,
+        unique: true,
+        sparse: true,
+    },
+    rich_description: {
+        type: String,
+        default: null,
+    },
+    campaign: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+    },
+    tags: [{
+        type: String,
+        trim: true,
+        maxlength: 30,
+    }],
+    referral_enabled: {
+        type: Boolean,
+        default: false,
+    },
 }, { timestamps: true });
 
 // Indexes for better query performance
 linkSchema.index({ category: 1 });
 linkSchema.index({ posted_by: 1 });
 linkSchema.index({ 'link_data.url': 1 }, { unique: true });
+linkSchema.index({ slug: 1 });
+linkSchema.index({ is_affiliate_link: 1 });
 
 module.exports = mongoose.model('Link', linkSchema);

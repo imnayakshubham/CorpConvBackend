@@ -12,4 +12,7 @@ module.exports = {
     SURVEYS_LIST: 7200,       // 2 hours
     SURVEY_DETAIL: 7200,      // 2 hours
     CHATS_LIST: 300,          // 5 minutes
+    AFFILIATE_LINKS_LIST: 3600,   // 1 hour
+    AFFILIATE_LINK_DETAIL: 7200,  // 2 hours
+    AFFILIATE_ANALYTICS: 300,     // 5 minutes
 };
