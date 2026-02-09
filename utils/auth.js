@@ -45,7 +45,7 @@ const getAuth = async () => {
                     },
                     public_user_name: {
                         type: "string",
-                        defaultValue: null
+                        defaultValue: "Someone"
                     },
                     is_email_verified: {
                         type: "boolean",

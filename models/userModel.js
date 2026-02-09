@@ -9,7 +9,7 @@ const userSchema = mongoose.Schema({
   },
   public_user_name: {
     type: String,
-    default: null
+    default: "Someone"
   },
   is_email_verified: {
     type: Boolean,
