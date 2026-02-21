@@ -1,6 +1,9 @@
 require("dotenv").config();
 const express = require("express");
+const helmet = require("helmet");
 const connectDB = require("./config/db");
+const { globalLimiter } = require("./middleware/rateLimiter");
+const { stripAllHtml } = require("./utils/sanitize");
 const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const linkRoutes = require("./routes/linkRoutes");
@@ -88,8 +91,10 @@ app.use(cors({
   transports: ['websocket']
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(helmet());
+app.use(globalLimiter);
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 if (process.env.APP_ENV === "PROD") {
   job.start()
@@ -131,11 +136,17 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Short link redirect for affiliate links
 const { redirectAndTrack } = require("./controllers/linksController");
+const { isProd } = require("./constants");
 app.get("/r/:slug", redirectAndTrack);
 
 
 app.get("/", (req, res) => {
-  res.send(`Hello World!`);
+  if (isProd) {
+    res.redirect(process.env.FRONTEND_URL || "http://localhost:3000")
+
+  } else {
+    res.send(`Hushwork Now is live @ ${process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS[0]}`)
+  }
 });
 
 
@@ -317,7 +328,7 @@ io.on("connection", (socket) => {
       let answer = null
       const answerData = {
         answered_by: payload.user_id,
-        answer: payload.answer?.trim(),
+        answer: stripAllHtml(payload.answer?.trim() || ''),
         question_id: payload.question_id
       }
 
@@ -383,7 +394,7 @@ io.on("connection", (socket) => {
   socket.on("update_question_title", async (payload) => {
     let updatedQuestion = null
     try {
-      updatedQuestion = await questionModel.findByIdAndUpdate(payload.question_id, { question: payload.question }, { new: true })
+      updatedQuestion = await questionModel.findByIdAndUpdate(payload.question_id, { question: stripAllHtml(payload.question || '') }, { new: true })
 
       if (updatedQuestion) {
         // Update question cache with fresh data

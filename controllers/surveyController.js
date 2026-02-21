@@ -1,6 +1,8 @@
 const { Survey, Submission } = require("../models/surveyModel");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
+const escapeRegex = require("../utils/escapeRegex");
+const { sanitizeRichText } = require("../utils/sanitize");
 
 // CREATE Survey API
 const createSurvey = async (req, res) => {
@@ -84,7 +86,7 @@ const listSurveys = async (req, res) => {
 
         // Search filter (regex-based for partial matching)
         if (search && search.trim()) {
-            const searchRegex = new RegExp(search.trim(), 'i');
+            const searchRegex = new RegExp(escapeRegex(search.trim()), 'i');
             query.$or = [
                 { survey_title: searchRegex },
                 { survey_description: searchRegex },
@@ -258,14 +260,21 @@ const editSurvey = async (req, res) => {
                 data: null
             });
         }
-        let updatedPayload = req.body;
-        const payloadKeys = Object.keys(updatedPayload)
-        if (payloadKeys.includes("survey_title") && payloadKeys.includes("survey_description")) {
-            updatedPayload = {
-                survey_title: updatedPayload.survey_title.trim(),
-                survey_description: updatedPayload.survey_description.trim(),
-                ...updatedPayload
+        // Allowlisted fields only
+        const allowedFields = [
+            'survey_title', 'survey_description', 'survey_form', 'pages',
+            'is_multi_step', 'status', 'tags', 'quiz_settings', 'sharing',
+            'response_settings', 'theme', 'notifications', 'form_settings', 'slug'
+        ];
+        const updatedPayload = {};
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updatedPayload[field] = req.body[field];
             }
+        }
+
+        if (updatedPayload.survey_title) {
+            updatedPayload.survey_title = updatedPayload.survey_title.trim();
             if (updatedPayload.survey_title.length < 3) {
                 return res.status(400).json({
                     status: 'Failed',
@@ -274,10 +283,11 @@ const editSurvey = async (req, res) => {
                 });
             }
         }
+        if (updatedPayload.survey_description !== undefined) {
+            updatedPayload.survey_description = sanitizeRichText(updatedPayload.survey_description.trim());
+        }
 
-
-
-        const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, { ...updatedPayload }, { new: true })
+        const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, updatedPayload, { new: true })
 
         // Invalidate caches
         await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
