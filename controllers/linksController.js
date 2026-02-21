@@ -9,6 +9,7 @@ const { load } = require("cheerio");
 const { isVerifiedSource, randomIdGenerator } = require('../utils/utils');
 const cache = require('../redisClient/cacheHelper');
 const TTL = require('../redisClient/cacheTTL');
+const { sanitizeRichText } = require('../utils/sanitize');
 
 // --- Link cache helpers ---
 
@@ -972,7 +973,7 @@ const createAffiliateLink = asyncHandler(async (req, res) => {
             category: validatedCategory,
             is_affiliate_link: true,
             slug,
-            rich_description: rich_description || null,
+            rich_description: rich_description ? sanitizeRichText(rich_description) : null,
             campaign: campaign?.trim().substring(0, 100) || null,
             tags: Array.isArray(tags) ? tags.map(t => t.trim().substring(0, 30)).filter(Boolean) : [],
             referral_enabled: !!referral_enabled,
@@ -1133,7 +1134,7 @@ const updateAffiliateLink = asyncHandler(async (req, res) => {
         }
 
         if (typeof rich_description === 'string') {
-            updateData.rich_description = rich_description;
+            updateData.rich_description = sanitizeRichText(rich_description);
         }
         if (typeof campaign === 'string') {
             updateData.campaign = campaign.trim().substring(0, 100) || null;

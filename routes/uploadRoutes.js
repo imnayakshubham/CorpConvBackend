@@ -7,6 +7,7 @@ const {
     deleteFile,
     handleMulterError
 } = require("../controllers/uploadController");
+const { uploadLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
 
@@ -14,6 +15,7 @@ const router = express.Router();
 router.post(
     "/survey-file",
     protect,
+    uploadLimiter,
     upload.single('file'),
     handleMulterError,
     uploadSingleFile
@@ -23,6 +25,7 @@ router.post(
 router.post(
     "/survey-files",
     protect,
+    uploadLimiter,
     upload.array('files', 5),
     handleMulterError,
     uploadMultipleFiles

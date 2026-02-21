@@ -2,6 +2,7 @@ const QuestionModel = require("../models/questionModel")
 const { getIo } = require("../utils/socketManger")
 const cache = require("../redisClient/cacheHelper")
 const TTL = require("../redisClient/cacheTTL")
+const escapeRegex = require("../utils/escapeRegex")
 
 
 
@@ -79,7 +80,7 @@ const getquestions = async (req, res) => {
 
         // Search: case-insensitive regex
         if (search.trim()) {
-            query.question = { $regex: search.trim(), $options: 'i' };
+            query.question = { $regex: escapeRegex(search.trim()), $options: 'i' };
         }
 
         // Cursor pagination (for newest/oldest)

@@ -6,10 +6,16 @@ const notFound = (req, res, next) => {
 
 const errorHandler = (err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-  res.status(statusCode);
-  res.json({
-    message: err.message,
-    stack: process.env.NODE_ENV === "production" ? null : err.stack,
+
+  // Log full error to console for debugging
+  console.error(err.stack || err.message);
+
+  res.status(statusCode).json({
+    status: 'Failed',
+    message: process.env.NODE_ENV === 'production'
+      ? 'Something went wrong'
+      : err.message,
+    data: null,
   });
 };
 

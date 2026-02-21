@@ -4,6 +4,7 @@ const { populateChildComments } = require("../utils/utils");
 const { getIo } = require("../utils/socketManger");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
+const { stripAllHtml } = require("../utils/sanitize");
 
 
 
@@ -15,7 +16,7 @@ const postComments = async (req, res) => {
 
         // Create a new comment
         const newComment = await Comment.create({
-            comment,
+            comment: stripAllHtml(comment),
             commented_by,
             post_id,
             parent_comment_id,
@@ -61,7 +62,7 @@ const postReplyComments = async (req, res) => {
 
         // Create a new comment as a reply
         const newComment = await Comment.create({
-            comment,
+            comment: stripAllHtml(comment),
             commented_by,
             post_id,
             parent_comment_id,
@@ -179,7 +180,7 @@ const updateComment = async (req, res) => {
         const comment_id = req.params.comment_id;
         const { comment } = req.body;
 
-        const updatedComment = await Comment.findByIdAndUpdate(comment_id, { comment }, { new: true });
+        const updatedComment = await Comment.findByIdAndUpdate(comment_id, { comment: stripAllHtml(comment) }, { new: true });
 
         res.json(updatedComment);
     } catch (error) {

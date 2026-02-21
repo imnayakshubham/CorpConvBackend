@@ -5,6 +5,7 @@ const { getIo } = require("../utils/socketManger");
 const { populateChildComments } = require("../utils/utils");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
+const { sanitizeRichText } = require("../utils/sanitize");
 
 
 const createPost = async (req, res) => {
@@ -12,7 +13,7 @@ const createPost = async (req, res) => {
 
         const postPayload = {
             category: req.body.category,
-            content: req.body.content,
+            content: sanitizeRichText(req.body.content),
             posted_by: req.user._id,
         }
 
@@ -73,7 +74,7 @@ const updatePost = async (req, res) => {
     try {
         const post = await Post.findOne({ _id: req.body._id });
         if (post) {
-            const postData = await Post.findByIdAndUpdate(req.body._id, { content: req.body.content, category: req.body.category }, { new: true }).populate("posted_by", "public_user_name is_email_verified avatar_config").populate({
+            const postData = await Post.findByIdAndUpdate(req.body._id, { content: sanitizeRichText(req.body.content), category: req.body.category }, { new: true }).populate("posted_by", "public_user_name is_email_verified avatar_config").populate({
                 path: 'comments',
                 match: { access: { $ne: false } },
             });

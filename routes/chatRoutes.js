@@ -8,15 +8,22 @@ const {
   renameGroup,
 } = require("../controllers/chatControllers");
 const { protect } = require("../middleware/authMiddleware");
+const validate = require("../middleware/validate");
+const {
+  accessChatBody,
+  createGroupChatBody,
+  renameGroupBody,
+  groupMemberBody,
+} = require("../validators/chatSchemas");
 
 const router = express.Router();
 
-router.route("/").post(protect, accessChat);
-router.route("/chat-list").get(protect, fetchChats)
+router.route("/").post(protect, validate({ body: accessChatBody }), accessChat);
+router.route("/chat-list").get(protect, fetchChats);
 
-router.route("/group").post(protect, createGroupChat);
-router.route("/rename").put(protect, renameGroup);
-router.route("/groupremove").put(protect, removeFromGroup);
-router.route("/groupadd").put(protect, addToGroup);
+router.route("/group").post(protect, validate({ body: createGroupChatBody }), createGroupChat);
+router.route("/rename").put(protect, validate({ body: renameGroupBody }), renameGroup);
+router.route("/groupremove").put(protect, validate({ body: groupMemberBody }), removeFromGroup);
+router.route("/groupadd").put(protect, validate({ body: groupMemberBody }), addToGroup);
 
 module.exports = router;

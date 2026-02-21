@@ -8,6 +8,7 @@ const Notifications = require("../models/notificationModel");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
+const escapeRegex = require("../utils/escapeRegex");
 
 
 
@@ -16,8 +17,8 @@ const allUsers = asyncHandler(async (req, res) => {
   try {
     const keyword = req.query.search ? {
       $or: [
-        { public_user_name: { $regex: req.query.search, $options: "i" } },
-        { user_current_company_name: { $regex: req.query.search, $options: "i" } }
+        { public_user_name: { $regex: escapeRegex(req.query.search), $options: "i" } },
+        { user_current_company_name: { $regex: escapeRegex(req.query.search), $options: "i" } }
       ],
     }
       : {};
@@ -26,7 +27,7 @@ const allUsers = asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.log({ error })
-    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
   }
 });
 
@@ -49,8 +50,8 @@ const getfollowersList = async (req, res) => {
     const followersMatchingSearch = await User.find({
       _id: { $in: followerIds },
       $or: [
-        { "public_user_name": { $regex: new RegExp(searchTerm, "i") } },
-        { "user_current_company_name": { $regex: new RegExp(searchTerm, "i") } }
+        { "public_user_name": { $regex: new RegExp(escapeRegex(searchTerm), "i") } },
+        { "user_current_company_name": { $regex: new RegExp(escapeRegex(searchTerm), "i") } }
       ]
     }, { public_user_name: 1, user_current_company_name: 1 });
 
@@ -88,7 +89,7 @@ const authUser = async (req, res) => {
   try {
 
     if (!user_email_id) {
-      return res.status(200).json({ message: "Please Fill all the details", status: "Failed" });
+      return res.status(400).json({ message: "Please Fill all the details", status: "Failed" });
     }
     const userData = await User.findOne({
       $or: [
@@ -125,7 +126,14 @@ const authUser = async (req, res) => {
       }
       const user_current_company_name = !["example", "gmail", "outlook"].includes(domain) ? toTitleCase(domain) : "Somewhere"
       const data = {
-        ...req.body,
+        user_email_id: req.body.user_email_id,
+        actual_user_name: req.body.actual_user_name,
+        user_job_role: req.body.user_job_role,
+        user_job_experience: req.body.user_job_experience,
+        user_bio: req.body.user_bio,
+        user_location: req.body.user_location,
+        provider: req.body.provider,
+        providerId: req.body.providerId,
         is_email_verified: !["example", "gmail", "outlook"].includes(domain) ? true : false,
         is_anonymous: true,
         user_current_company_name,
@@ -149,7 +157,7 @@ const authUser = async (req, res) => {
     }
   } catch (error) {
     console.log({ error })
-    return res.status(200).json({ message: error, status: "Failed" });
+    return res.status(500).json({ message: "Registration failed", status: "Failed" });
   }
 };
 
@@ -166,44 +174,53 @@ const logout = async (req, res) => {
       res.clearCookie(tokenkeyName, cookieOptions);
       return res.status(200).json({ message: "Logged Out", status: "Success" })
     } else {
-      return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+      return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
-    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
 
   }
 }
 
 const updateUserProfile = async (req, res) => {
   try {
+    const userId = req.user._id;
 
-    const UserInfo = await User.findOne({ _id: req.body._id })
+    const UserInfo = await User.findOne({ _id: userId })
     if (!UserInfo) {
-      return res.status(200).json({ message: "No User Exist", status: "Failed", })
+      return res.status(404).json({ message: "No User Exist", status: "Failed", })
     }
 
+    // Allowlisted fields only
+    const allowedFields = {};
+    if (req.body.user_job_role !== undefined) allowedFields.user_job_role = req.body.user_job_role;
+    if (req.body.user_job_experience !== undefined) allowedFields.user_job_experience = req.body.user_job_experience;
+    if (req.body.user_bio !== undefined) allowedFields.user_bio = req.body.user_bio;
+    if (req.body.user_location !== undefined) allowedFields.user_location = req.body.user_location;
+    if (req.body.secondary_email_id !== undefined) allowedFields.secondary_email_id = req.body.secondary_email_id;
+
+    if (allowedFields.user_job_role) {
+      allowedFields.public_user_name = `${toTitleCase(allowedFields.user_job_role)} @ ${UserInfo.user_current_company_name}`;
+    }
 
     const updateOperation = {
-      $set: {
-        ...req.body,
-        public_user_name: `${toTitleCase(req.body.user_job_role)} @ ${UserInfo.user_current_company_name}`
-      },
+      $set: allowedFields,
     };
 
     // Invalidate user cache
-    const userInfoCacheKey = cache.generateKey('user', 'info', req.body._id);
+    const userInfoCacheKey = cache.generateKey('user', 'info', userId);
     await cache.del(userInfoCacheKey);
 
-    const updatedData = await User.updateOne({ _id: req.body._id }, updateOperation)
+    const updatedData = await User.updateOne({ _id: userId }, updateOperation)
     if (updatedData) {
       return res.status(200).json({
-        message: "Your Profile has been Updated Successfully", status: "Success", result: updateOperation["$set"]
+        message: "Your Profile has been Updated Successfully", status: "Success", result: allowedFields
       })
     } else {
-      return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+      return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
     }
   } catch (error) {
-    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
 
@@ -211,7 +228,7 @@ const getUserInfo = async (req, res) => {
   try {
     const userId = req.params?.id
     if (!userId) {
-      return res.status(200).json({ message: "Unable to find User...", status: "Failed", })
+      return res.status(400).json({ message: "Unable to find User...", status: "Failed", })
     }
 
     // Try to get from cache
@@ -238,7 +255,7 @@ const getUserInfo = async (req, res) => {
     }
 
   } catch (error) {
-    return res.status(200).json({ message: "Something went Wrong", status: "Failed", })
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed", })
   }
 }
 
@@ -307,12 +324,12 @@ const fetchUsers = async (req, res) => {
         });
       return res.status(200).json({ message: "Invitations Fetched SuccessFully", status: "Success", result: fetchUsersPayloadFormatter(payload.type, followings?.[payload.type] ?? []) })
     } else {
-      return res.status(200).json({ message: "Invalid Operations", status: "Failed", result: fetchUsersPayloadFormatter(payload.type, []) })
+      return res.status(400).json({ message: "Invalid Operations", status: "Failed", result: fetchUsersPayloadFormatter(payload.type, []) })
     }
 
   } catch (error) {
     console.log({ error })
-    return res.status(200).json({ message: "Something went Wrong", status: "Failed", result: [] })
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed", result: [] })
   }
 }
 
