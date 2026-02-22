@@ -2,22 +2,27 @@ const express = require("express");
 const { Survey } = require("../models/surveyModel");
 const User = require("../models/userModel");
 const QuestionModel = require("../models/questionModel")
+const Post = require("../models/postModel")
 
 const router = express.Router();
 
 const listData = async (req, res) => {
     try {
-        const surveys = await Survey.find({ access: true, status: "published" }).select("_id")
-        const users = await User.find({ access: true }).select("_id")
-        const questions = await QuestionModel.find({ access: true }).select("_id")
+        const [surveys, users, questions, posts] = await Promise.all([
+            Survey.find({ access: true, status: "published" }).select("_id createdAt"),
+            User.find({ access: true }).select("_id createdAt"),
+            QuestionModel.find({ access: true }).select("_id createdAt"),
+            Post.find({}).select("_id createdAt"),
+        ]);
 
-        const allSurveys = surveys.map((survey) => `survey/${survey._id}`)
-        const allUsers = users.map((user) => `user/${user._id}`)
-        const allQuestions = questions.map((question) => `answerlink/question/${question._id}`)
+        const allSurveys = surveys.map((s) => ({ path: `survey/${s._id}`, lastModified: s.createdAt }))
+        const allUsers = users.map((u) => ({ path: `user/${u._id}`, lastModified: u.createdAt }))
+        const allQuestions = questions.map((q) => ({ path: `answerlink/question/${q._id}`, lastModified: q.createdAt }))
+        const allPosts = posts.map((p) => ({ path: `post/${p._id}`, lastModified: p.createdAt }))
 
         return res.status(200).json({
             status: 'Success',
-            data: [...(allSurveys ?? []), ...(allUsers ?? []), ...(allQuestions ?? [])],
+            data: [...allSurveys, ...allUsers, ...allQuestions, ...allPosts],
             message: 'retrieved successfully'
         });
     } catch (error) {
