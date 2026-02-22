@@ -142,7 +142,7 @@ app.get("/r/:slug", redirectAndTrack);
 
 app.get("/", (req, res) => {
   if (isProd) {
-    res.redirect(process.env.FRONTEND_URL || "http://localhost:3000")
+    res.redirect(process.env.FRONTEND_URL || "http://localhost:3005")
 
   } else {
     res.send(`Hushwork Now is live @ ${process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS[0]}`)
