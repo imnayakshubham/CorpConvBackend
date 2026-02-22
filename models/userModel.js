@@ -67,8 +67,7 @@ const userSchema = mongoose.Schema({
   user_email_id: {
     type: String,
     trim: true,
-    unique: true,
-    required: [true, "Email is required"],
+    index: { unique: true, sparse: true },
   },
   is_email_verified: {
     type: Boolean,
