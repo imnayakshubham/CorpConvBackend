@@ -25,6 +25,7 @@ const getAuth = async () => {
         console.log("[Better Auth] Initializing with allowedOrigins:", allowedOrigins, process.env.GOOGLE_REDIRECT_URI);
 
         _auth = betterAuth({
+            baseURL: process.env.BETTER_AUTH_URL,
             database: mongodbAdapter(mongoose.connection.db),
             appName: "hushwork",
             trustedOrigins: allowedOrigins,
@@ -39,10 +40,6 @@ const getAuth = async () => {
                     image: "actual_profile_pic"
                 },
                 additionalFields: {
-                    actual_user_name: {
-                        type: "string",
-                        defaultValue: null,
-                    },
                     public_user_name: {
                         type: "string",
                         defaultValue: "Someone"
@@ -71,10 +68,6 @@ const getAuth = async () => {
                         type: "boolean",
                         defaultValue: false,
                     },
-                    actual_profile_pic: {
-                        type: "string",
-                        defaultValue: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
-                    },
                     user_public_profile_pic: {
                         type: "string",
                         defaultValue: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
@@ -87,17 +80,9 @@ const getAuth = async () => {
                         type: "string",
                         defaultValue: null
                     },
-                    user_phone_number: {
-                        type: "number",
-                        defaultValue: null
-                    },
                     is_anonymous: {
                         type: "boolean",
                         defaultValue: true,
-                    },
-                    user_email_id: {
-                        type: "string",
-                        defaultValue: null,
                     },
                     access: {
                         type: "boolean",
@@ -240,7 +225,7 @@ const getAuth = async () => {
             },
 
             advanced: {
-                useSecureCookies: true,          // always Secure
+                useSecureCookies: process.env.APP_ENV === 'PROD',
                 database: {
                     idField: "_id",
                 },
@@ -256,12 +241,20 @@ const getAuth = async () => {
                         }
                     },
                 },
+                crossSubDomainCookies: {
+                    enabled: process.env.APP_ENV === 'PROD',
+                    domain: process.env.APP_ENV === 'PROD' && process.env.FRONTEND_URL
+                        ? `.${new URL(process.env.FRONTEND_URL).hostname.replace(/^www\./, '')}`
+                        : undefined,
+                },
             },
             plugins: [
                 passkey({
-                    rpID: process.env.APP_ENV === 'PROD' ? 'hushwork.vercel.app' : 'localhost',
+                    rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',
-                    origin: process.env.FRONTEND_URL,
+                    origin: process.env.APP_ENV === 'PROD'
+                        ? 'https://www.hushworknow.com'
+                        : 'http://localhost:3005',
                 }),
                 customSession(async ({ user, session }) => {
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
