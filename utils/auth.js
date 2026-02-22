@@ -255,19 +255,13 @@ const getAuth = async () => {
                             path: '/',
                         }
                     },
-                    crossSubDomainCookies: {
-                        enabled: true,
-                        domain: process.env.FRONTEND_URL,
-                    },
                 },
             },
             plugins: [
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushwork.vercel.app' : 'localhost',
                     rpName: 'Hushwork',
-                    origin: process.env.APP_ENV === 'PROD'
-                        ? 'https://hushwork.vercel.app'
-                        : 'http://localhost:3005',
+                    origin: process.env.FRONTEND_URL,
                 }),
                 customSession(async ({ user, session }) => {
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
