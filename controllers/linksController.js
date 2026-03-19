@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const Link = require('../models/linkModel');
+const ActivityEvent = require('../models/activityEventModel');
 const Category = require('../models/categoryModel');
 const Click = require('../models/clickModel');
 const Referral = require('../models/referralModel');
@@ -272,6 +273,7 @@ const createLink = asyncHandler(async (req, res) => {
         if (linkData) {
             const io = getIo();
             io.emit('listen_link_creation', linkData);
+            ActivityEvent.create({ userId: req.user._id, eventType: 'link_created' }).catch(() => {});
 
             return res.status(201).json({
                 status: 'Success',

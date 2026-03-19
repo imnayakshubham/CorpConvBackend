@@ -10,13 +10,14 @@ const {
   surveySubmissionBody,
   listSurveysQuery,
   surveyIdParam,
+  tagsQuery,
 } = require("../validators/surveySchemas");
 
 const router = express.Router();
 
 router.route("/create-survey").post(protect, validate({ body: createSurveyBody }), createSurvey);
 router.route("/survey-list").get(optionalAuth, validate({ query: listSurveysQuery }), listSurveys);
-router.route("/tags").get(getAvailableTags);
+router.route("/tags").get(validate({ query: tagsQuery }), getAvailableTags);
 router.route("/:id").delete(protect, validate({ params: surveyIdParam }), archiveSurvey);
 router.route("/unpublish/:id").put(protect, validate({ params: surveyIdParam }), unpublishSurvey);
 router.route("/edit/:id").put(protect, validate({ params: surveyIdParam, body: editSurveyBody }), editSurvey);

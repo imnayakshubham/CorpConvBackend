@@ -1,4 +1,5 @@
 const QuestionModel = require("../models/questionModel")
+const ActivityEvent = require("../models/activityEventModel")
 const { getIo } = require("../utils/socketManger")
 const cache = require("../redisClient/cacheHelper")
 const TTL = require("../redisClient/cacheTTL")
@@ -21,6 +22,7 @@ const createquestion = async (req, res) => {
             );
             const io = getIo();
             io.to("questions_list").emit("new_question_created", populatedQuestion);
+            ActivityEvent.create({ userId: req.user._id, eventType: 'question_asked' }).catch(() => {});
 
             return res.status(201).json({
                 status: 'Success',

@@ -13,8 +13,10 @@ const getAuth = async () => {
         // Dynamic imports for ESM-only packages
         const { betterAuth } = await import("better-auth");
         const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-        const { customSession } = await import("better-auth/plugins");
+        const { customSession, admin } = await import("better-auth/plugins");
         const { passkey } = await import("@better-auth/passkey");
+
+        const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
 
         mongoose.connection.db.collection("verification").deleteMany({ id: null })
 
@@ -211,6 +213,22 @@ const getAuth = async () => {
                     qr_config: {
                         type: "object",
                         defaultValue: null
+                    },
+                    last_login_at: {
+                        type: "date",
+                        defaultValue: null
+                    },
+                    login_count: {
+                        type: "number",
+                        defaultValue: 0
+                    },
+                    usernameChangedAt: {
+                        type: "date",
+                        defaultValue: null
+                    },
+                    usernameHistory: {
+                        type: "object",
+                        defaultValue: []
                     }
                 }
             },
@@ -256,7 +274,17 @@ const getAuth = async () => {
                         ? 'https://www.hushworknow.com'
                         : 'http://localhost:3005',
                 }),
+                admin({
+                    defaultRole: "user",
+                    adminUserIds: superAdminIds,
+                }),
                 customSession(async ({ user, session }) => {
+                    const superAdminEmails = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+
+                    const isSuperAdmin =
+                        superAdminIds.includes(user?.id?.toString()) ||
+                        superAdminEmails.includes(user?.user_email_id);
+
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
                         if (projection[key] === 1) {
                             acc[key] = user[key]
@@ -265,9 +293,8 @@ const getAuth = async () => {
                     }, {})
 
                     return {
-                        user: userInfo,
+                        user: { ...userInfo, isSuperAdmin },
                         session,
-
                     }
                 })
             ]

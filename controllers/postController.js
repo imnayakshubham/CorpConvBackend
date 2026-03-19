@@ -1,4 +1,5 @@
 const Post = require("../models/postModel");
+const ActivityEvent = require("../models/activityEventModel");
 const Category = require("../models/categoryModel");
 const Comment = require("../models/commentModel");
 const { getIo } = require("../utils/socketManger");
@@ -45,6 +46,7 @@ const createPost = async (req, res) => {
 
             const io = getIo()
             io.emit('listen_post_creation', postData)
+            ActivityEvent.create({ userId: req.user._id, eventType: 'post_created' }).catch(() => {});
 
             return res.status(201).json({
                 status: 'Success',

@@ -16,6 +16,9 @@ const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const usernameRoutes = require("./routes/usernameRoutes");
+const { trackActivity } = require("./middleware/activityMiddleware");
 // Dynamic import for ESM-only better-auth/node
 let _toNodeHandler;
 const getToNodeHandler = async () => {
@@ -86,12 +89,19 @@ app.use(cors({
       callback(null, false);
     }
   },
-  methods: ["GET", "POST", "DELETE", "PUT"],
+  methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
   credentials: true,
   transports: ['websocket']
 }));
 
-app.use(helmet());
+app.use(helmet({
+  // API-only server: no HTML served, so CSP would have no effect and could
+  // interfere with the Better Auth handler. Disable it explicitly.
+  contentSecurityPolicy: false,
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+  referrerPolicy: { policy: 'no-referrer' },
+  // noSniff, frameguard, xssFilter remain on (helmet defaults).
+}));
 app.use(globalLimiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -120,16 +130,18 @@ app.all("/api/auth/*", async (req, res) => {
 });
 
 app.use("/api", userRoutes);
-app.use("/api/chat", chatRoutes);
-app.use("/api/message", messageRoutes);
-app.use("/api/link", linkRoutes);
-app.use("/api/post", postRoutes);
-app.use("/api/comment", commentRoutes);
-app.use("/api/question", questionRoutes);
-app.use("/api/survey", surveyRoutes);
+app.use("/api/chat", trackActivity, chatRoutes);
+app.use("/api/message", trackActivity, messageRoutes);
+app.use("/api/link", trackActivity, linkRoutes);
+app.use("/api/post", trackActivity, postRoutes);
+app.use("/api/comment", trackActivity, commentRoutes);
+app.use("/api/question", trackActivity, questionRoutes);
+app.use("/api/survey", trackActivity, surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/feedback", require("./routes/feedbackRoutes"));
+app.use("/api", adminRoutes);
+app.use("/api", usernameRoutes);
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));

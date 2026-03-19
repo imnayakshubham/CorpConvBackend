@@ -48,5 +48,9 @@
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.1",
     "react-email": "5.2.9"
+  },
+  "overrides": {
+    "form-data": ">=4.0.4",
+    "minimatch": ">=9.0.7"
   }
 }

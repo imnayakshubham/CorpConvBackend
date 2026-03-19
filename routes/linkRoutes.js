@@ -30,6 +30,7 @@ const {
     updateAffiliateLinkBody,
     fetchLinksQuery,
     linkIdParam,
+    categoriesQuery,
 } = require("../validators/linkSchemas");
 
 const router = express.Router();
@@ -39,7 +40,7 @@ router.route("/update").post(protect, validate({ body: updateLinkBody }), update
 router.route("/delete").post(protect, validate({ body: deleteLinkBody }), deleteLink);
 router.route("/like").post(protect, validate({ body: likeBookmarkBody }), likeDislikeLink);
 router.route("/bookmark").post(protect, validate({ body: likeBookmarkBody }), bookmarkLink);
-router.route("/categories").get(getCategories);
+router.route("/categories").get(validate({ query: categoriesQuery }), getCategories);
 
 // Analytics routes
 router.route("/track-view").post(trackingLimiter, validate({ body: trackBody }), trackLinkView);
