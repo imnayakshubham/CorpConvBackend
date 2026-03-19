@@ -5,13 +5,19 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "server": "nodemon index.js"
+    "server": "nodemon index.js",
+    "email:build": "email build --port 4000",
+    "email:dev": "email dev --port 4000",
+    "email:export": "email export --port 4000",
+    "email:send-bulk": "npx tsx scripts/sendBulkDomainUpdate.js"
   },
   "keywords": [],
   "author": "Nayak Shubham",
   "license": "ISC",
   "dependencies": {
     "@better-auth/passkey": "^1.4.17",
+    "@react-email/components": "1.0.8",
+    "@react-email/render": "^2.0.4",
     "@upstash/redis": "^1.34.0",
     "axios": "^1.6.7",
     "bcryptjs": "^2.4.3",
@@ -23,14 +29,24 @@
     "express": "^4.18.2",
     "express-async-handler": "^1.2.0",
     "express-rate-limit": "^8.2.1",
+    "googleapis": "^171.4.0",
     "helmet": "^8.1.0",
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.21.0",
     "multer": "^2.0.2",
+    "nodemailer": "^8.0.1",
     "nodemon": "^3.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "sanitize-html": "^2.17.1",
     "socket.io": "^4.7.3",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@react-email/preview-server": "5.2.9",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "react-email": "5.2.9"
   }
 }
