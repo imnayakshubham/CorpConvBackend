@@ -1,4 +1,4 @@
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 // ---------------------------------------------------------------------------
 // Shared handler factory — sets Retry-After + legacy X-RateLimit-* headers
@@ -95,7 +95,7 @@ const writeLimiter = rateLimit({
   max: WRITE_MAX,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
   handler: buildHandler('Too many write requests, please slow down.'),
 });
 
@@ -124,7 +124,7 @@ const usernameWriteLimiter = rateLimit({
   max: USERNAME_WRITE_MAX,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
   handler: buildHandler('Too many username change attempts, please try again later.'),
 });
 

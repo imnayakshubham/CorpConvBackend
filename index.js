@@ -18,6 +18,7 @@ const siteMapRoutes = require("./routes/siteMapRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const usernameRoutes = require("./routes/usernameRoutes");
+const bentoRoutes = require("./routes/bentoRoutes");
 const { trackActivity } = require("./middleware/activityMiddleware");
 // Dynamic import for ESM-only better-auth/node
 let _toNodeHandler;
@@ -141,6 +142,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/feedback", require("./routes/feedbackRoutes"));
 app.use("/api", adminRoutes);
 app.use("/api", usernameRoutes);
+app.use("/api/bento", trackActivity, bentoRoutes);
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));

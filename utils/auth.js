@@ -234,6 +234,10 @@ const getAuth = async () => {
                     usernameHistory: {
                         type: "object",
                         defaultValue: []
+                    },
+                    username: {
+                        type: "string",
+                        defaultValue: null,
                     }
                 }
             },

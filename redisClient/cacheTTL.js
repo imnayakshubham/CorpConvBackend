@@ -18,4 +18,5 @@ module.exports = {
     ADMIN_PLATFORM_STATS: 300,    // 5 minutes
     ADMIN_ACTIVE_USERS: 300,      // 5 minutes
     ADMIN_TRENDS: 300,            // 5 minutes
+    BENTO_PROFILE: 7200,           // 2 hours
 };
