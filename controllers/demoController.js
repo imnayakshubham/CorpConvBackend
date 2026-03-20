@@ -79,10 +79,21 @@ const getDemoData = asyncHandler(async (req, res) => {
 });
 
 const updateDemoData = asyncHandler(async (req, res) => {
-  const { layouts, itemUpdates } = req.body;
+  const { layouts, itemUpdates, deletedItems, addedItems, profile } = req.body;
+
+  if (profile) {
+    inMemoryDemoState.profile = { ...inMemoryDemoState.profile, ...profile };
+  }
+
+  if (addedItems && Array.isArray(addedItems)) {
+    inMemoryDemoState.bentoItems = [...inMemoryDemoState.bentoItems, ...addedItems];
+  }
+
+  if (deletedItems && Array.isArray(deletedItems)) {
+    inMemoryDemoState.bentoItems = inMemoryDemoState.bentoItems.filter(i => !deletedItems.includes(i.id));
+  }
 
   if (layouts && Array.isArray(layouts)) {
-    // Merge the layouts into the existing bentoItems
     inMemoryDemoState.bentoItems = inMemoryDemoState.bentoItems.map((item) => {
       const updatedLayoutForIt = layouts.find(l => l.i === item.id);
       if (updatedLayoutForIt) {
@@ -105,7 +116,8 @@ const updateDemoData = asyncHandler(async (req, res) => {
     inMemoryDemoState.bentoItems = inMemoryDemoState.bentoItems.map((item) => {
       const update = itemUpdates.find(u => u.id === item.id);
       if (update) {
-        return { ...item, text: update.text }; // Safe overwrite of content
+        // Safe overwrite of ALL updated fields (url, bgColor, text, name, etc.)
+        return { ...item, ...update }; 
       }
       return item;
     });
