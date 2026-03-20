@@ -143,6 +143,7 @@ app.use("/api/feedback", require("./routes/feedbackRoutes"));
 app.use("/api", adminRoutes);
 app.use("/api", usernameRoutes);
 app.use("/api/bento", trackActivity, bentoRoutes);
+app.use("/api/demo", require("./routes/demoRoutes"));
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
