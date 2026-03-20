@@ -67,7 +67,6 @@ async function invalidateQuestionsListCache() {
   await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
 }
 
-connectDB();
 const { getAuth } = require("./utils/auth");
 const app = express();
 
@@ -170,26 +169,26 @@ function generateRandomUserId() {
 app.use(notFound);
 app.use(errorHandler);
 
-const PORT = process.env.PORT;
-const server = app.listen(
-  PORT,
-  console.log(`Server running on PORT ${PORT}...`.yellow.bold)
-);
-initializeSocket(server);
+async function startServer() {
+  await connectDB();
+  require('./utils/slackService').init();
 
-
-const redis = getRedisInstance();
-if (redis) {
-  redis.ping().then(() => {
-    console.log('Redis ping successful');
-  }).catch((err) => {
-    console.warn('Redis ping failed, continuing without Redis cache features.');
+  const PORT = process.env.PORT;
+  const server = app.listen(PORT, () => {
+    console.log(`Server running on PORT ${PORT}...`.yellow.bold);
   });
-}
+  initializeSocket(server);
 
-const io = getIo()
+  const redis = getRedisInstance();
+  if (redis) {
+    redis.ping()
+      .then(() => console.log('Redis ping successful'))
+      .catch(() => console.warn('Redis ping failed, continuing without Redis cache features.'));
+  }
 
-io.on("connection", (socket) => {
+  const io = getIo();
+
+  io.on("connection", (socket) => {
   let currentActiveChat = null
   console.log("Connected to socket.io");
   socket.on("setup", (userData) => {
@@ -541,4 +540,10 @@ io.on("connection", (socket) => {
     console.log("USER DISCONNECTED");
     socket.leave(userData._id);
   });
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

@@ -10,6 +10,8 @@ const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 const escapeRegex = require("../utils/escapeRegex");
+const { stripAllHtml } = require("../utils/sanitize");
+const eventBus = require("../utils/eventBus");
 
 
 
@@ -102,6 +104,7 @@ const authUser = async (req, res) => {
     if (userData) {
       User.updateOne({ _id: userData._id }, { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } }).catch(() => {});
       ActivityEvent.create({ userId: userData._id, eventType: 'login' }).catch(() => {});
+      eventBus.emit('user:login', userData);
 
       const token = generateToken(userData._id)
 
@@ -150,6 +153,7 @@ const authUser = async (req, res) => {
       }
       const user = await new User(data);
       const result = await user.save();
+      eventBus.emit('user:signup', result);
       const token = generateToken(result._id)
 
       res.cookie(tokenkeyName, token, cookieOptions);
@@ -204,6 +208,10 @@ const updateUserProfile = async (req, res) => {
     if (req.body.user_bio !== undefined) allowedFields.user_bio = req.body.user_bio;
     if (req.body.user_location !== undefined) allowedFields.user_location = req.body.user_location;
     if (req.body.secondary_email_id !== undefined) allowedFields.secondary_email_id = req.body.secondary_email_id;
+
+    if (allowedFields.user_bio != null) {
+      allowedFields.user_bio = stripAllHtml(allowedFields.user_bio);
+    }
 
     if (allowedFields.user_job_role) {
       allowedFields.public_user_name = `${toTitleCase(allowedFields.user_job_role)} @ ${UserInfo.user_current_company_name}`;

@@ -6,8 +6,13 @@ let _auth;
 
 const getAuth = async () => {
     if (!_auth) {
-        if (!mongoose.connection.db) {
+        if (mongoose.connection.readyState !== 1) {
             throw new Error("Database not connected yet. Cannot initialize Better Auth.");
+        }
+        // Ensure mongoose.connection.db is available (Mongoose 8.x timing)
+        const db = mongoose.connection.db || await mongoose.connection.asPromise().then(() => mongoose.connection.db);
+        if (!db) {
+            throw new Error("Database connection established but db instance not available.");
         }
 
         // Dynamic imports for ESM-only packages
@@ -18,7 +23,7 @@ const getAuth = async () => {
 
         const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
 
-        mongoose.connection.db.collection("verification").deleteMany({ id: null })
+        db.collection("verification").deleteMany({ id: null })
 
 
         // Parse ALLOW_ORIGIN from env
@@ -28,7 +33,7 @@ const getAuth = async () => {
 
         _auth = betterAuth({
             baseURL: process.env.BETTER_AUTH_URL,
-            database: mongodbAdapter(mongoose.connection.db),
+            database: mongodbAdapter(db),
             appName: "hushwork",
             trustedOrigins: allowedOrigins,
             user: {
@@ -266,7 +271,17 @@ const getAuth = async () => {
                         : undefined,
                 },
             },
-            plugins: [
+            databaseHooks: {
+            user: {
+                create: {
+                    after: async (user) => {
+                        const eventBus = require('./eventBus');
+                        eventBus.emit('user:signup', user);
+                    },
+                },
+            },
+        },
+        plugins: [
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',
