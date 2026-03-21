@@ -19,7 +19,7 @@
     "@react-email/components": "1.0.8",
     "@react-email/render": "^2.0.4",
     "@upstash/redis": "^1.34.0",
-    "axios": "^1.6.7",
+    "axios": "^1.13.6",
     "bcryptjs": "^2.4.3",
     "better-auth": "^1.4.10",
     "cheerio": "^1.0.0-rc.12",
@@ -40,7 +40,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sanitize-html": "^2.17.1",
-    "socket.io": "^4.7.3",
+    "socket.io": "^4.8.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -52,6 +52,8 @@
   "overrides": {
     "form-data": ">=4.0.4",
     "minimatch": ">=9.0.7",
+    "socket.io-parser": ">=4.2.6",
+    "kysely": ">=0.28.14",
     "nodemon": {
       "minimatch": "^3.1.2"
     }
