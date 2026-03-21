@@ -1,6 +1,29 @@
 /**
+ * Recursively removes prototype-pollution keys (__proto__, constructor, prototype)
+ * from plain objects and arrays before Zod parsing.
+ * Applied to req.body only (query/params are strings and not vulnerable).
+ *
+ * OWASP API3 — prevents deeply nested JSON payloads from poisoning Object.prototype.
+ */
+function sanitizeBody(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeBody);
+  }
+  if (value !== null && typeof value === 'object') {
+    const clean = {};
+    for (const key of Object.keys(value)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      clean[key] = sanitizeBody(value[key]);
+    }
+    return clean;
+  }
+  return value;
+}
+
+/**
  * Validation middleware factory.
  * Validates req.body, req.query, and/or req.params against Zod schemas.
+ * Sanitizes req.body against prototype pollution before parsing.
  *
  * @param {{ body?: ZodSchema, query?: ZodSchema, params?: ZodSchema }} schemas
  * @returns Express middleware
@@ -10,7 +33,7 @@ const validate = (schemas) => {
     const errors = {};
 
     if (schemas.body) {
-      const result = schemas.body.safeParse(req.body);
+      const result = schemas.body.safeParse(sanitizeBody(req.body));
       if (!result.success) {
         errors.body = formatZodErrors(result.error);
       } else {

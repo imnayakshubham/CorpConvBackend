@@ -16,7 +16,8 @@ const {
   updateAvatarConfig,
   updateQRConfig,
   trackProfileView,
-  getUserAnalytics
+  getUserAnalytics,
+  getUserByUsername
 } = require("../controllers/userControllers");
 const { protect, optionalAuth } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -40,6 +41,8 @@ const router = express.Router();
 router.route("/user").get(protect, validate({ query: searchQuery }), allUsers);
 // Analytics routes (must be before /user/:id to avoid route conflict)
 router.route("/user/analytics").get(protect, getUserAnalytics);
+// Username lookup (must be before /user/:id to prevent "by-username" matching as an ID)
+router.route("/user/by-username/:username").get(getUserByUsername);
 router.route("/user/:id").get(validate({ params: userIdParam }), getUserInfo);
 router.route("/followers").get(protect, validate({ query: searchQuery }), getfollowersList);
 router.post("/auth", authLimiter, validate({ body: authUserBody }), authUser);

@@ -6,17 +6,24 @@ let _auth;
 
 const getAuth = async () => {
     if (!_auth) {
-        if (!mongoose.connection.db) {
+        if (mongoose.connection.readyState !== 1) {
             throw new Error("Database not connected yet. Cannot initialize Better Auth.");
+        }
+        // Ensure mongoose.connection.db is available (Mongoose 8.x timing)
+        const db = mongoose.connection.db || await mongoose.connection.asPromise().then(() => mongoose.connection.db);
+        if (!db) {
+            throw new Error("Database connection established but db instance not available.");
         }
 
         // Dynamic imports for ESM-only packages
         const { betterAuth } = await import("better-auth");
         const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-        const { customSession } = await import("better-auth/plugins");
+        const { customSession, admin } = await import("better-auth/plugins");
         const { passkey } = await import("@better-auth/passkey");
 
-        mongoose.connection.db.collection("verification").deleteMany({ id: null })
+        const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+
+        db.collection("verification").deleteMany({ id: null })
 
 
         // Parse ALLOW_ORIGIN from env
@@ -26,7 +33,7 @@ const getAuth = async () => {
 
         _auth = betterAuth({
             baseURL: process.env.BETTER_AUTH_URL,
-            database: mongodbAdapter(mongoose.connection.db),
+            database: mongodbAdapter(db),
             appName: "hushwork",
             trustedOrigins: allowedOrigins,
             user: {
@@ -211,6 +218,26 @@ const getAuth = async () => {
                     qr_config: {
                         type: "object",
                         defaultValue: null
+                    },
+                    last_login_at: {
+                        type: "date",
+                        defaultValue: null
+                    },
+                    login_count: {
+                        type: "number",
+                        defaultValue: 0
+                    },
+                    usernameChangedAt: {
+                        type: "date",
+                        defaultValue: null
+                    },
+                    usernameHistory: {
+                        type: "object",
+                        defaultValue: []
+                    },
+                    username: {
+                        type: "string",
+                        defaultValue: null,
                     }
                 }
             },
@@ -248,7 +275,17 @@ const getAuth = async () => {
                         : undefined,
                 },
             },
-            plugins: [
+            databaseHooks: {
+            user: {
+                create: {
+                    after: async (user) => {
+                        const eventBus = require('./eventBus');
+                        eventBus.emit('user:signup', user);
+                    },
+                },
+            },
+        },
+        plugins: [
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',
@@ -256,7 +293,17 @@ const getAuth = async () => {
                         ? 'https://www.hushworknow.com'
                         : 'http://localhost:3005',
                 }),
+                admin({
+                    defaultRole: "user",
+                    adminUserIds: superAdminIds,
+                }),
                 customSession(async ({ user, session }) => {
+                    const superAdminEmails = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+
+                    const isSuperAdmin =
+                        superAdminIds.includes(user?.id?.toString()) ||
+                        superAdminEmails.includes(user?.user_email_id);
+
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
                         if (projection[key] === 1) {
                             acc[key] = user[key]
@@ -265,9 +312,8 @@ const getAuth = async () => {
                     }, {})
 
                     return {
-                        user: userInfo,
+                        user: { ...userInfo, isSuperAdmin },
                         session,
-
                     }
                 })
             ]

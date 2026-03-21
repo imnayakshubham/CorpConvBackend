@@ -16,6 +16,10 @@ const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const usernameRoutes = require("./routes/usernameRoutes");
+const bentoRoutes = require("./routes/bentoRoutes");
+const { trackActivity } = require("./middleware/activityMiddleware");
 // Dynamic import for ESM-only better-auth/node
 let _toNodeHandler;
 const getToNodeHandler = async () => {
@@ -64,7 +68,6 @@ async function invalidateQuestionsListCache() {
   await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
 }
 
-connectDB();
 const { getAuth } = require("./utils/auth");
 const app = express();
 
@@ -86,12 +89,19 @@ app.use(cors({
       callback(null, false);
     }
   },
-  methods: ["GET", "POST", "DELETE", "PUT"],
+  methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
   credentials: true,
   transports: ['websocket']
 }));
 
-app.use(helmet());
+app.use(helmet({
+  // API-only server: no HTML served, so CSP would have no effect and could
+  // interfere with the Better Auth handler. Disable it explicitly.
+  contentSecurityPolicy: false,
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+  referrerPolicy: { policy: 'no-referrer' },
+  // noSniff, frameguard, xssFilter remain on (helmet defaults).
+}));
 app.use(globalLimiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -120,16 +130,20 @@ app.all("/api/auth/*", async (req, res) => {
 });
 
 app.use("/api", userRoutes);
-app.use("/api/chat", chatRoutes);
-app.use("/api/message", messageRoutes);
-app.use("/api/link", linkRoutes);
-app.use("/api/post", postRoutes);
-app.use("/api/comment", commentRoutes);
-app.use("/api/question", questionRoutes);
-app.use("/api/survey", surveyRoutes);
+app.use("/api/chat", trackActivity, chatRoutes);
+app.use("/api/message", trackActivity, messageRoutes);
+app.use("/api/link", trackActivity, linkRoutes);
+app.use("/api/post", trackActivity, postRoutes);
+app.use("/api/comment", trackActivity, commentRoutes);
+app.use("/api/question", trackActivity, questionRoutes);
+app.use("/api/survey", trackActivity, surveyRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/feedback", require("./routes/feedbackRoutes"));
+app.use("/api", adminRoutes);
+app.use("/api", usernameRoutes);
+app.use("/api/bento", trackActivity, bentoRoutes);
+app.use("/api/demo", require("./routes/demoRoutes"));
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
@@ -158,26 +172,26 @@ function generateRandomUserId() {
 app.use(notFound);
 app.use(errorHandler);
 
-const PORT = process.env.PORT;
-const server = app.listen(
-  PORT,
-  console.log(`Server running on PORT ${PORT}...`.yellow.bold)
-);
-initializeSocket(server);
+async function startServer() {
+  await connectDB();
+  require('./utils/slackService').init();
 
-
-const redis = getRedisInstance();
-if (redis) {
-  redis.ping().then(() => {
-    console.log('Redis ping successful');
-  }).catch((err) => {
-    console.warn('Redis ping failed, continuing without Redis cache features.');
+  const PORT = process.env.PORT;
+  const server = app.listen(PORT, () => {
+    console.log(`Server running on PORT ${PORT}...`.yellow.bold);
   });
-}
+  initializeSocket(server);
 
-const io = getIo()
+  const redis = getRedisInstance();
+  if (redis) {
+    redis.ping()
+      .then(() => console.log('Redis ping successful'))
+      .catch(() => console.warn('Redis ping failed, continuing without Redis cache features.'));
+  }
 
-io.on("connection", (socket) => {
+  const io = getIo();
+
+  io.on("connection", (socket) => {
   let currentActiveChat = null
   console.log("Connected to socket.io");
   socket.on("setup", (userData) => {
@@ -529,4 +543,10 @@ io.on("connection", (socket) => {
     console.log("USER DISCONNECTED");
     socket.leave(userData._id);
   });
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

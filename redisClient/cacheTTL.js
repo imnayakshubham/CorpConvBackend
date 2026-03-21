@@ -15,4 +15,10 @@ module.exports = {
     AFFILIATE_LINKS_LIST: 3600,   // 1 hour
     AFFILIATE_LINK_DETAIL: 7200,  // 2 hours
     AFFILIATE_ANALYTICS: 300,     // 5 minutes
+    ADMIN_PLATFORM_STATS: 300,    // 5 minutes
+    ADMIN_ACTIVE_USERS: 300,      // 5 minutes
+    ADMIN_TRENDS: 300,            // 5 minutes
+    BENTO_PROFILE: 7200,           // 2 hours
+    BENTO_PAGE_PROFILE: 7200,      // 2 hours
+    BENTO_PAGE_BLOCKS: 7200,       // 2 hours
 };

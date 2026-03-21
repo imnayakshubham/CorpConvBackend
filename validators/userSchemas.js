@@ -17,10 +17,10 @@ const authUserBody = z.object({
 const updateUserProfileBody = z.object({
   user_job_role: z.string().min(1).max(100),
   user_job_experience: z.number().int().min(0).max(100).optional(),
-  user_bio: z.string().max(500).optional(),
-  user_location: z.string().max(100).optional(),
-  secondary_email_id: z.string().email().optional(),
-}).strict();
+  user_bio: z.string().max(1000).nullable().optional(),
+  user_location: z.string().max(100).nullable().optional(),
+  secondary_email_id: z.string().email().nullable().optional(),
+});
 
 const fetchUsersBody = z.object({
   type: z.enum(['all_users', 'followers', 'pending_followings', 'followings']),

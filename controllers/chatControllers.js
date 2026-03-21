@@ -111,7 +111,12 @@ const createGroupChat = asyncHandler(async (req, res) => {
     return res.status(400).send({ message: "Please Fill all the feilds" });
   }
 
-  var users = JSON.parse(req.body.users);
+  let users;
+  try {
+    users = JSON.parse(req.body.users);
+  } catch {
+    return res.status(400).json({ status: 'Failed', message: 'Invalid users format', data: null });
+  }
 
   if (users.length < 2) {
     return res

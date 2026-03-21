@@ -226,7 +226,10 @@ const projection = {
     _id: 1,
     avatar_config: 1,
     qr_config: 1,
-    user_public_profile_pic: 1
+    user_public_profile_pic: 1,
+    username: 1,
+    usernameChangedAt: 1,
+    usernameHistory: 1,
 };
 
 

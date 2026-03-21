@@ -156,8 +156,40 @@ const userSchema = mongoose.Schema({
   profile_views: {
     type: Number,
     default: 0
-  }
-}, { timestaps: true });
+  },
+  lastLoginAt: {
+    type: Date,
+    default: null
+  },
+  loginCount: {
+    type: Number,
+    default: 0
+  },
+  lastActiveAt: {
+    type: Date,
+    default: null
+  },
+
+  // ---- @handle username (Instagram-style) ----
+  // Lowercase alphanumeric + dots + underscores, 3–30 chars.
+  // null = user has not chosen a username yet.
+  username: {
+    type: String,
+    default: null,
+    lowercase: true,
+    trim: true,
+    match: [/^[a-z0-9._]{3,30}$/, 'Invalid username format'],
+  },
+  usernameChangedAt: { type: Date, default: null },
+  usernameHistory: [{ username: String, changedAt: Date }],
+}, { timestamps: true });
+
+// Unique sparse index — sparse allows multiple documents with username: null
+// while still guaranteeing uniqueness for documents that DO have a username.
+userSchema.index(
+  { username: 1 },
+  { unique: true, sparse: true, name: 'username_unique_sparse' }
+);
 
 const User = mongoose.model("User", userSchema);
 

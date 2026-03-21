@@ -65,6 +65,9 @@ const slugParam = z.object({
   slug: z.string().min(1).max(50),
 });
 
+// No query params expected on /categories; unknown keys are silently stripped.
+const categoriesQuery = z.object({}).strip();
+
 module.exports = {
   createLinkBody,
   updateLinkBody,
@@ -76,4 +79,5 @@ module.exports = {
   fetchLinksQuery,
   linkIdParam,
   slugParam,
+  categoriesQuery,
 };

@@ -1,4 +1,5 @@
 const { Survey, Submission } = require("../models/surveyModel");
+const ActivityEvent = require("../models/activityEventModel");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const escapeRegex = require("../utils/escapeRegex");
@@ -29,6 +30,7 @@ const createSurvey = async (req, res) => {
 
 
         const savedSurvey = await newSurvey.save();
+        ActivityEvent.create({ userId: req.user._id, eventType: 'survey_created' }).catch(() => {});
 
         // Invalidate surveys list cache (all patterns)
         await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);

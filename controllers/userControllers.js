@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel");
+const ActivityEvent = require("../models/activityEventModel");
 const Company = require("../models/companySchema");
 const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
 const { default: mongoose } = require("mongoose");
@@ -9,6 +10,8 @@ const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
 const escapeRegex = require("../utils/escapeRegex");
+const { stripAllHtml } = require("../utils/sanitize");
+const eventBus = require("../utils/eventBus");
 
 
 
@@ -99,6 +102,9 @@ const authUser = async (req, res) => {
     });
 
     if (userData) {
+      User.updateOne({ _id: userData._id }, { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } }).catch(() => {});
+      ActivityEvent.create({ userId: userData._id, eventType: 'login' }).catch(() => {});
+      eventBus.emit('user:login', userData);
 
       const token = generateToken(userData._id)
 
@@ -112,7 +118,10 @@ const authUser = async (req, res) => {
       return res.status(200).json({ message: "email already exists!", status: "Success", result: responseFormatterForAuth(result) });
 
     } else {
-      const emailSplit = user_email_id.split("@")
+      const emailSplit = user_email_id.split("@");
+      if (emailSplit.length < 2 || !emailSplit[1]) {
+        return res.status(400).json({ message: 'Invalid email format', status: 'Failed' });
+      }
       const domain = emailSplit[1].split(".")[0]
       const companyExist = await Company.findOne({ company_name: toTitleCase(domain) });
       const companyId = companyExist && companyExist?.company_id ? companyExist?.company_id : new mongoose.Types.ObjectId()
@@ -144,6 +153,7 @@ const authUser = async (req, res) => {
       }
       const user = await new User(data);
       const result = await user.save();
+      eventBus.emit('user:signup', result);
       const token = generateToken(result._id)
 
       res.cookie(tokenkeyName, token, cookieOptions);
@@ -198,6 +208,10 @@ const updateUserProfile = async (req, res) => {
     if (req.body.user_bio !== undefined) allowedFields.user_bio = req.body.user_bio;
     if (req.body.user_location !== undefined) allowedFields.user_location = req.body.user_location;
     if (req.body.secondary_email_id !== undefined) allowedFields.secondary_email_id = req.body.secondary_email_id;
+
+    if (allowedFields.user_bio != null) {
+      allowedFields.user_bio = stripAllHtml(allowedFields.user_bio);
+    }
 
     if (allowedFields.user_job_role) {
       allowedFields.public_user_name = `${toTitleCase(allowedFields.user_job_role)} @ ${UserInfo.user_current_company_name}`;
@@ -809,4 +823,28 @@ const getUserAnalytics = async (req, res) => {
   }
 };
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics };
+const getUserByUsername = async (req, res) => {
+  try {
+    const username = req.params?.username?.toLowerCase()?.trim()
+    if (!username) return res.status(400).json({ message: "Username is required", status: "Failed" })
+
+    const cacheKey = cache.generateKey('user', 'by-username', username)
+    const cachedData = await cache.get(cacheKey)
+    if (cachedData !== undefined && cachedData !== null) {
+      return cachedData
+        ? res.status(200).json({ message: "User Profile Found (Cached)", status: "Success", result: cachedData })
+        : res.status(404).json({ message: "User not found", status: "Failed", result: null })
+    }
+
+    const user = await User.findOne({ username, access: true }, projection)
+    await cache.set(cacheKey, user ?? null, TTL.USER_PROFILE)
+
+    return user
+      ? res.status(200).json({ message: "User Profile Found", status: "Success", result: user })
+      : res.status(404).json({ message: "User not found", status: "Failed", result: null })
+  } catch {
+    return res.status(500).json({ message: "Something went Wrong", status: "Failed" })
+  }
+}
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics, getUserByUsername };

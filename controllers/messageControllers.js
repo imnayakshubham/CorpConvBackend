@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Message = require("../models/messageModel");
 const User = require("../models/userModel");
 const Chat = require("../models/chatModel");
+const ActivityEvent = require("../models/activityEventModel");
 
 const allMessages = asyncHandler(async (req, res) => {
   try {
@@ -60,6 +61,7 @@ const sendMessage = asyncHandler(async (req, res) => {
       select: "public_user_name user_job_experience user_current_company_name",
     });
 
+    ActivityEvent.create({ userId: req.user._id, eventType: 'message_sent' }).catch(() => {});
     await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message });
 
     await Chat.findByIdAndUpdate(
