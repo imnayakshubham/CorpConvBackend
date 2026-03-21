@@ -20,6 +20,7 @@ const updateUserProfileBody = z.object({
   user_bio: z.string().max(1000).nullable().optional(),
   user_location: z.string().max(100).nullable().optional(),
   secondary_email_id: z.string().email().nullable().optional(),
+  user_current_company_name: z.string().max(100).nullable().optional(),
 });
 
 const fetchUsersBody = z.object({

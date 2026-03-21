@@ -102,8 +102,8 @@ const authUser = async (req, res) => {
     });
 
     if (userData) {
-      User.updateOne({ _id: userData._id }, { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } }).catch(() => {});
-      ActivityEvent.create({ userId: userData._id, eventType: 'login' }).catch(() => {});
+      User.updateOne({ _id: userData._id }, { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } }).catch(() => { });
+      ActivityEvent.create({ userId: userData._id, eventType: 'login' }).catch(() => { });
       eventBus.emit('user:login', userData);
 
       const token = generateToken(userData._id)
@@ -209,12 +209,14 @@ const updateUserProfile = async (req, res) => {
     if (req.body.user_location !== undefined) allowedFields.user_location = req.body.user_location;
     if (req.body.secondary_email_id !== undefined) allowedFields.secondary_email_id = req.body.secondary_email_id;
 
+    if (req.body.user_current_company_name !== undefined) allowedFields.user_current_company_name = req.body.user_current_company_name;
+
     if (allowedFields.user_bio != null) {
       allowedFields.user_bio = stripAllHtml(allowedFields.user_bio);
     }
 
     if (allowedFields.user_job_role) {
-      allowedFields.public_user_name = `${toTitleCase(allowedFields.user_job_role)} @ ${UserInfo.user_current_company_name}`;
+      allowedFields.public_user_name = `${toTitleCase(allowedFields.user_job_role)} @ ${allowedFields.user_current_company_name}`;
     }
 
     const updateOperation = {
