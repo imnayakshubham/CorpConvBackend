@@ -19,4 +19,6 @@ module.exports = {
     ADMIN_ACTIVE_USERS: 300,      // 5 minutes
     ADMIN_TRENDS: 300,            // 5 minutes
     BENTO_PROFILE: 7200,           // 2 hours
+    BENTO_PAGE_PROFILE: 7200,      // 2 hours
+    BENTO_PAGE_BLOCKS: 7200,       // 2 hours
 };

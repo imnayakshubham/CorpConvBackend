@@ -7,14 +7,43 @@ const cache = require('../redisClient/cacheHelper');
 const TTL = require('../redisClient/cacheTTL');
 const { stripAllHtml } = require('../utils/sanitize');
 const { projection } = require('../constants');
+const { fetchLinkMetadata } = require('../utils/fetchLinkMetadata');
 
 const getBentoCacheKey = (username) => cache.generateKey('bento', 'profile', username);
+const getBentoPageBlocksCacheKey = (idOrUsername) => cache.generateKey('bento', 'page-blocks', idOrUsername);
+const getBentoPageProfileCacheKey = (idOrUsername) => cache.generateKey('bento', 'page-profile', idOrUsername);
 
 const invalidateBentoCache = async (userId) => {
     const user = await User.findById(userId).select('username').lean();
+    const keys = [];
     if (user?.username) {
-        await cache.del(getBentoCacheKey(user.username));
+        keys.push(getBentoCacheKey(user.username));
+        keys.push(getBentoPageBlocksCacheKey(user.username));
+        keys.push(getBentoPageProfileCacheKey(user.username));
     }
+    keys.push(getBentoPageBlocksCacheKey(userId.toString()));
+    keys.push(getBentoPageProfileCacheKey(userId.toString()));
+    if (keys.length) await cache.del(...keys);
+};
+
+// Reusable user resolution — extracted from getPublicProfile
+const resolveUser = async (idOrUsername) => {
+    const user = await User.findOne({
+        access: true,
+        $or: [{ _id: idOrUsername }, { username: idOrUsername }]
+    }, projection).lean();
+
+    if (user) return { user };
+
+    // Check released username → redirect
+    const released = await ReleasedUsername.findOne({ username: idOrUsername.toLowerCase() }).lean();
+    if (released) {
+        const newUser = await User.findById(released.releasedBy).select('username').lean();
+        if (newUser?.username) {
+            return { redirect: `/bento/${newUser.username}` };
+        }
+    }
+    return { notFound: true };
 };
 
 const getPublicProfile = asyncHandler(async (req, res) => {
@@ -31,40 +60,25 @@ const getPublicProfile = asyncHandler(async (req, res) => {
             });
         }
 
-        const user = await User.findOne({
-            access: true,
-            $or: [
-                { _id: username },
-                { username: username }
-            ]
-        }, projection).lean();
+        const result = await resolveUser(username);
 
-        if (!user) {
-            // Check if this was a previously released username → redirect
-            const released = await ReleasedUsername.findOne({ username: username.toLowerCase() }).lean();
-            if (released) {
-                const newUser = await User.findById(released.releasedBy).select('username').lean();
-                if (newUser?.username) {
-                    const publishedProfile = await BentoProfile.findOne({
-                        user_id: newUser._id,
-                        is_published: true,
-                    }).lean();
-                    if (publishedProfile) {
-                        return res.status(301).json({
-                            status: 'Redirect',
-                            redirect_to: `/bento/${newUser.username}`,
-                            message: 'Username changed, redirecting to new profile',
-                        });
-                    }
-                }
-            }
+        if (result.redirect) {
+            return res.status(301).json({
+                status: 'Redirect',
+                redirect_to: result.redirect,
+                message: 'Username changed, redirecting to new profile',
+            });
+        }
 
+        if (result.notFound) {
             return res.status(404).json({
                 status: 'Failed',
                 message: 'User not found',
                 data: null,
             });
         }
+
+        const { user } = result;
 
         const profile = await BentoProfile.findOne({
             user_id: user._id,
@@ -404,6 +418,364 @@ const reorderItems = asyncHandler(async (req, res) => {
     }
 });
 
+// --- Bento Page API ---
+
+const getBentoPageProfile = asyncHandler(async (req, res) => {
+    try {
+        const { id_or_username } = req.params;
+
+        const cacheKey = getBentoPageProfileCacheKey(id_or_username);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            const is_owner = req.user?._id?.toString() === cached.user?._id?.toString();
+            return res.status(200).json({
+                status: 'Success',
+                data: { ...cached, is_owner },
+                message: 'Bento page profile fetched successfully (Cached)',
+            });
+        }
+
+        const result = await resolveUser(id_or_username);
+
+        if (result.redirect) {
+            return res.status(301).json({
+                status: 'Redirect',
+                redirect_to: result.redirect,
+                message: 'Username changed, redirecting to new profile',
+            });
+        }
+
+        if (result.notFound) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'User not found',
+                data: null,
+            });
+        }
+
+        const { user } = result;
+        const is_owner = req.user?._id?.toString() === user._id.toString();
+
+        const responseData = { user };
+        await cache.set(cacheKey, responseData, TTL.BENTO_PAGE_PROFILE);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { ...responseData, is_owner },
+            message: 'Bento page profile fetched successfully',
+        });
+    } catch (error) {
+        console.log({ error });
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to fetch bento page profile',
+            data: null,
+        });
+    }
+});
+
+const listBentoBlocks = asyncHandler(async (req, res) => {
+    try {
+        const { id_or_username } = req.params;
+
+        const cacheKey = getBentoPageBlocksCacheKey(id_or_username);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            const is_owner = req.user?._id?.toString() === cached._userId?.toString();
+            return res.status(200).json({
+                status: 'Success',
+                data: { blocks: cached.blocks, vibe: cached.vibe, is_published: cached.is_published, is_owner },
+                message: 'Bento blocks fetched successfully (Cached)',
+            });
+        }
+
+        const result = await resolveUser(id_or_username);
+
+        if (result.redirect) {
+            return res.status(301).json({
+                status: 'Redirect',
+                redirect_to: result.redirect,
+                message: 'Username changed, redirecting to new profile',
+            });
+        }
+
+        if (result.notFound) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'User not found',
+                data: null,
+            });
+        }
+
+        const { user } = result;
+        const is_owner = req.user?._id?.toString() === user._id.toString();
+
+        const profile = await BentoProfile.findOne({ user_id: user._id }).lean();
+
+        let blocks = [];
+        let vibe = profile?.vibe || { theme: 'dark', font: 'font-sans', radius: 'rounded-[1.8rem]' };
+        let is_published = profile?.is_published || false;
+
+        if (is_owner) {
+            blocks = profile?.blocks || [];
+        } else {
+            if (!profile?.is_published) {
+                return res.status(404).json({
+                    status: 'Failed',
+                    message: 'Bento profile not found or not published',
+                    data: null,
+                });
+            }
+            blocks = profile.published_blocks?.length ? profile.published_blocks : profile.blocks || [];
+        }
+
+        // Sort by layout position
+        blocks.sort((a, b) => {
+            const ay = a.layout?.y ?? 0;
+            const by = b.layout?.y ?? 0;
+            if (ay !== by) return ay - by;
+            return (a.layout?.x ?? 0) - (b.layout?.x ?? 0);
+        });
+
+        const cacheData = { blocks, vibe, is_published, _userId: user._id.toString() };
+        await cache.set(cacheKey, cacheData, TTL.BENTO_PAGE_BLOCKS);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: { blocks, vibe, is_published, is_owner },
+            message: 'Bento blocks fetched successfully',
+        });
+    } catch (error) {
+        console.log({ error });
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to fetch bento blocks',
+            data: null,
+        });
+    }
+});
+
+// Sanitize text fields on a block object
+const sanitizeBlockTextFields = (block) => {
+    const textFields = ['title', 'subtitle', 'text_content', 'text', 'name', 'role', 'location'];
+    for (const field of textFields) {
+        if (block[field]) {
+            block[field] = stripAllHtml(block[field]);
+        }
+    }
+    return block;
+};
+
+// Fetch and attach link metadata if block is a link type with a URL
+const attachLinkMetadata = async (block) => {
+    if (block.block_type === 'link' && block.url) {
+        try {
+            const metadata = await fetchLinkMetadata(block.url);
+            block.link_metadata = {
+                meta_title: metadata.title || '',
+                meta_description: metadata.description || '',
+                meta_image: metadata.image || '',
+                favicon: metadata.favicon || '',
+            };
+        } catch {
+            // Metadata fetch failure is non-critical
+        }
+    }
+    return block;
+};
+
+const updateBentoBlocks = asyncHandler(async (req, res) => {
+    try {
+        const { id_or_username } = req.params;
+        const { addedItems, deletedItems, itemUpdates, layouts, vibe, is_published } = req.body;
+
+        // Resolve user and verify ownership
+        const result = await resolveUser(id_or_username);
+        if (result.notFound || result.redirect) {
+            return res.status(404).json({
+                status: 'Failed',
+                message: 'User not found',
+                data: null,
+            });
+        }
+
+        const { user } = result;
+        if (req.user._id.toString() !== user._id.toString()) {
+            return res.status(403).json({
+                status: 'Failed',
+                message: 'You can only edit your own bento profile',
+                data: null,
+            });
+        }
+
+        // Find or create profile
+        let profile = await BentoProfile.findOne({ user_id: user._id });
+        if (!profile) {
+            profile = await BentoProfile.create({ user_id: user._id, blocks: [], sections: [] });
+        }
+
+        // Apply operations in sequence
+
+        // 1. Add new blocks
+        if (addedItems?.length) {
+            if ((profile.blocks?.length || 0) + addedItems.length > 100) {
+                return res.status(400).json({
+                    status: 'Failed',
+                    message: 'Maximum 100 blocks allowed',
+                    data: null,
+                });
+            }
+
+            // Fetch link metadata in parallel (fire-and-forget pattern)
+            const processedItems = await Promise.allSettled(
+                addedItems.map(async (item) => {
+                    const sanitized = sanitizeBlockTextFields({ ...item });
+                    return attachLinkMetadata(sanitized);
+                })
+            );
+
+            for (const result of processedItems) {
+                if (result.status === 'fulfilled') {
+                    profile.blocks.push(result.value);
+                }
+            }
+        }
+
+        // 2. Delete blocks
+        if (deletedItems?.length) {
+            profile.blocks = profile.blocks.filter(
+                (b) => !deletedItems.includes(b._id.toString())
+            );
+        }
+
+        // 3. Apply layout updates
+        if (layouts?.length) {
+            for (const layoutUpdate of layouts) {
+                const block = profile.blocks.find(
+                    (b) => b._id.toString() === layoutUpdate.i
+                );
+                if (block) {
+                    if (!block.layout) {
+                        block.layout = { x: 0, y: 0, w: 4, h: 3, minW: 1, minH: 1 };
+                    }
+                    block.layout.x = layoutUpdate.x;
+                    block.layout.y = layoutUpdate.y;
+                    block.layout.w = layoutUpdate.w;
+                    block.layout.h = layoutUpdate.h;
+                }
+            }
+        }
+
+        // 4. Apply item updates
+        if (itemUpdates?.length) {
+            const metadataFetches = [];
+
+            for (const update of itemUpdates) {
+                const { id, ...updates } = update;
+                const block = profile.blocks.find(
+                    (b) => b._id.toString() === id
+                );
+                if (!block) continue;
+
+                // Check if URL changed on a link block
+                const urlChanged = block.block_type === 'link' && updates.url && updates.url !== block.url;
+
+                // Sanitize text fields in updates
+                sanitizeBlockTextFields(updates);
+
+                // Merge updates
+                for (const [key, value] of Object.entries(updates)) {
+                    block[key] = value;
+                }
+
+                // Re-fetch metadata if URL changed
+                if (urlChanged) {
+                    metadataFetches.push(attachLinkMetadata(block));
+                }
+            }
+
+            if (metadataFetches.length) {
+                await Promise.allSettled(metadataFetches);
+            }
+        }
+
+        // 5. Update vibe
+        if (vibe) {
+            if (!profile.vibe) {
+                profile.vibe = { theme: 'dark', font: 'font-sans', radius: 'rounded-[1.8rem]' };
+            }
+            if (vibe.theme !== undefined) profile.vibe.theme = vibe.theme;
+            if (vibe.font !== undefined) profile.vibe.font = vibe.font;
+            if (vibe.radius !== undefined) profile.vibe.radius = vibe.radius;
+        }
+
+        // 6. Publish
+        if (is_published === true) {
+            profile.published_blocks = [...profile.blocks];
+            profile.is_published = true;
+        }
+
+        // Increment version and save
+        profile.version = (profile.version || 0) + 1;
+        await profile.save();
+
+        // Update cache incrementally
+        await updateBentoBlocksCache(user._id, user.username, {
+            addedItems, deletedItems, itemUpdates, layouts, vibe,
+            blocks: profile.blocks,
+            is_published: profile.is_published,
+            vibeData: profile.vibe,
+        });
+
+        ActivityEvent.create({ userId: user._id, eventType: 'bento_blocks_updated' }).catch(() => { });
+
+        return res.status(200).json({
+            status: 'Success',
+            data: {
+                blocks: profile.blocks,
+                vibe: profile.vibe,
+                is_published: profile.is_published,
+            },
+            message: 'Bento blocks updated successfully',
+        });
+    } catch (error) {
+        console.log({ error });
+        return res.status(500).json({
+            status: 'Failed',
+            message: 'Failed to update bento blocks',
+            data: null,
+        });
+    }
+});
+
+// Incremental Redis cache update after successful DB write
+const updateBentoBlocksCache = async (userId, username, operations) => {
+    try {
+        const { blocks, vibeData, is_published } = operations;
+
+        // Update blocks cache with the final state from DB
+        const identifiers = [userId.toString()];
+        if (username) identifiers.push(username);
+
+        for (const id of identifiers) {
+            const blocksCacheKey = getBentoPageBlocksCacheKey(id);
+            const cacheData = {
+                blocks: blocks || [],
+                vibe: vibeData || { theme: 'dark', font: 'font-sans', radius: 'rounded-[1.8rem]' },
+                is_published: is_published || false,
+                _userId: userId.toString(),
+            };
+            await cache.set(blocksCacheKey, cacheData, TTL.BENTO_PAGE_BLOCKS);
+        }
+
+        // Invalidate profile cache (lightweight, rarely changes)
+        const profileKeys = identifiers.map((id) => getBentoPageProfileCacheKey(id));
+        if (profileKeys.length) await cache.del(...profileKeys);
+    } catch {
+        // Cache update failure is non-critical
+    }
+};
+
 module.exports = {
     getPublicProfile,
     getMyProfile,
@@ -413,4 +785,7 @@ module.exports = {
     deleteSection,
     deleteBlock,
     reorderItems,
+    getBentoPageProfile,
+    listBentoBlocks,
+    updateBentoBlocks,
 };

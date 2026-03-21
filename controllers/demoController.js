@@ -117,7 +117,7 @@ const updateDemoData = asyncHandler(async (req, res) => {
       const update = itemUpdates.find(u => u.id === item.id);
       if (update) {
         // Safe overwrite of ALL updated fields (url, bgColor, text, name, etc.)
-        return { ...item, ...update }; 
+        return { ...item, ...update };
       }
       return item;
     });
