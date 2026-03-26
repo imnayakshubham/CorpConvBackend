@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const User = require("../models/userModel");
 const { projection } = require("../constants");
+const cacheTTL = require("../redisClient/cacheTTL");
 
 let _auth;
 
@@ -101,7 +102,7 @@ const getAuth = async () => {
                     },
                     user_current_company_name: {
                         type: "string",
-                        defaultValue: null,
+                        defaultValue: "Somewhere",
                     },
                     user_company_id: {
                         type: "string",
@@ -276,16 +277,47 @@ const getAuth = async () => {
                 },
             },
             databaseHooks: {
-            user: {
-                create: {
-                    after: async (user) => {
-                        const eventBus = require('./eventBus');
-                        eventBus.emit('user:signup', user);
+                user: {
+                    create: {
+                        after: async (user) => {
+                            console.log({ user })
+                            const cache = require('../redisClient/cacheHelper');
+                            const eventBus = require('./eventBus');
+                            const userId = user._id || user.id;
+                            if (userId) {
+
+                                const cacheKey = cache.generateKey('user', 'info', userId);
+
+                                await cache.set(cacheKey, user, cacheTTL.USER_PROFILE);
+                            }
+                            eventBus.emit('user:signup', user);
+                        },
+                    },
+                },
+                session: {
+                    create: {
+
+                        after: async (session) => {
+
+                            const cache = require('../redisClient/cacheHelper');
+                            const eventBus = require('./eventBus');
+                            const cacheKey = cache.generateKey('user', 'info', session.userId);
+                            let user = await cache.get(cacheKey);
+                            if (!user) {
+                                const User = require('../models/userModel');
+                                user = await User.findById(session.userId, projection).lean();
+                                if (user) {
+                                    await cache.set(cacheKey, user, cacheTTL.USER_PROFILE);
+                                }
+                            }
+                            if (user) {
+                                eventBus.emit('user:login', user);
+                            }
+                        },
                     },
                 },
             },
-        },
-        plugins: [
+            plugins: [
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',

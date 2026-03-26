@@ -82,6 +82,7 @@ const userSchema = mongoose.Schema({
   user_current_company_name: {
     type: String,
     trim: true,
+    default: "Somewhere",
     required: [true, "User Company Name is required"],
   },
   user_company_id: {
