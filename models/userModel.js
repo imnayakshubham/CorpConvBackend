@@ -185,7 +185,7 @@ const userSchema = mongoose.Schema({
   usernameHistory: [{ username: String, changedAt: Date }],
 }, { timestamps: true });
 
-// Unique sparse index — sparse allows multiple documents with username: null
+// Unique sparse index  - sparse allows multiple documents with username: null
 // while still guaranteeing uniqueness for documents that DO have a username.
 userSchema.index(
   { username: 1 },

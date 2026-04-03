@@ -3,7 +3,7 @@
  * from plain objects and arrays before Zod parsing.
  * Applied to req.body only (query/params are strings and not vulnerable).
  *
- * OWASP API3 — prevents deeply nested JSON payloads from poisoning Object.prototype.
+ * OWASP API3  - prevents deeply nested JSON payloads from poisoning Object.prototype.
  */
 function sanitizeBody(value) {
   if (Array.isArray(value)) {

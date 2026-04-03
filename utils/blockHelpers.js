@@ -39,7 +39,7 @@ const invalidateBlockCache = async (userId) => {
     if (keys.length) await cache.del(...keys);
 };
 
-// Mutates block in place — strips HTML from all text fields
+// Mutates block in place  - strips HTML from all text fields
 const sanitizeBlockTextFields = (block) => {
     const textFields = ['title', 'subtitle', 'text_content', 'text', 'name', 'role', 'location'];
     for (const field of textFields) {
@@ -48,7 +48,7 @@ const sanitizeBlockTextFields = (block) => {
     return block;
 };
 
-// Mutates block in place — fetches and attaches link metadata for link-type blocks
+// Mutates block in place  - fetches and attaches link metadata for link-type blocks
 const attachLinkMetadata = async (block) => {
     if (block.block_type === 'link' && block.url) {
         try {

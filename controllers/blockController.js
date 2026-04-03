@@ -53,7 +53,7 @@ const listBlocks = asyncHandler(async (req, res) => {
         let is_published = false;
 
         if (is_owner) {
-            // Owner always gets fresh data — no cache
+            // Owner always gets fresh data  - no cache
             const profile = await BlockProfile.findOne({ user_id: user._id }).lean();
             allBlocks = profile?.blocks || [];
             vibe = profile?.vibe || vibe;

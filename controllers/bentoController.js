@@ -137,7 +137,7 @@ const upsertProfile = asyncHandler(async (req, res) => {
             })),
         }));
 
-        // Phase 2A: Publish validation — must have at least one section with content
+        // Phase 2A: Publish validation  - must have at least one section with content
         if (is_published) {
             const hasContent = sanitizedSections.some(
                 (section) => section.blocks && section.blocks.length > 0
@@ -166,7 +166,7 @@ const upsertProfile = asyncHandler(async (req, res) => {
             // Leave is_published and published_sections untouched
         }
 
-        // Phase 2D: Optimistic locking — if version is provided, use it as a filter
+        // Phase 2D: Optimistic locking  - if version is provided, use it as a filter
         const filter = { user_id: req.user._id };
         if (version !== undefined && version !== null) {
             filter.version = version;
@@ -182,7 +182,7 @@ const upsertProfile = asyncHandler(async (req, res) => {
         );
 
         if (!profile) {
-            // Version mismatch — concurrent edit detected
+            // Version mismatch  - concurrent edit detected
             return res.status(409).json({
                 status: 'Failed',
                 error: 'version_conflict',

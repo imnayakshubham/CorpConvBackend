@@ -23,7 +23,7 @@ const {
 
 const router = express.Router();
 
-// Read — public (optionalAuth to detect is_owner)
+// Read  - public (optionalAuth to detect is_owner)
 router.get(
     '/:id_or_username/list',
     optionalAuth,
@@ -31,7 +31,7 @@ router.get(
     listBlocks
 );
 
-// Write — owner only, rate-limited
+// Write  - owner only, rate-limited
 router.post(
     '/:id_or_username/add',
     protect,

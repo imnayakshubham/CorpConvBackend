@@ -39,7 +39,7 @@ router.route('/reorder').patch(protect, writeLimiter, validate({ body: reorderBo
 router.route('/user/:id_or_username/profile')
     .get(optionalAuth, validate({ params: idOrUsernameParam }), getBentoPageProfile);
 
-// Public profile — must be LAST
+// Public profile  - must be LAST
 router.route('/:username').get(validate({ params: usernameParam }), getPublicProfile);
 
 module.exports = router;
