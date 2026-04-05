@@ -14,6 +14,7 @@ const commentRoutes = require("./routes/commentRoutes");
 
 const questionRoutes = require("./routes/questionRoutes");
 const surveyRoutes = require("./routes/surveyRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const siteMapRoutes = require("./routes/siteMapRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -37,6 +38,7 @@ const cors = require("cors");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const path = require("path");
 const { initializeSocket, getIo } = require("./utils/socketManger");
+const notificationService = require("./utils/notificationService");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
@@ -138,6 +140,7 @@ app.use("/api/post", trackActivity, postRoutes);
 app.use("/api/comment", trackActivity, commentRoutes);
 app.use("/api/question", trackActivity, questionRoutes);
 app.use("/api/survey", trackActivity, surveyRoutes);
+app.use("/api/notification", notificationRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/feedback", require("./routes/feedbackRoutes"));
@@ -197,8 +200,10 @@ async function startServer() {
   let currentActiveChat = null
   console.log("Connected to socket.io");
   socket.on("setup", (userData) => {
-    if (userData?._id) {
-      socket.join(userData._id);
+    // Accept both string id (Better Auth) and legacy { _id } object
+    const userId = typeof userData === "string" ? userData : userData?._id;
+    if (userId) {
+      socket.join(userId);
       socket.emit("connected");
     }
   });
@@ -352,7 +357,7 @@ async function startServer() {
         let answerToAquestion = await questionAnswerModel.create(answerData);
         if (answerToAquestion) {
           if (!!answerToAquestion.answered_by) {
-            const data = await answerToAquestion.populate({
+            await answerToAquestion.populate({
               path: "answered_by",
               select: "public_user_name user_public_profile_pic"
             })
@@ -402,6 +407,21 @@ async function startServer() {
         io.to("questions_list").emit("question_answer_count_updated", {
           question_id: payload.question_id
         });
+
+        // Notify question owner about the new reply
+        questionModel.findById(payload.question_id).select("question_posted_by").lean()
+          .then((q) => {
+            if (q && payload.user_id) {
+              notificationService.createAndEmit({
+                actorId: payload.user_id,
+                receiverId: q.question_posted_by,
+                type: "REPLY",
+                targetId: answer.data._id,
+                targetType: "answer",
+              });
+            }
+          })
+          .catch(() => {});
       }
     }
 
@@ -451,8 +471,10 @@ async function startServer() {
 
   socket.on("update_question_likes", async (payload) => {
     let updatedQuestion = null
+    let question = null
+    let isNewLike = false
     try {
-      const question = await questionModel.findById(payload.question_id);
+      question = await questionModel.findById(payload.question_id);
       if (!question) {
         updatedQuestion = {
           status: 'Failed',
@@ -464,7 +486,8 @@ async function startServer() {
 
       // Check if user has already liked the answer
       const userIndex = question.liked_by.indexOf(userId);
-      if (userIndex === -1) {
+      isNewLike = userIndex === -1;
+      if (isNewLike) {
         // User hasn't liked the question, add like
         question.liked_by.push(userId);
       } else {
@@ -501,6 +524,17 @@ async function startServer() {
         question_id: payload.question_id,
         liked_by: updatedQuestion.data.liked_by
       });
+
+      // Notify question owner on new like (not on unlike)
+      if (isNewLike && payload.user_id) {
+        notificationService.createAndEmit({
+          actorId: payload.user_id,
+          receiverId: question.question_posted_by,
+          type: "REACTION",
+          targetId: question._id,
+          targetType: "question",
+        });
+      }
     }
 
   })

@@ -3,6 +3,7 @@ const ActivityEvent = require("../models/activityEventModel");
 const Category = require("../models/categoryModel");
 const Comment = require("../models/commentModel");
 const { getIo } = require("../utils/socketManger");
+const notificationService = require("../utils/notificationService");
 const { populateChildComments } = require("../utils/utils");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
@@ -269,6 +270,17 @@ const upVotePost = async (req, res) => {
                 };
 
                 io.emit('listen_upvote', minimalPayload);
+
+                // Notify post owner on new upvote (not on removal)
+                if (action === 'added') {
+                    notificationService.createAndEmit({
+                        actorId: userId,
+                        receiverId: post.posted_by,
+                        type: "REACTION",
+                        targetId: post._id,
+                        targetType: "post",
+                    });
+                }
 
                 return res.status(200).json({
                     status: 'Success',

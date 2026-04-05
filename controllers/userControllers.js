@@ -4,8 +4,7 @@ const ActivityEvent = require("../models/activityEventModel");
 const Company = require("../models/companySchema");
 const { toTitleCase, generateUserId, keepOnlyNumbers, generateToken } = require("../utils/utils.js");
 const { default: mongoose } = require("mongoose");
-const { getIo } = require("../utils/socketManger");
-const Notifications = require("../models/notificationModel");
+const notificationService = require("../utils/notificationService");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const { tokenkeyName, cookieOptions, projection } = require("../constants/index.js");
@@ -356,34 +355,32 @@ const sendFollowRequest = async (req, res) => {
 
   try {
     const receiverUser = await User.findById(receiverId);
-    // Check if the receiverId is in the pending_followings of senderId
-    const isRequestWithdrawal = receiverUser.pending_followings.includes(senderId);
+    const isPendingWithdrawal = receiverUser.pending_followings.some(id => id.toString() === senderId.toString());
+    const isAlreadyFollower = receiverUser.followers.some(id => id.toString() === senderId.toString());
 
-    if (isRequestWithdrawal) {
-      // Withdraw request
-      const result = await User.findByIdAndUpdate(senderId, {
-        $pull: { followings: receiverId },
-      }, { upsert: true, new: true });
-      if (result) {
-        await User.findByIdAndUpdate(receiverId, {
-          $pull: { pending_followings: senderId },
-        });
-      }
+    if (isPendingWithdrawal) {
+      // Withdraw pending request
+      await User.findByIdAndUpdate(senderId, { $pull: { followings: receiverId } }, { upsert: true, new: true });
+      await User.findByIdAndUpdate(receiverId, { $pull: { pending_followings: senderId } });
+
+    } else if (isAlreadyFollower) {
+      // Unfollow accepted connection — remove from both followers arrays
+      await User.findByIdAndUpdate(senderId, { $pull: { followers: receiverId } });
+      await User.findByIdAndUpdate(receiverId, { $pull: { followers: senderId } });
 
     } else {
-      // Send request
-      const recieverData = await User.findByIdAndUpdate(receiverId, { $addToSet: { pending_followings: senderId }, }, { upsert: true, new: true });
+      // Send new follow request
+      const recieverData = await User.findByIdAndUpdate(receiverId, { $addToSet: { pending_followings: senderId } }, { upsert: true, new: true });
       if (recieverData) {
-        const senderData = await User.findByIdAndUpdate(senderId, {
-          $addToSet: { followings: receiverId },
-        }, { upsert: true, new: true });
+        await User.findByIdAndUpdate(senderId, { $addToSet: { followings: receiverId } }, { upsert: true, new: true });
 
-        const notification = await Notifications.create({ content: `${senderData.public_user_name} Sent you a Follow Request`, receiverId })
-        if (notification) {
-          const io = getIo()
-          console.log({ notification })
-          io.to(receiverId).emit('follow_request_send_notication', notification);
-        }
+        notificationService.createAndEmit({
+          actorId: req.user._id,
+          receiverId,
+          type: "FOLLOW_REQUEST",
+          targetId: req.user._id,
+          targetType: "user",
+        });
       }
     }
 
@@ -423,6 +420,15 @@ const acceptFollowRequest = async (req, res) => {
     const result = await User.findById(userId, { _id: 1, followings: 1, pending_followings: 1, followers: 1 });
 
     res.status(200).json({ message: "Updated User Info ", status: "Success", result: result });
+
+    // Notify the requester that their follow request was accepted
+    notificationService.createAndEmit({
+      actorId: req.user._id,
+      receiverId: requesterId,
+      type: "FOLLOW_ACCEPT",
+      targetId: req.user._id,
+      targetType: "user",
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
