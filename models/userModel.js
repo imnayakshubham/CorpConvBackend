@@ -113,6 +113,10 @@ const userSchema = mongoose.Schema({
     ref: 'User',
     default: []
   }],
+  blockedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
   secondary_email_id: {
     type: String,
     trim: true,

@@ -21,6 +21,7 @@ const chatModel = mongoose.Schema(
     status: { type: String, enum: ['accepted', 'pending', 'rejected'], default: 'accepted' },
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     unreadCounts: { type: Map, of: Number, default: {} },
+    blockedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true }
 );
