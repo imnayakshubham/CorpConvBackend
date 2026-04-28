@@ -9,54 +9,60 @@ const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
   try {
-
     if (!userId) {
-      console.log("UserId param not sent with request");
       return res.sendStatus(400);
     }
 
-    var isChat = await Chat.find({
+    // Check if chat already exists
+    let isChat = await Chat.find({
       isGroupChat: false,
       $and: [
         { users: { $elemMatch: { $eq: req.user._id } } },
         { users: { $elemMatch: { $eq: userId } } },
       ],
-    }).populate({
-      path: "users",
-      select: "public_user_name user_job_experience user_current_company_name"
-    }).populate("latestMessage");
+    }).populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name" })
+      .populate("latestMessage");
 
     isChat = await User.populate(isChat, {
       path: "latestMessage.sender",
       select: "public_user_name user_job_experience",
     });
 
-
     if (isChat.length > 0) {
-      res.send(isChat[0]);
-    } else {
-      var chatData = {
-        chatName: "sender",
-        isGroupChat: false,
-        readBy: [req.user._id],
-        users: [req.user._id, userId],
-      };
-
-      const createdChat = await Chat.create(chatData);
-
-      // Invalidate chats cache for both users
-      const currentUserChatsKey = cache.generateKey('chats', 'user', req.user._id);
-      const otherUserChatsKey = cache.generateKey('chats', 'user', userId);
-      await cache.del(currentUserChatsKey, otherUserChatsKey);
-
-      const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
-        "users",
-        "-token"
-      );
-      res.status(200).json(FullChat);
+      const existing = isChat[0];
+      // Block if this user was previously rejected by the other person
+      if (existing.status === 'rejected' && existing.requestedBy?.toString() === req.user._id.toString()) {
+        return res.status(403).json({ status: 'rejected', message: 'This user has declined your message request.' });
+      }
+      return res.send(existing);
     }
+
+    // Check mutual follow to decide status
+    const [currentUser, targetUser] = await Promise.all([
+      User.findById(req.user._id).select('followings'),
+      User.findById(userId).select('followings'),
+    ]);
+    const currentFollowsTarget = currentUser?.followings?.map(String).includes(String(userId));
+    const targetFollowsCurrent = targetUser?.followings?.map(String).includes(String(req.user._id));
+    const isMutual = currentFollowsTarget && targetFollowsCurrent;
+
+    const chatData = {
+      chatName: "sender",
+      isGroupChat: false,
+      users: [req.user._id, userId],
+      status: isMutual ? 'accepted' : 'pending',
+      requestedBy: isMutual ? null : req.user._id,
+    };
+
+    const createdChat = await Chat.create(chatData);
+
+    const currentUserChatsKey = cache.generateKey('chats', 'user', req.user._id);
+    const otherUserChatsKey = cache.generateKey('chats', 'user', userId);
+    await cache.del(currentUserChatsKey, otherUserChatsKey);
+
+    const FullChat = await Chat.findOne({ _id: createdChat._id }).populate("users", "-token");
+    return res.status(200).json(FullChat);
   } catch (error) {
-    console.log({ error: error })
     res.status(400);
     throw new Error(error.message);
   }
@@ -71,10 +77,17 @@ const fetchChats = asyncHandler(async (req, res) => {
       return res.status(200).send({ status: "Success", message: "chats found for the user. (Cached)", result: cached });
     }
 
-    const results = await Chat.find({ users: { $elemMatch: { $eq: req.user._id } } })
+    const results = await Chat.find({
+      users: { $elemMatch: { $eq: req.user._id } },
+      $or: [
+        { status: 'accepted' },
+        { status: 'pending', requestedBy: req.user._id },
+        { status: 'rejected', requestedBy: req.user._id },
+      ],
+    })
       .populate({
         path: "users",
-        select: "public_user_name user_job_experience user_current_company_name"
+        select: "public_user_name username user_job_experience user_current_company_name"
       })
       .populate("groupAdmin")
       .populate("latestMessage")
@@ -86,7 +99,7 @@ const fetchChats = asyncHandler(async (req, res) => {
     if (results.length > 0) {
       await User.populate(results, {
         path: "latestMessage.sender",
-        select: "public_user_name user_job_experience user_current_company_name",
+        select: "public_user_name username user_job_experience user_current_company_name",
       });
 
       // Cache the results
@@ -252,6 +265,57 @@ const addToGroup = asyncHandler(async (req, res) => {
   }
 });
 
+const fetchMessageRequests = asyncHandler(async (req, res) => {
+  try {
+    const requests = await Chat.find({
+      users: { $elemMatch: { $eq: req.user._id } },
+      status: 'pending',
+      requestedBy: { $ne: req.user._id },
+    }).populate({ path: "users", select: "public_user_name user_job_experience user_current_company_name avatar_config user_public_profile_pic" })
+      .populate("latestMessage")
+      .sort({ updatedAt: -1 });
+
+    await User.populate(requests, {
+      path: "latestMessage.sender",
+      select: "public_user_name",
+    });
+
+    return res.status(200).json({ status: 'Success', result: requests });
+  } catch (error) {
+    return res.status(500).json({ status: 'Failed', result: [] });
+  }
+});
+
+const acceptRequest = asyncHandler(async (req, res) => {
+  const chat = await Chat.findById(req.params.chatId);
+  if (!chat) return res.status(404).json({ message: 'Chat not found' });
+  if (chat.requestedBy?.toString() === req.user._id.toString()) {
+    return res.status(403).json({ message: 'Only the recipient can accept this request.' });
+  }
+  const updated = await Chat.findByIdAndUpdate(req.params.chatId, { status: 'accepted' }, { new: true })
+    .populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name" })
+    .populate("latestMessage");
+  await cache.del(
+    cache.generateKey('chats', 'user', req.user._id),
+    cache.generateKey('chats', 'user', chat.requestedBy)
+  );
+  return res.status(200).json({ status: 'Success', result: updated });
+});
+
+const rejectRequest = asyncHandler(async (req, res) => {
+  const chat = await Chat.findById(req.params.chatId);
+  if (!chat) return res.status(404).json({ message: 'Chat not found' });
+  if (chat.requestedBy?.toString() === req.user._id.toString()) {
+    return res.status(403).json({ message: 'Only the recipient can reject this request.' });
+  }
+  const updated = await Chat.findByIdAndUpdate(req.params.chatId, { status: 'rejected' }, { new: true });
+  await cache.del(
+    cache.generateKey('chats', 'user', req.user._id),
+    cache.generateKey('chats', 'user', chat.requestedBy)
+  );
+  return res.status(200).json({ status: 'Success', result: updated });
+});
+
 module.exports = {
   accessChat,
   fetchChats,
@@ -259,4 +323,7 @@ module.exports = {
   renameGroup,
   addToGroup,
   removeFromGroup,
+  fetchMessageRequests,
+  acceptRequest,
+  rejectRequest,
 };

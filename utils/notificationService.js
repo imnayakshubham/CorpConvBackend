@@ -5,6 +5,7 @@ const { getIo } = require("./socketManger");
 const TYPE_PRIORITY = {
   FOLLOW_REQUEST: "high",
   FOLLOW_ACCEPT: "high",
+  MESSAGE: "high",
   REPLY: "medium",
   COMMENT: "medium",
   REACTION: "low",
@@ -18,6 +19,7 @@ const CONTENT_TEMPLATES = {
   FOLLOW_ACCEPT_user: (name) => `${name} accepted your follow request`,
   REACTION_post: (name) => `${name} upvoted your post`,
   REACTION_question: (name) => `${name} liked your question`,
+  MESSAGE_chat: (name) => `${name} sent you a message`,
 };
 
 function buildContent(type, targetType, displayName) {

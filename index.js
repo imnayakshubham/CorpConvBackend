@@ -196,15 +196,29 @@ async function startServer() {
 
   const io = getIo();
 
+  // In-memory online users: userId → Set of socketIds
+  const onlineUsers = new Map();
+
   io.on("connection", (socket) => {
-  let currentActiveChat = null
+  let currentActiveChat = null;
+  let connectedUserId = null;
   console.log("Connected to socket.io");
+
   socket.on("setup", (userData) => {
     // Accept both string id (Better Auth) and legacy { _id } object
     const userId = typeof userData === "string" ? userData : userData?._id;
     if (userId) {
+      connectedUserId = userId;
       socket.join(userId);
+
+      if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
+      onlineUsers.get(userId).add(socket.id);
+
+      // Broadcast this user is online to everyone
+      socket.broadcast.emit("user_online", { userId });
       socket.emit("connected");
+      // Send the current online list to the connecting user
+      socket.emit("online_users", { userIds: [...onlineUsers.keys()] });
     }
   });
 
@@ -309,14 +323,11 @@ async function startServer() {
     socket.join(room);
     console.log("User Joined Room: " + room);
   });
-  socket.on("typing", (room) => {
-    socket.in(room).emit("typing")
+  socket.on("typing", ({ room, userName }) => {
+    socket.in(room).emit("typing", { chatId: room, userName });
   });
 
-  // socket.on("read message", (chat) => {
-  //   console.log({ chat })
-  // })
-  socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
+  socket.on("stop typing", (room) => socket.in(room).emit("stop typing", { chatId: room }));
 
   socket.on("send_follow_request", (payload) => {
     socket.in(payload.receiverId).emit("receive_follow_request", payload);
@@ -575,9 +586,24 @@ async function startServer() {
     }
   });
 
-  socket.off("setup", () => {
-    console.log("USER DISCONNECTED");
-    socket.leave(userData._id);
+  socket.on("disconnect", async () => {
+    if (connectedUserId) {
+      const sockets = onlineUsers.get(connectedUserId);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(connectedUserId);
+          const lastSeen = new Date();
+          // Update lastActiveAt in DB (fire and forget)
+          try {
+            const User = require("./models/userModel");
+            await User.findByIdAndUpdate(connectedUserId, { lastActiveAt: lastSeen }).catch(() => {});
+          } catch {}
+          // Broadcast user went offline with lastSeen timestamp
+          socket.broadcast.emit("user_offline", { userId: connectedUserId, lastSeen: lastSeen.toISOString() });
+        }
+      }
+    }
   });
   });
 }

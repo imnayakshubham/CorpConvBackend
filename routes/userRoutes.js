@@ -17,7 +17,8 @@ const {
   updateQRConfig,
   trackProfileView,
   getUserAnalytics,
-  getUserByUsername
+  getUserByUsername,
+  getChatUsers
 } = require("../controllers/userControllers");
 const { protect, optionalAuth } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -45,6 +46,7 @@ router.route("/user/analytics").get(protect, getUserAnalytics);
 router.route("/user/by-username/:username").get(getUserByUsername);
 router.route("/user/:id").get(validate({ params: userIdParam }), getUserInfo);
 router.route("/followers").get(protect, validate({ query: searchQuery }), getfollowersList);
+router.get("/chat-users", protect, getChatUsers);
 router.post("/auth", authLimiter, validate({ body: authUserBody }), authUser);
 router.route("/users").post(validate({ body: fetchUsersBody }), fetchUsers);
 router.route("/logout").post(protect, logout);
