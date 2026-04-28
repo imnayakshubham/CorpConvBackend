@@ -2,6 +2,7 @@ const Comment = require("../models/commentModel");
 const Post = require("../models/postModel");
 const { populateChildComments } = require("../utils/utils");
 const { getIo } = require("../utils/socketManger");
+const notificationService = require("../utils/notificationService");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const { stripAllHtml } = require("../utils/sanitize");
@@ -49,6 +50,21 @@ const postComments = async (req, res) => {
         // Emit socket event for real-time updates
         const io = getIo();
         io.emit('listen_comment_created', { post_id, comment: populatedComment });
+
+        // Notify post owner about the new comment
+        Post.findById(post_id).select("posted_by").lean()
+          .then((post) => {
+            if (post) {
+              notificationService.createAndEmit({
+                actorId: commented_by,
+                receiverId: post.posted_by,
+                type: "COMMENT",
+                targetId: newComment._id,
+                targetType: "comment",
+              });
+            }
+          })
+          .catch(() => {});
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
@@ -97,6 +113,21 @@ const postReplyComments = async (req, res) => {
         // Emit socket event for real-time updates
         const io = getIo();
         io.emit('listen_comment_reply', { post_id, comment: populatedReply, parent_comment_id });
+
+        // Notify parent comment owner about the reply
+        Comment.findById(parent_comment_id).select("commented_by").lean()
+          .then((parentComment) => {
+            if (parentComment) {
+              notificationService.createAndEmit({
+                actorId: commented_by,
+                receiverId: parentComment.commented_by,
+                type: "REPLY",
+                targetId: newComment._id,
+                targetType: "comment",
+              });
+            }
+          })
+          .catch(() => {});
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });

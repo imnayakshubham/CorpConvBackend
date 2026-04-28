@@ -1,13 +1,44 @@
 const mongoose = require("mongoose");
 
-const notificationSchema = mongoose.Schema({
+const notificationSchema = mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ["REPLY", "COMMENT", "FOLLOW_REQUEST", "FOLLOW_ACCEPT", "REACTION"],
+      required: true,
+    },
+    actorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    targetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+    targetType: {
+      type: String,
+      enum: ["question", "answer", "post", "comment", "user"],
+      required: true,
+    },
     content: { type: String, trim: true },
     isRead: { type: Boolean, default: false },
-    receiverId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-},
-    { timestamps: true }
+    priority: {
+      type: String,
+      enum: ["high", "medium", "low"],
+      default: "medium",
+    },
+  },
+  { timestamps: true }
 );
 
-const Notifications = mongoose.model("Notifications", notificationSchema);
+notificationSchema.index({ receiverId: 1, isRead: 1, createdAt: -1 });
 
-module.exports = Notifications;
+const Notification = mongoose.model("Notification", notificationSchema);
+
+module.exports = Notification;

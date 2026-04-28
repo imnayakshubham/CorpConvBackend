@@ -1,7 +1,7 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 // ---------------------------------------------------------------------------
-// Shared handler factory — sets Retry-After + legacy X-RateLimit-* headers
+// Shared handler factory  - sets Retry-After + legacy X-RateLimit-* headers
 // alongside the standardHeaders (RateLimit-* per RFC 9110) so that clients
 // reading either header style get correct reset information.
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ function buildHandler(message) {
 }
 
 // ---------------------------------------------------------------------------
-// Windows and maxima — all configurable via environment variables.
+// Windows and maxima  - all configurable via environment variables.
 // Defaults are conservative production-safe values.
 // See hushworkbackend/.env.example for the full list.
 // ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ const submissionLimiter = rateLimit({
   handler: buildHandler('Too many submissions, please try again later.'),
 });
 
-// Per-user write limiter — MUST be placed AFTER protect middleware in routes
+// Per-user write limiter  - MUST be placed AFTER protect middleware in routes
 // so req.user is populated for the keyGenerator. Falls back to IP when unauthenticated.
 const writeLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -99,7 +99,7 @@ const writeLimiter = rateLimit({
   handler: buildHandler('Too many write requests, please slow down.'),
 });
 
-// Admin endpoints — stricter per-IP limit.
+// Admin endpoints  - stricter per-IP limit.
 // Place AFTER protect + superAdmin middleware in route definitions.
 const adminLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -109,7 +109,7 @@ const adminLimiter = rateLimit({
   handler: buildHandler('Too many admin requests, please try again later.'),
 });
 
-// Username availability check — 30 req/min per IP (env-configurable)
+// Username availability check  - 30 req/min per IP (env-configurable)
 const usernameCheckLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: USERNAME_CHECK_MAX,
@@ -118,7 +118,7 @@ const usernameCheckLimiter = rateLimit({
   handler: buildHandler('Too many username check requests, please try again later.'),
 });
 
-// Username set/update — 5 attempts per hour per authenticated user
+// Username set/update  - 5 attempts per hour per authenticated user
 const usernameWriteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: USERNAME_WRITE_MAX,

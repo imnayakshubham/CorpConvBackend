@@ -193,7 +193,7 @@ const createLink = asyncHandler(async (req, res) => {
 
         const linkData = await link.populate("posted_by", "public_user_name is_email_verified avatar_config");
 
-        // Update caches — add new link to all relevant cached lists
+        // Update caches  - add new link to all relevant cached lists
         const cacheKeys = getLinkCacheKeys(req.user._id, validatedCategory);
         await Promise.all([
             addLinkToCacheLists(cacheKeys, linkData),
@@ -323,7 +323,7 @@ const updateLink = asyncHandler(async (req, res) => {
                 updateData.link_data.description = stripHtml(description).substring(0, 500);
             }
         } else {
-            // URL unchanged — use dot notation to update individual fields
+            // URL unchanged  - use dot notation to update individual fields
             if (typeof title === 'string') {
                 updateData['link_data.title'] = stripHtml(title).substring(0, 200);
             }

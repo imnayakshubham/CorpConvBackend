@@ -79,7 +79,7 @@ const checkAvailability = asyncHandler(async (req, res) => {
     return res.status(400).json({ available: false, reason: validation.reason, message: validation.message });
   }
 
-  // Redis cache check — value '1' means taken, absence means unknown
+  // Redis cache check  - value '1' means taken, absence means unknown
   const cached = await cache.get(takenCacheKey(username));
   if (cached !== null) {
     return res.json({ available: false, username, reason: 'taken' });
@@ -91,7 +91,7 @@ const checkAvailability = asyncHandler(async (req, res) => {
     return res.json({ available: false, username, reason: 'in_cooldown' });
   }
 
-  // MongoDB — authoritative source of truth
+  // MongoDB  - authoritative source of truth
   const exists = await User.exists({ username });
   if (exists) {
     // Backfill Redis cache on confirmed hit
@@ -141,7 +141,7 @@ const setUsername = asyncHandler(async (req, res) => {
 
   const previousUsername = user.username;
 
-  // Build atomic update — unique index is the final race-condition guard
+  // Build atomic update  - unique index is the final race-condition guard
   const updateOps = {
     $set: { username, usernameChangedAt: new Date() },
   };
@@ -158,7 +158,7 @@ const setUsername = asyncHandler(async (req, res) => {
     });
   } catch (err) {
     if (err.code === 11000) {
-      // Unique index violation — name was claimed between check and write
+      // Unique index violation  - name was claimed between check and write
       return res.status(409).json({
         error: 'username_taken',
         message: 'That username was just claimed. Please choose another.',
@@ -174,7 +174,7 @@ const setUsername = asyncHandler(async (req, res) => {
       releasedBy: userId,
       expiresAt: new Date(Date.now() + CHANGE_COOLDOWN_DAYS * 86_400_000),
     }).catch((e) => {
-      // Duplicate key means it was already released — safe to ignore
+      // Duplicate key means it was already released  - safe to ignore
       if (e.code !== 11000) {
         console.error('[username] Failed to release old username:', e.message);
       }

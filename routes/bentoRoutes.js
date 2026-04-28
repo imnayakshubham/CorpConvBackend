@@ -10,8 +10,6 @@ const {
     deleteBlock,
     reorderItems,
     getBentoPageProfile,
-    listBentoBlocks,
-    updateBentoBlocks,
 } = require('../controllers/bentoController');
 const validate = require('../middleware/validate');
 const { writeLimiter } = require('../middleware/rateLimiter');
@@ -24,7 +22,6 @@ const {
     reorderBody,
     usernameParam,
     idOrUsernameParam,
-    updateBentoBlocksBody,
 } = require('../validators/bentoSchemas');
 
 const router = express.Router();
@@ -42,11 +39,7 @@ router.route('/reorder').patch(protect, writeLimiter, validate({ body: reorderBo
 router.route('/user/:id_or_username/profile')
     .get(optionalAuth, validate({ params: idOrUsernameParam }), getBentoPageProfile);
 
-router.route('/user/:id_or_username/blocks')
-    .get(optionalAuth, validate({ params: idOrUsernameParam }), listBentoBlocks)
-    .post(protect, writeLimiter, validate({ params: idOrUsernameParam, body: updateBentoBlocksBody }), updateBentoBlocks);
-
-// Public profile — must be LAST
+// Public profile  - must be LAST
 router.route('/:username').get(validate({ params: usernameParam }), getPublicProfile);
 
 module.exports = router;

@@ -72,9 +72,26 @@ let inMemoryDemoState = {
 };
 
 const getDemoData = asyncHandler(async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(50, parseInt(req.query.limit) || 12));
+  const skip = (page - 1) * limit;
+
+  const allItems = inMemoryDemoState.bentoItems;
+  const total = allItems.length;
+  const items = allItems.slice(skip, skip + limit);
+
   res.status(200).json({
     status: "Success",
-    data: inMemoryDemoState,
+    data: {
+      profile: inMemoryDemoState.profile,
+      bentoItems: items,
+      pagination: {
+        total,
+        page,
+        limit,
+        hasMore: skip + limit < total,
+      },
+    },
   });
 });
 

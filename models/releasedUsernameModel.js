@@ -14,7 +14,7 @@ const releasedUsernameSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
 });
 
-// TTL index — MongoDB deletes documents automatically once expiresAt passes
+// TTL index  - MongoDB deletes documents automatically once expiresAt passes
 releasedUsernameSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const ReleasedUsername = mongoose.model("ReleasedUsername", releasedUsernameSchema);
