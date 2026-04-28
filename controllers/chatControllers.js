@@ -4,6 +4,7 @@ const User = require("../models/userModel");
 const mongoose = require('mongoose');
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
+const { getIo } = require("../utils/socketManger");
 
 const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -11,6 +12,29 @@ const accessChat = asyncHandler(async (req, res) => {
   try {
     if (!userId) {
       return res.sendStatus(400);
+    }
+
+    // Self-chat (Saved Messages / Notes to self)
+    if (String(userId) === String(req.user._id)) {
+      let selfChat = await Chat.findOne({
+        isGroupChat: false,
+        users: { $size: 1, $all: [req.user._id] },
+      }).populate({ path: 'users', select: 'public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic' })
+        .populate('latestMessage');
+
+      if (!selfChat) {
+        const created = await Chat.create({
+          chatName: 'Saved Messages',
+          isGroupChat: false,
+          users: [req.user._id],
+          status: 'accepted',
+        });
+        selfChat = await Chat.findById(created._id)
+          .populate({ path: 'users', select: 'public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic' });
+        await cache.del(cache.generateKey('chats', 'user', req.user._id));
+      }
+
+      return res.status(200).json(selfChat);
     }
 
     // Check if chat already exists
@@ -61,6 +85,13 @@ const accessChat = asyncHandler(async (req, res) => {
     await cache.del(currentUserChatsKey, otherUserChatsKey);
 
     const FullChat = await Chat.findOne({ _id: createdChat._id }).populate("users", "-token");
+
+    // Notify the recipient immediately so their sidebar updates without a manual refresh
+    try {
+      const io = getIo();
+      io.to(String(userId)).emit('new_chat', { chatId: createdChat._id });
+    } catch { }
+
     return res.status(200).json(FullChat);
   } catch (error) {
     res.status(400);
@@ -70,7 +101,6 @@ const accessChat = asyncHandler(async (req, res) => {
 
 const fetchChats = asyncHandler(async (req, res) => {
   try {
-    // Try to get from cache
     const cacheKey = cache.generateKey('chats', 'user', req.user._id);
     const cached = await cache.get(cacheKey);
     if (cached) {
@@ -82,19 +112,18 @@ const fetchChats = asyncHandler(async (req, res) => {
       $or: [
         { status: 'accepted' },
         { status: 'pending', requestedBy: req.user._id },
-        { status: 'rejected', requestedBy: req.user._id },
+        { status: 'rejected' },
+        { users: { $size: 1 } },  // self-chat
       ],
     })
       .populate({
         path: "users",
-        select: "public_user_name username user_job_experience user_current_company_name"
+        select: "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic"
       })
       .populate("groupAdmin")
       .populate("latestMessage")
       .sort({ updatedAt: -1 })
       .exec();
-
-
 
     if (results.length > 0) {
       await User.populate(results, {
@@ -102,16 +131,13 @@ const fetchChats = asyncHandler(async (req, res) => {
         select: "public_user_name username user_job_experience user_current_company_name",
       });
 
-      // Cache the results
       await cache.set(cacheKey, results, TTL.CHATS_LIST);
-
       return res.status(200).send({ status: "Success", message: "chats found for the user.", result: results });
-
     } else {
       return res.status(200).send({ status: "Success", message: "No chats found for the user.", result: results });
     }
   } catch (error) {
-    console.log({ error })
+    console.log({ error });
     return res.status(200).send({ status: "Failed", message: "Something went Wrong", result: [] });
   }
 });
@@ -280,6 +306,44 @@ const fetchMessageRequests = asyncHandler(async (req, res) => {
       select: "public_user_name",
     });
 
+    // Auto-accept pending requests where both users now follow each other
+    if (requests.length > 0) {
+      const currentUser = await User.findById(req.user._id).select('followings');
+      const myFollowings = new Set((currentUser?.followings || []).map(String));
+
+      const otherUserIds = requests.map(chat =>
+        chat.users.find(u => u._id.toString() !== req.user._id.toString())?._id
+      ).filter(Boolean);
+
+      const otherUsers = await User.find({ _id: { $in: otherUserIds } }).select('followings');
+      const otherFollowMap = new Map(otherUsers.map(u => [u._id.toString(), new Set((u.followings || []).map(String))]));
+
+      const toAccept = [];
+      for (const chat of requests) {
+        const otherId = chat.users.find(u => u._id.toString() !== req.user._id.toString())?._id?.toString();
+        if (otherId && myFollowings.has(otherId) && otherFollowMap.get(otherId)?.has(req.user._id.toString())) {
+          toAccept.push(chat._id);
+        }
+      }
+
+      if (toAccept.length > 0) {
+        await Chat.updateMany({ _id: { $in: toAccept } }, { status: 'accepted' });
+        // Invalidate cache for both sides so the accepted chats appear in fetchChats
+        const requesterIds = toAccept.map(chatId =>
+          requests.find(c => c._id.toString() === chatId.toString())?.requestedBy
+        ).filter(Boolean);
+        await Promise.all([
+          cache.del(cache.generateKey('chats', 'user', req.user._id)),
+          ...requesterIds.map(id => cache.del(cache.generateKey('chats', 'user', id))),
+        ]);
+      }
+
+      // Return only the non-auto-accepted requests
+      const acceptedIds = new Set(toAccept.map(String));
+      const remaining = requests.filter(c => !acceptedIds.has(c._id.toString()));
+      return res.status(200).json({ status: 'Success', result: remaining });
+    }
+
     return res.status(200).json({ status: 'Success', result: requests });
   } catch (error) {
     return res.status(500).json({ status: 'Failed', result: [] });
@@ -293,7 +357,7 @@ const acceptRequest = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Only the recipient can accept this request.' });
   }
   const updated = await Chat.findByIdAndUpdate(req.params.chatId, { status: 'accepted' }, { new: true })
-    .populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name" })
+    .populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic" })
     .populate("latestMessage");
   await cache.del(
     cache.generateKey('chats', 'user', req.user._id),

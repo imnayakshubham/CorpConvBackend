@@ -860,11 +860,11 @@ const getChatUsers = asyncHandler(async (req, res) => {
   const cursor = req.query.cursor?.trim();
   const search = req.query.search?.trim();
 
-  const filter = { _id: { $ne: req.user._id }, access: true };
+  const filter = { access: true };
   if (cursor) filter._id = { ...filter._id, $lt: new mongoose.Types.ObjectId(cursor) };
   if (search) {
     const re = new RegExp(escapeRegex(search), 'i');
-    filter.$or = [{ public_user_name: re }, { user_current_company_name: re }];
+    filter.$or = [{ public_user_name: re }, { user_current_company_name: re }, { username: re }];
   }
 
   const users = await User.find(filter)

@@ -33,7 +33,10 @@ const allMessages = asyncHandler(async (req, res) => {
 
     const updateChatData = await Chat.findByIdAndUpdate(
       { _id: req.params.chatId },
-      { unreadMessage: [] },
+      {
+        unreadMessage: [],
+        $set: { [`unreadCounts.${req.user._id}`]: 0 },
+      },
       { new: true }
     )
       .populate({ path: "users", select: SENDER_SELECT })
@@ -83,14 +86,16 @@ const sendMessage = asyncHandler(async (req, res) => {
     // Clear cached chat lists for all members so latestMessage appears immediately
     const cacheKeys = chat.users.map(uid => cache.generateKey('chats', 'user', uid));
     await cache.del(...cacheKeys).catch(() => {});
-    await Chat.findByIdAndUpdate(
-      chatId,
-      { $addToSet: { unreadMessage: { messageId: message._id, readBy: [req.user._id] } } },
-      { new: true }
-    );
+
+    // Increment per-user unread count for everyone except the sender
+    const otherMembers = chat.users.filter(id => id.toString() !== req.user._id.toString());
+    const unreadIncrements = {};
+    otherMembers.forEach(uid => { unreadIncrements[`unreadCounts.${uid}`] = 1; });
+    if (Object.keys(unreadIncrements).length) {
+      await Chat.findByIdAndUpdate(chatId, { $inc: unreadIncrements });
+    }
 
     // Notify all other chat members
-    const otherMembers = chat.users.filter(id => id.toString() !== req.user._id.toString());
     otherMembers.forEach(receiverId => {
       notificationService.createAndEmit({
         actorId: req.user._id,
