@@ -111,6 +111,30 @@ async function onSignUp(user) {
   await send(buildPayload(':wave:  New User Signed Up', user));
 }
 
+async function onFeedback(user, feedback) {
+  if (isGlobalLimited()) return;
+  await send({
+    blocks: [
+      buildHeader(':speech_balloon:  New Feedback Submitted'),
+      {
+        type: 'section',
+        fields: [
+          { type: 'mrkdwn', text: `*Type:*\n${feedback.type || 'N/A'}` },
+          { type: 'mrkdwn', text: `*Title:*\n${feedback.title || 'N/A'}` },
+          { type: 'mrkdwn', text: `*Email:*\n${user.user_email_id || user.email || 'N/A'}` },
+          { type: 'mrkdwn', text: `*Handle:*\n${user.username || user.actual_user_name || 'N/A'}` },
+        ],
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*Description:*\n${feedback.description || 'N/A'}` },
+      },
+      { type: 'divider' },
+      buildContext(new Date()),
+    ],
+  });
+}
+
 // --- Init: register event listeners ---
 
 function init() {
@@ -125,4 +149,4 @@ function init() {
   console.log('[slackService] Slack notification listeners registered.');
 }
 
-module.exports = { init, onLogin, onSignUp };
+module.exports = { init, onLogin, onSignUp, onFeedback };

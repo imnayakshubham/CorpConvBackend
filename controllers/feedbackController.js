@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const Feedback = require("../models/feedbackModel");
+const { onFeedback } = require("../utils/slackService");
 
 const createFeedback = asyncHandler(async (req, res) => {
     const { type, title, description } = req.body;
@@ -17,6 +18,8 @@ const createFeedback = asyncHandler(async (req, res) => {
     });
 
     if (feedback) {
+        onFeedback(req.user, { type, title, description }).catch(() => {});
+
         res.status(201).json({
             status: "Success",
             data: feedback,
