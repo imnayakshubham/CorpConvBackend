@@ -45,6 +45,9 @@ const allMessages = asyncHandler(async (req, res) => {
 
     await User.populate(updateChatData, { path: "latestMessage.sender", select: SENDER_SELECT });
 
+    // Invalidate the chat list cache so the next fetchChats returns unreadCounts = 0
+    await cache.del(cache.generateKey('chats', 'user', req.user._id));
+
     res.status(200).send({ status: "Success", message: "chats found for the user.", result: { messages, chatData: updateChatData } });
   } catch (error) {
     res.status(400);
@@ -212,4 +215,18 @@ const markDelivered = asyncHandler(async (req, res) => {
   return res.json({ status: 'Success' });
 });
 
-module.exports = { allMessages, sendMessage, editMessage, deleteMessage, addReaction, markDelivered };
+const markRead = asyncHandler(async (req, res) => {
+  const { chatId } = req.body;
+  const userId = req.user._id;
+
+  await Chat.findByIdAndUpdate(chatId, {
+    $set: { [`unreadCounts.${userId}`]: 0 },
+    unreadMessage: [],
+  });
+
+  await cache.del(cache.generateKey('chats', 'user', userId));
+
+  return res.json({ status: 'Success' });
+});
+
+module.exports = { allMessages, sendMessage, editMessage, deleteMessage, addReaction, markDelivered, markRead };

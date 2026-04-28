@@ -6,6 +6,7 @@ const {
   deleteMessage,
   addReaction,
   markDelivered,
+  markRead,
 } = require("../controllers/messageControllers");
 const { protect } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -22,6 +23,7 @@ const router = express.Router();
 
 // Must be before /:id routes to avoid conflict
 router.patch("/delivered", protect, validate({ body: deliveredBody }), markDelivered);
+router.patch("/read", protect, markRead);
 
 router.get("/:chatId", protect, validate({ params: chatIdParam }), allMessages);
 router.post("/", protect, validate({ body: sendMessageBody }), sendMessage);
