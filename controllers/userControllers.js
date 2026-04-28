@@ -855,4 +855,28 @@ const getUserByUsername = async (req, res) => {
   }
 }
 
-module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics, getUserByUsername };
+const getChatUsers = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+  const cursor = req.query.cursor?.trim();
+  const search = req.query.search?.trim();
+
+  const filter = { access: true };
+  if (cursor) filter._id = { ...filter._id, $lt: new mongoose.Types.ObjectId(cursor) };
+  if (search) {
+    const re = new RegExp(escapeRegex(search), 'i');
+    filter.$or = [{ public_user_name: re }, { user_current_company_name: re }, { username: re }];
+  }
+
+  const users = await User.find(filter)
+    .sort({ _id: -1 })
+    .limit(limit + 1)
+    .select('_id public_user_name user_job_role user_current_company_name avatar_config user_public_profile_pic');
+
+  const hasMore = users.length > limit;
+  const data = hasMore ? users.slice(0, limit) : users;
+  const nextCursor = hasMore ? data[data.length - 1]._id : null;
+
+  res.status(200).json({ status: 'Success', data, nextCursor, hasMore });
+});
+
+module.exports = { allUsers, authUser, logout, updateUserProfile, fetchUsers, rejectFollowRequest, acceptFollowRequest, sendFollowRequest, getfollowersList, getUserInfo, listUserSessions, revokeSession, revokeAllSessions, updateAvatarConfig, updateQRConfig, trackProfileView, getUserAnalytics, getUserByUsername, getChatUsers };

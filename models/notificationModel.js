@@ -4,7 +4,7 @@ const notificationSchema = mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["REPLY", "COMMENT", "FOLLOW_REQUEST", "FOLLOW_ACCEPT", "REACTION"],
+      enum: ["REPLY", "COMMENT", "FOLLOW_REQUEST", "FOLLOW_ACCEPT", "REACTION", "MESSAGE"],
       required: true,
     },
     actorId: {
@@ -23,7 +23,7 @@ const notificationSchema = mongoose.Schema(
     },
     targetType: {
       type: String,
-      enum: ["question", "answer", "post", "comment", "user"],
+      enum: ["question", "answer", "post", "comment", "user", "chat"],
       required: true,
     },
     content: { type: String, trim: true },

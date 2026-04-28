@@ -6,6 +6,9 @@ const {
   removeFromGroup,
   addToGroup,
   renameGroup,
+  fetchMessageRequests,
+  acceptRequest,
+  rejectRequest,
 } = require("../controllers/chatControllers");
 const { protect } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -25,5 +28,9 @@ router.route("/group").post(protect, validate({ body: createGroupChatBody }), cr
 router.route("/rename").put(protect, validate({ body: renameGroupBody }), renameGroup);
 router.route("/groupremove").put(protect, validate({ body: groupMemberBody }), removeFromGroup);
 router.route("/groupadd").put(protect, validate({ body: groupMemberBody }), addToGroup);
+
+router.route("/requests").get(protect, fetchMessageRequests);
+router.route("/:chatId/accept").put(protect, acceptRequest);
+router.route("/:chatId/reject").put(protect, rejectRequest);
 
 module.exports = router;
