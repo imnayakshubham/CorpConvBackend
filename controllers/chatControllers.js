@@ -380,6 +380,68 @@ const rejectRequest = asyncHandler(async (req, res) => {
   return res.status(200).json({ status: 'Success', result: updated });
 });
 
+const blockUser = asyncHandler(async (req, res) => {
+  const { userId, chatId } = req.body;
+  if (!userId) return res.sendStatus(400);
+  if (String(userId) === String(req.user._id)) {
+    return res.status(400).json({ message: 'You cannot block yourself.' });
+  }
+
+  await Promise.all([
+    // User level — global block list
+    User.findByIdAndUpdate(req.user._id, { $addToSet: { blockedUsers: userId } }),
+    // Chat level — mark which side blocked within this chat
+    chatId
+      ? Chat.findByIdAndUpdate(chatId, { $addToSet: { blockedBy: req.user._id } })
+      : Promise.resolve(),
+  ]);
+
+  if (chatId) {
+    await cache.del(
+      cache.generateKey('chats', 'user', req.user._id),
+      cache.generateKey('chats', 'user', userId)
+    );
+  }
+
+  return res.status(200).json({ status: 'Success', message: 'User blocked.' });
+});
+
+const unblockUser = asyncHandler(async (req, res) => {
+  const { userId, chatId } = req.body;
+  if (!userId) return res.sendStatus(400);
+
+  await Promise.all([
+    User.findByIdAndUpdate(req.user._id, { $pull: { blockedUsers: userId } }),
+    chatId
+      ? Chat.findByIdAndUpdate(chatId, { $pull: { blockedBy: req.user._id } })
+      : Promise.resolve(),
+  ]);
+
+  if (chatId) {
+    await cache.del(
+      cache.generateKey('chats', 'user', req.user._id),
+      cache.generateKey('chats', 'user', userId)
+    );
+  }
+
+  return res.status(200).json({ status: 'Success', message: 'User unblocked.' });
+});
+
+const getBlockStatus = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  const chat = await Chat.findById(chatId).select('blockedBy users');
+  if (!chat) return res.status(404).json({ message: 'Chat not found' });
+
+  const blockedBy = (chat.blockedBy || []).map(String);
+  const currentId = String(req.user._id);
+  const otherId = chat.users.map(String).find(id => id !== currentId);
+
+  return res.status(200).json({
+    iBlockedThem: blockedBy.includes(currentId),
+    theyBlockedMe: otherId ? blockedBy.includes(otherId) : false,
+  });
+});
+
 module.exports = {
   accessChat,
   fetchChats,
@@ -390,4 +452,7 @@ module.exports = {
   fetchMessageRequests,
   acceptRequest,
   rejectRequest,
+  blockUser,
+  unblockUser,
+  getBlockStatus,
 };

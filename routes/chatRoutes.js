@@ -9,6 +9,9 @@ const {
   fetchMessageRequests,
   acceptRequest,
   rejectRequest,
+  blockUser,
+  unblockUser,
+  getBlockStatus,
 } = require("../controllers/chatControllers");
 const { protect } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -32,5 +35,8 @@ router.route("/groupadd").put(protect, validate({ body: groupMemberBody }), addT
 router.route("/requests").get(protect, fetchMessageRequests);
 router.route("/:chatId/accept").put(protect, acceptRequest);
 router.route("/:chatId/reject").put(protect, rejectRequest);
+router.route("/block").post(protect, blockUser);
+router.route("/unblock").post(protect, unblockUser);
+router.route("/:chatId/block-status").get(protect, getBlockStatus);
 
 module.exports = router;
