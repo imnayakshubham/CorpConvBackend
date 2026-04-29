@@ -191,6 +191,9 @@ const userSchema = mongoose.Schema({
   },
   usernameChangedAt: { type: Date, default: null },
   usernameHistory: [{ username: String, changedAt: Date }],
+
+  secondary_email_change_count: { type: Number, default: 0 },
+  secondary_email_change_year: { type: Number, default: null },
 }, { timestamps: true });
 
 // Unique sparse index  - sparse allows multiple documents with username: null

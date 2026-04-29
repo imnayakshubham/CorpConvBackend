@@ -128,6 +128,45 @@ const usernameWriteLimiter = rateLimit({
   handler: buildHandler('Too many username change attempts, please try again later.'),
 });
 
+// Secondary email OTP send  - 3 requests / 15 min per authenticated user
+const emailOtpSendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_EMAIL_OTP_SEND_MAX ?? '3', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
+  handler: buildHandler('Too many verification code requests. Please wait 15 minutes.'),
+});
+
+// Secondary email OTP verify  - 5 attempts / 15 min per authenticated user
+const emailOtpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_EMAIL_OTP_VERIFY_MAX ?? '5', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
+  handler: buildHandler('Too many OTP verification attempts. Please request a new code.'),
+});
+
+// Backup code generation  - 3 / hour per authenticated user
+const backupCodeGenerateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_BACKUP_CODE_GENERATE_MAX ?? '3', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
+  handler: buildHandler('Too many backup code generation requests. Try again in an hour.'),
+});
+
+// Backup code verification  - 5 attempts / 15 min per IP
+const backupCodeVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_BACKUP_CODE_VERIFY_MAX ?? '5', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: buildHandler('Too many backup code attempts. Please wait before trying again.'),
+});
+
 module.exports = {
   globalLimiter,
   authLimiter,
@@ -138,4 +177,8 @@ module.exports = {
   adminLimiter,
   usernameCheckLimiter,
   usernameWriteLimiter,
+  emailOtpSendLimiter,
+  emailOtpVerifyLimiter,
+  backupCodeGenerateLimiter,
+  backupCodeVerifyLimiter,
 };
