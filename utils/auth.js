@@ -60,6 +60,10 @@ const getAuth = async () => {
                         type: "string",
                         defaultValue: null
                     },
+                    user_public_location: {
+                        type: String,
+                        default: null
+                    },
                     user_job_role: {
                         type: "string",
                         defaultValue: null

@@ -20,6 +20,10 @@ const userSchema = mongoose.Schema({
     type: String,
     default: null
   },
+  user_public_location: {
+    type: String,
+    default: null
+  },
   user_job_role: {
     type: String,
     default: null
