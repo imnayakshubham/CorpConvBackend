@@ -37,6 +37,9 @@ const {
   userIdParam,
 } = require("../validators/userSchemas");
 
+const secondaryEmailRoutes = require('./secondaryEmailRoutes');
+const backupCodeRoutes = require('./backupCodeRoutes');
+
 const router = express.Router();
 
 router.route("/user").get(protect, validate({ query: searchQuery }), allUsers);
@@ -67,5 +70,11 @@ router.route("/update-qr-config").post(protect, validate({ body: updateQRConfigB
 
 // Profile view tracking
 router.route("/track-profile-view/:id").post(optionalAuth, trackingLimiter, validate({ params: userIdParam }), trackProfileView);
+
+// Secondary email management (validate, save, remove; OTP flow ready for future activation)
+router.use('/secondary-email', secondaryEmailRoutes);
+
+// Backup / recovery codes (MFA fallback)
+router.use('/backup-codes', backupCodeRoutes);
 
 module.exports = router;

@@ -21,6 +21,78 @@ const getAuth = async () => {
         const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
         const { customSession, admin } = await import("better-auth/plugins");
         const { passkey } = await import("@better-auth/passkey");
+        const { createAuthEndpoint } = await import("@better-auth/core/api");
+        const { setSessionCookie } = await import("better-auth/cookies");
+        const { APIError } = await import("better-auth");
+
+        const UserModel = require("../models/userModel");
+        const BackupCode = require("../models/backupCodesModel");
+        const z = require("zod");
+
+        const accountRecoveryPlugin = () => ({
+            id: "account-recovery",
+            endpoints: {
+                signInAccountRecovery: createAuthEndpoint(
+                    "/sign-in/account-recovery",
+                    {
+                        method: "POST",
+                        body: z.object({
+                            email: z.string().email().max(254),
+                            backupCode: z.string().regex(/^[A-Fa-f0-9]{5}-[A-Fa-f0-9]{5}$/i, "Invalid backup code format"),
+                        }).strict(),
+                        metadata: { openapi: { description: "Recover account using backup code" } },
+                    },
+                    async (ctx) => {
+                        const { email, backupCode } = ctx.body;
+                        const ip =
+                            ctx.request?.headers?.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+                            ctx.request?.headers?.get("x-real-ip") ||
+                            "unknown";
+
+                        const normalizedEmail = email.toLowerCase().trim();
+                        const user = await UserModel.findOne({
+                            $or: [
+                                { user_email_id: normalizedEmail },
+                                { secondary_email_id: normalizedEmail, is_secondary_email_id_verified: true },
+                            ],
+                        });
+
+                        const INVALID_MSG = "Invalid email or backup code.";
+                        if (!user || !user.access) {
+                            throw new APIError("UNAUTHORIZED", { message: INVALID_MSG });
+                        }
+
+                        const result = await BackupCode.verifyCode(user._id, backupCode.toUpperCase(), ip);
+                        if (!result.valid) {
+                            throw new APIError("UNAUTHORIZED", { message: INVALID_MSG });
+                        }
+
+                        const baUser = await ctx.context.internalAdapter.findUserById(user._id.toString());
+                        if (!baUser) {
+                            throw new APIError("INTERNAL_SERVER_ERROR", { message: "Failed to load user" });
+                        }
+
+                        const session = await ctx.context.internalAdapter.createSession(baUser.id);
+                        if (!session) {
+                            throw new APIError("INTERNAL_SERVER_ERROR", { message: "Failed to create session" });
+                        }
+
+                        await setSessionCookie(ctx, { session, user: baUser });
+
+                        return ctx.json({
+                            status: "Success",
+                            message: "Recovery successful. You are now logged in.",
+                            remainingCodes: result.remaining,
+                        });
+                    }
+                ),
+            },
+            rateLimit: [{
+                pathMatcher(path) { return path === "/sign-in/account-recovery"; },
+                window: 900,
+                max: 5,
+            }],
+        });
 
         const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
 
@@ -59,6 +131,10 @@ const getAuth = async () => {
                     user_location: {
                         type: "string",
                         defaultValue: null
+                    },
+                    user_public_location: {
+                        type: String,
+                        default: null
                     },
                     user_job_role: {
                         type: "string",
@@ -318,6 +394,7 @@ const getAuth = async () => {
                 },
             },
             plugins: [
+                accountRecoveryPlugin(),
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',

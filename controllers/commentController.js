@@ -59,8 +59,8 @@ const postComments = async (req, res) => {
                 actorId: commented_by,
                 receiverId: post.posted_by,
                 type: "COMMENT",
-                targetId: newComment._id,
-                targetType: "comment",
+                targetId: post_id,
+                targetType: "post",
               });
             }
           })
@@ -122,8 +122,8 @@ const postReplyComments = async (req, res) => {
                 actorId: commented_by,
                 receiverId: parentComment.commented_by,
                 type: "REPLY",
-                targetId: newComment._id,
-                targetType: "comment",
+                targetId: post_id,
+                targetType: "post",
               });
             }
           })
