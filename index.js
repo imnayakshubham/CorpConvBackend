@@ -140,6 +140,7 @@ app.use("/api/post", trackActivity, postRoutes);
 app.use("/api/comment", trackActivity, commentRoutes);
 app.use("/api/question", trackActivity, questionRoutes);
 app.use("/api/survey", trackActivity, surveyRoutes);
+app.use("/api/survey", require('./routes/hushAiRoutes'));
 app.use("/api/notification", notificationRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);

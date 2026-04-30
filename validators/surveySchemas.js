@@ -57,6 +57,19 @@ const surveyIdParam = z.object({
 // No query params expected; unknown keys are silently stripped.
 const tagsQuery = z.object({}).strip();
 
+const hushAiChatBody = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().min(1).max(10000),
+  })).min(1).max(50),
+  surveyContext: z.object({
+    survey_title: z.string().max(200),
+    survey_description: z.string().max(2000).optional(),
+    survey_form: z.array(z.record(z.string(), z.unknown())).max(100),
+    pages: z.array(z.record(z.string(), z.unknown())).max(20),
+  }),
+}).strict();
+
 module.exports = {
   createSurveyBody,
   editSurveyBody,
@@ -64,4 +77,5 @@ module.exports = {
   listSurveysQuery,
   surveyIdParam,
   tagsQuery,
+  hushAiChatBody,
 };
