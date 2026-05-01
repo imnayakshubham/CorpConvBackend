@@ -8,6 +8,7 @@ const { getIo } = require("../utils/socketManger");
 const cache = require("../redisClient/cacheHelper");
 
 const SENDER_SELECT = "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic";
+const MESSAGE_PAGE_SIZE = 20;
 
 async function populateMessage(msg) {
   msg = await msg.populate("sender", SENDER_SELECT);
@@ -21,34 +22,51 @@ async function populateMessage(msg) {
 
 const allMessages = asyncHandler(async (req, res) => {
   try {
+    const { before, limit } = req.query;
+    const parsedLimit = Math.min(parseInt(limit, 10) || MESSAGE_PAGE_SIZE, 100);
+    const isPaginating = !!before;
+
+    // Mark all unread as read (idempotent)
     await Message.updateMany(
       { chat: req.params.chatId, readBy: { $nin: [req.user._id] } },
       { $addToSet: { readBy: req.user._id } }
     );
 
-    const messages = await Message.find({ chat: req.params.chatId })
+    const filter = { chat: req.params.chatId };
+    if (before) {
+      const cursorMsg = await Message.findById(before, 'createdAt').lean();
+      if (cursorMsg) filter.createdAt = { $lt: cursorMsg.createdAt };
+    }
+
+    const messages = await Message.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(parsedLimit)
       .populate("sender", SENDER_SELECT)
       .populate({ path: "replyTo", select: "content sender isDeleted", populate: { path: "sender", select: "public_user_name" } })
       .populate("chat");
 
-    const updateChatData = await Chat.findByIdAndUpdate(
-      { _id: req.params.chatId },
-      {
-        unreadMessage: [],
-        $set: { [`unreadCounts.${req.user._id}`]: 0 },
-      },
-      { new: true }
-    )
-      .populate({ path: "users", select: SENDER_SELECT })
-      .populate("groupAdmin")
-      .populate("latestMessage");
+    // Reverse to chronological order (oldest first) for display
+    messages.reverse();
 
-    await User.populate(updateChatData, { path: "latestMessage.sender", select: SENDER_SELECT });
+    const hasMore = messages.length === parsedLimit;
 
-    // Invalidate the chat list cache so the next fetchChats returns unreadCounts = 0
-    await cache.del(cache.generateKey('chats', 'user', req.user._id));
+    // Only fetch chatData on initial load (no cursor) to avoid redundant DB work
+    let chatData = null;
+    if (!isPaginating) {
+      chatData = await Chat.findByIdAndUpdate(
+        { _id: req.params.chatId },
+        { unreadMessage: [], $set: { [`unreadCounts.${req.user._id}`]: 0 } },
+        { new: true }
+      )
+        .populate({ path: "users", select: SENDER_SELECT })
+        .populate("groupAdmin")
+        .populate("latestMessage");
 
-    res.status(200).send({ status: "Success", message: "chats found for the user.", result: { messages, chatData: updateChatData } });
+      await User.populate(chatData, { path: "latestMessage.sender", select: SENDER_SELECT });
+      await cache.del(cache.generateKey('chats', 'user', req.user._id));
+    }
+
+    res.status(200).send({ status: "Success", message: "chats found for the user.", result: { messages, chatData, hasMore } });
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
