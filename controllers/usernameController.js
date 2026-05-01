@@ -13,7 +13,7 @@ const RESERVED = new Set([
   'settings', 'profile', 'dashboard', 'explore', 'search',
   'notifications', 'messages', 'chats', 'post', 'posts',
   'user', 'users', 'login', 'logout', 'signup', 'register',
-  'me', 'home', 'feed', 'jobs', 'surveys', 'answerlink',
+  'me', 'home', 'feed', 'jobs', 'surveys', 'answerlink', "qna", "polls",
   // Next.js route segments
   'analytics', 'affiliate-links', 'affiliatelinks', 'links',
   'changelog', 'report', 'r', 'answer', 'question', 'questions',
@@ -21,7 +21,61 @@ const RESERVED = new Set([
   // Settings sub-routes
   'account', 'general',
   // Common reserved
-  'onboarding', 'verify', '404', '500',
+  'onboarding', 'verify', '404', '500', "login", "signup", "sign-up", "sign-in", "signin", "poll", "polls", "hushwork",
+  // System / Infra (VERY important)
+  'administrator', 'superadmin', 'superuser', 'owner', 'host',
+  'hostname', 'server', 'backend', 'frontend', 'client',
+  'null', 'undefined', 'true', 'false', 'public', 'private',
+
+  // Network / system accounts (from Unix-like systems)
+  'daemon', 'bin', 'sys', 'sync', 'shutdown', 'halt',
+  'operator', 'nobody', 'nogroup', 'tty', 'ftp', 'irc',
+  'smtp', 'pop', 'imap', 'dns', 'dhcp', 'ssh', 'sshd',
+  'mysql', 'postgres', 'mongodb', 'redis',
+
+  // Email / communication
+  'mailer', 'mailer-daemon', 'postmaster', 'webmaster',
+  'hostmaster', 'usenet', 'news',
+
+  // Auth / security sensitive
+  'auth', 'authorize', 'authentication', 'oauth',
+  'token', 'session', 'password', 'pass', 'passwd',
+  'secure', 'accounting', 'billing',
+
+  // Common routes / pages
+  'about', 'about-us', 'team', 'careers', 'company',
+  'press', 'blog', 'status', 'docs', 'documentation',
+  'faq', 'support-center', 'helpdesk', 'contact-us',
+
+  // App structure / dev
+  'app', 'apps', 'dev', 'prod', 'staging', 'test',
+  'debug', 'logs', 'errors', 'assets', 'static',
+  'uploads', 'files', 'cdn', 'content',
+
+  // API / integrations
+  'graphql', 'rest', 'webhook', 'webhooks', 'callback',
+  'integrations', 'plugins', 'extensions',
+
+  // Generic nouns (avoid collisions)
+  'all', 'everyone', 'someone', 'anyone',
+  'admin1', 'admin123', 'user1', 'guest', 'default',
+
+  // Short / high-value handles
+  'a', 'i', 'me', 'you', 'we', 'us',
+
+  // Commerce / business
+  'store', 'shop', 'cart', 'checkout', 'orders',
+  'payments', 'wallet', 'transactions', 'invoice',
+
+  // Social features
+  'like', 'likes', 'comment', 'comments',
+  'share', 'shares', 'followers', 'following',
+
+  // Moderation
+  'moderator', 'mod', 'staff', 'team', 'officials',
+
+  // Misc risky
+  'owner', 'founder', 'ceo', 'adminteam'
 ]);
 
 const USERNAME_REGEX = /^[a-z0-9._]{3,30}$/;
@@ -181,7 +235,7 @@ const setUsername = asyncHandler(async (req, res) => {
     });
 
     // Invalidate old username's cache entry so it becomes available after cooldown
-    cache.del(takenCacheKey(previousUsername)).catch(() => {});
+    cache.del(takenCacheKey(previousUsername)).catch(() => { });
   }
 
   // Mark new username as taken in Redis
