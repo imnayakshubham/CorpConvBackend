@@ -15,6 +15,7 @@
   "author": "Nayak Shubham",
   "license": "ISC",
   "dependencies": {
+    "@ai-sdk/groq": "^3.0.37",
     "@better-auth/passkey": "^1.4.17",
     "@langchain/core": "^1.1.42",
     "@langchain/groq": "^1.2.0",
