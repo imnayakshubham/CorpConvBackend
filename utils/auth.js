@@ -22,6 +22,7 @@ const getAuth = async () => {
         const { customSession, admin } = await import("better-auth/plugins");
         const { passkey } = await import("@better-auth/passkey");
         const { createAuthEndpoint } = await import("@better-auth/core/api");
+        const { sensitiveSessionMiddleware } = await import("better-auth/api");
         const { setSessionCookie } = await import("better-auth/cookies");
         const { APIError } = await import("better-auth");
 
@@ -32,6 +33,42 @@ const getAuth = async () => {
         const accountRecoveryPlugin = () => ({
             id: "account-recovery",
             endpoints: {
+                // better-auth's built-in setPassword is created without an HTTP path,
+                // so it never gets registered in the router. This re-exposes it with
+                // an explicit /set-password path so OAuth-only users can add a password.
+                setPassword: createAuthEndpoint(
+                    "/set-password",
+                    {
+                        method: "POST",
+                        body: z.object({ newPassword: z.string() }).strict(),
+                        use: [sensitiveSessionMiddleware],
+                    },
+                    async (ctx) => {
+                        const { newPassword } = ctx.body;
+                        const session = ctx.context.session;
+                        const minLen = ctx.context.password.config.minPasswordLength;
+                        const maxLen = ctx.context.password.config.maxPasswordLength;
+                        if (newPassword.length < minLen) {
+                            throw new APIError("BAD_REQUEST", { message: "Password is too short" });
+                        }
+                        if (newPassword.length > maxLen) {
+                            throw new APIError("BAD_REQUEST", { message: "Password is too long" });
+                        }
+                        const accounts = await ctx.context.internalAdapter.findAccounts(session.user.id);
+                        const credAccount = accounts.find(a => a.providerId === "credential" && a.password);
+                        if (credAccount) {
+                            throw new APIError("BAD_REQUEST", { message: "user already has a password" });
+                        }
+                        const passwordHash = await ctx.context.password.hash(newPassword);
+                        await ctx.context.internalAdapter.linkAccount({
+                            userId: session.user.id,
+                            providerId: "credential",
+                            accountId: session.user.id,
+                            password: passwordHash,
+                        });
+                        return ctx.json({ status: true });
+                    }
+                ),
                 signInAccountRecovery: createAuthEndpoint(
                     "/sign-in/account-recovery",
                     {
@@ -108,6 +145,9 @@ const getAuth = async () => {
             baseURL: process.env.BETTER_AUTH_URL,
             database: mongodbAdapter(db),
             appName: "hushwork",
+            emailAndPassword: {
+                enabled: true,
+            },
             trustedOrigins: allowedOrigins,
             user: {
                 modelName: "users",
@@ -387,7 +427,10 @@ const getAuth = async () => {
                                 }
                             }
                             if (user) {
-                                eventBus.emit('user:login', user);
+                                // Fetch email only for the Slack notification — never cached, never sent to client
+                                const User = require('../models/userModel');
+                                const emailDoc = await User.findById(session.userId, { user_email_id: 1, _id: 0 }).lean();
+                                eventBus.emit('user:login', { ...user, user_email_id: emailDoc?.user_email_id });
                             }
                         },
                     },
