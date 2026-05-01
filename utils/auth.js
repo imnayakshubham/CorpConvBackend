@@ -355,7 +355,15 @@ const getAuth = async () => {
                     username: {
                         type: "string",
                         defaultValue: null,
-                    }
+                    },
+                    current_plan: {
+                        type: "string",
+                        defaultValue: "free",
+                    },
+                    ai_calls_this_month: {
+                        type: "number",
+                        defaultValue: 0,
+                    },
                 }
             },
             socialProviders: {
@@ -403,7 +411,6 @@ const getAuth = async () => {
                             if (userId) {
 
                                 const cacheKey = cache.generateKey('user', 'info', userId);
-
                                 await cache.set(cacheKey, user, cacheTTL.USER_PROFILE);
                             }
                             eventBus.emit('user:signup', user);

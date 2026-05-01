@@ -194,6 +194,8 @@ const userSchema = mongoose.Schema({
 
   secondary_email_change_count: { type: Number, default: 0 },
   secondary_email_change_year: { type: Number, default: null },
+  current_plan: { type: String, default: 'free' },
+  ai_calls_this_month: { type: Number, default: 0 },
 }, { timestamps: true });
 
 // Unique sparse index  - sparse allows multiple documents with username: null
