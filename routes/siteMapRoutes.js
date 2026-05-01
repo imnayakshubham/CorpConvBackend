@@ -17,7 +17,7 @@ const listData = async (req, res) => {
 
         const allSurveys = surveys.map((s) => ({ path: `survey/${s._id}`, lastModified: s.createdAt }))
         const allUsers = users.map((u) => ({ path: `user/${u._id}`, lastModified: u.createdAt }))
-        const allQuestions = questions.map((q) => ({ path: `answerlink/question/${q._id}`, lastModified: q.createdAt }))
+        const allQuestions = questions.map((q) => ({ path: `qna/question/${q._id}`, lastModified: q.createdAt }))
         const allPosts = posts.map((p) => ({ path: `post/${p._id}`, lastModified: p.createdAt }))
 
         return res.status(200).json({
