@@ -15,6 +15,14 @@ const messageSchema = mongoose.Schema(
       emoji: { type: String, required: true },
       userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     }],
+    links: [{
+      url: { type: String },
+      title: { type: String, default: '' },
+      description: { type: String, default: '' },
+      image: { type: String, default: null },
+      favicon: { type: String, default: null },
+      author: { type: String, default: '' },
+    }],
   },
   { timestamps: true }
 );

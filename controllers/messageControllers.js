@@ -6,8 +6,16 @@ const ActivityEvent = require("../models/activityEventModel");
 const notificationService = require("../utils/notificationService");
 const { getIo } = require("../utils/socketManger");
 const cache = require("../redisClient/cacheHelper");
+const { fetchLinkMetadata } = require("../utils/fetchLinkMetadata");
 
-const SENDER_SELECT = "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic";
+const URL_REGEX = /https?:\/\/[^\s<>'"]+/g;
+
+function extractUrls(text) {
+  const matches = text.match(URL_REGEX) || [];
+  return [...new Set(matches)].slice(0, 3);
+}
+
+const SENDER_SELECT = "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic";
 const MESSAGE_PAGE_SIZE = 20;
 
 async function populateMessage(msg) {
@@ -128,6 +136,25 @@ const sendMessage = asyncHandler(async (req, res) => {
     });
 
     res.json(message);
+
+    // Fire-and-forget: extract URLs and fetch OG metadata without blocking the response.
+    const urls = extractUrls(content);
+    if (urls.length > 0) {
+      (async () => {
+        try {
+          const settled = await Promise.allSettled(urls.map(url => fetchLinkMetadata(url)));
+          const links = settled
+            .filter(r => r.status === 'fulfilled' && r.value?.url)
+            .map(r => r.value);
+          if (links.length === 0) return;
+          await Message.findByIdAndUpdate(message._id, { links });
+          const io = getIo();
+          if (io) {
+            io.to(chatId).emit('message_links_updated', { messageId: message._id, links });
+          }
+        } catch (_) { /* silently ignore */ }
+      })();
+    }
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
