@@ -19,7 +19,7 @@ const accessChat = asyncHandler(async (req, res) => {
       let selfChat = await Chat.findOne({
         isGroupChat: false,
         users: { $size: 1, $all: [req.user._id] },
-      }).populate({ path: 'users', select: 'public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic' })
+      }).populate({ path: 'users', select: 'public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic' })
         .populate('latestMessage');
 
       if (!selfChat) {
@@ -30,7 +30,7 @@ const accessChat = asyncHandler(async (req, res) => {
           status: 'accepted',
         });
         selfChat = await Chat.findById(created._id)
-          .populate({ path: 'users', select: 'public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic' });
+          .populate({ path: 'users', select: 'public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic' });
         await cache.del(cache.generateKey('chats', 'user', req.user._id));
       }
 
@@ -44,7 +44,7 @@ const accessChat = asyncHandler(async (req, res) => {
         { users: { $elemMatch: { $eq: req.user._id } } },
         { users: { $elemMatch: { $eq: userId } } },
       ],
-    }).populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name" })
+    }).populate({ path: "users", select: "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic" })
       .populate("latestMessage");
 
     isChat = await User.populate(isChat, {
@@ -118,7 +118,7 @@ const fetchChats = asyncHandler(async (req, res) => {
     })
       .populate({
         path: "users",
-        select: "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic"
+        select: "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic"
       })
       .populate("groupAdmin")
       .populate("latestMessage")
@@ -357,7 +357,7 @@ const acceptRequest = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Only the recipient can accept this request.' });
   }
   const updated = await Chat.findByIdAndUpdate(req.params.chatId, { status: 'accepted' }, { new: true })
-    .populate({ path: "users", select: "public_user_name username user_job_experience user_current_company_name avatar_config user_public_profile_pic" })
+    .populate({ path: "users", select: "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic" })
     .populate("latestMessage");
   await cache.del(
     cache.generateKey('chats', 'user', req.user._id),
