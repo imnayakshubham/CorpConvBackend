@@ -40,6 +40,28 @@ const questionSchema = new mongoose.Schema({
             ref: 'User',
         },
     ],
+    status: {
+        type: String,
+        enum: ['draft', 'open', 'closed'],
+        default: 'open',
+    },
+    visibility: {
+        type: String,
+        enum: ['public', 'workspace'],
+        default: 'public',
+    },
+    workspace_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        default: null,
+    },
+    openAt: {
+        type: Date,
+        default: null,
+    },
+    closeAt: {
+        type: Date,
+        default: null,
+    },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Question', questionSchema);

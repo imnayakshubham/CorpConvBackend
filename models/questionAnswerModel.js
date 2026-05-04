@@ -32,7 +32,16 @@ const answerSchema = new mongoose.Schema({
     access: {
         type: Boolean,
         default: true
-    }
+    },
+    parent_answer_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AnswerToQuestion',
+        default: null,
+    },
+    is_resolved: {
+        type: Boolean,
+        default: false,
+    },
 }, { timestamps: true });
 
 module.exports = mongoose.model('AnswerToQuestion', answerSchema);

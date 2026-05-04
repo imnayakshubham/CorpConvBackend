@@ -18,6 +18,7 @@ const protect = asyncHandler(async (req, res, next) => {
 
       if (session) {
         req.user = session.user;
+        req.activeOrganizationId = session?.session?.activeOrganizationId ?? null;
 
         if (session.user) {
           const dbUser = await User.findById(session.user.id || session.user._id);
@@ -79,6 +80,7 @@ const optionalAuth = asyncHandler(async (req, _res, next) => {
         const dbUser = await User.findById(session.user.id || session.user._id);
         if (dbUser && dbUser.access) {
           req.user = dbUser;
+          req.activeOrganizationId = session?.session?.activeOrganizationId ?? null;
           return next();
         }
       }

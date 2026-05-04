@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const QuestionModel = require("../models/questionModel")
 const ActivityEvent = require("../models/activityEventModel")
 const { getIo } = require("../utils/socketManger")
@@ -10,12 +11,33 @@ const escapeRegex = require("../utils/escapeRegex")
 const createquestion = async (req, res) => {
     try {
         const question_posted_by = req.user._id
-        const newQuestion = await QuestionModel.create({ question_posted_by })
+        const { question, status: rawStatus, visibility = 'public', openAt, closeAt } = req.body || {};
+
+        // Derive status from dates if not explicitly set
+        let status = rawStatus || 'open';
+        if (!rawStatus) {
+            if (openAt && new Date(openAt) > new Date()) {
+                status = 'draft';
+            } else if (closeAt && new Date(closeAt) < new Date()) {
+                status = 'closed';
+            }
+        }
+
+        // Only attach workspace_id for workspace-scoped questions
+        const workspace_id = visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
+
+        const newQuestion = await QuestionModel.create({
+            question_posted_by,
+            ...(question && { question }),
+            status,
+            visibility,
+            workspace_id,
+            openAt: openAt ? new Date(openAt) : null,
+            closeAt: closeAt ? new Date(closeAt) : null,
+        })
         if (newQuestion) {
-            // Invalidate questions list cache
             await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`)
 
-            // Populate and broadcast to questions_list room
             const populatedQuestion = await newQuestion.populate(
                 'question_posted_by',
                 'public_user_name user_public_profile_pic'
@@ -37,7 +59,6 @@ const createquestion = async (req, res) => {
             })
         }
     } catch (error) {
-
         console.log({ error })
         return res.status(500).json({
             data: null,
@@ -55,12 +76,11 @@ const getquestions = async (req, res) => {
         const sortBy = req.query.sortBy || 'newest';
         const filter = req.query.filter || 'all';
         const userId = req.query.userId || null;
+        const activeOrganizationId = req.activeOrganizationId || null;
 
-        // Only cache first page with no search/filter (standard list view)
         const shouldCache = !cursor && !search.trim() && filter === 'all';
         const cacheKey = shouldCache ? cache.generateKey('questions', 'list', sortBy, filter) : null;
 
-        // Try to get from cache for first page
         if (shouldCache) {
             const cached = await cache.get(cacheKey);
             if (cached) {
@@ -72,64 +92,90 @@ const getquestions = async (req, res) => {
             }
         }
 
-        // Build query
-        let query = { access: true };
+        // Build base match query
+        let matchQuery = { access: true };
 
-        // Filter: my questions
+        // Workspace visibility: only include workspace questions if user is in that workspace
+        if (activeOrganizationId) {
+            matchQuery.$or = [
+                { visibility: 'public' },
+                { visibility: 'workspace', workspace_id: new mongoose.Types.ObjectId(activeOrganizationId) }
+            ];
+        } else {
+            matchQuery.visibility = 'public';
+        }
+
         if (filter === 'my-questions' && userId) {
-            query.question_posted_by = userId;
+            matchQuery.question_posted_by = new mongoose.Types.ObjectId(userId);
         }
 
-        // Search: case-insensitive regex
         if (search.trim()) {
-            query.question = { $regex: escapeRegex(search.trim()), $options: 'i' };
+            matchQuery.question = { $regex: escapeRegex(search.trim()), $options: 'i' };
         }
 
-        // Cursor pagination (for newest/oldest)
+        // Cursor pagination
         if (cursor) {
             if (sortBy === 'oldest') {
-                query.createdAt = { $gt: new Date(cursor) };
-            } else {
-                query.createdAt = { $lt: new Date(cursor) };
+                matchQuery.createdAt = { $gt: new Date(cursor) };
+            } else if (sortBy === 'newest') {
+                matchQuery.createdAt = { $lt: new Date(cursor) };
             }
         }
 
-        let questions;
+        const sortStage = sortBy === 'oldest'
+            ? { createdAt: 1 }
+            : sortBy === 'most-answers'
+                ? { answersCount: -1, createdAt: -1 }
+                : sortBy === 'most-liked'
+                    ? { likedCount: -1, createdAt: -1 }
+                    : { createdAt: -1 };
 
-        if (sortBy === 'most-answers' || sortBy === 'most-liked') {
-            // Aggregation for computed sorts
-            const sortField = sortBy === 'most-answers' ? 'answersCount' : 'likedCount';
-            const pipeline = [
-                { $match: query },
-                {
-                    $addFields: {
-                        answersCount: { $size: { $ifNull: ['$answers', []] } },
-                        likedCount: { $size: { $ifNull: ['$liked_by', []] } }
-                    }
-                },
-                { $sort: { [sortField]: -1, createdAt: -1 } },
-                { $limit: limit + 1 },
-                {
-                    $lookup: {
-                        from: 'users',
-                        localField: 'question_posted_by',
-                        foreignField: '_id',
-                        as: 'question_posted_by',
-                        pipeline: [{ $project: { public_user_name: 1, user_public_profile_pic: 1 } }]
-                    }
-                },
-                { $unwind: { path: '$question_posted_by', preserveNullAndEmptyArrays: true } }
-            ];
-            questions = await QuestionModel.aggregate(pipeline);
-        } else {
-            // Simple find for date sorts
-            const sortOptions = sortBy === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
-            questions = await QuestionModel.find(query)
-                .sort(sortOptions)
-                .limit(limit + 1)
-                .populate('question_posted_by', 'public_user_name user_public_profile_pic')
-                .lean();
-        }
+        // Single unified aggregation pipeline for all sort types.
+        // Uses $lookup to count only access:true answers (fixes stale-count bug).
+        const pipeline = [
+            { $match: matchQuery },
+            {
+                $lookup: {
+                    from: 'answertoquestions',
+                    let: { answerIds: { $ifNull: ['$answers', []] } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $in: ['$_id', '$$answerIds'] },
+                                        { $eq: ['$access', true] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $count: 'n' }
+                    ],
+                    as: '_activeAnswerCount'
+                }
+            },
+            {
+                $addFields: {
+                    answersCount: { $ifNull: [{ $arrayElemAt: ['$_activeAnswerCount.n', 0] }, 0] },
+                    likedCount: { $size: { $ifNull: ['$liked_by', []] } },
+                }
+            },
+            { $project: { _activeAnswerCount: 0, answers: 0 } },
+            { $sort: sortStage },
+            { $limit: limit + 1 },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'question_posted_by',
+                    foreignField: '_id',
+                    as: 'question_posted_by',
+                    pipeline: [{ $project: { public_user_name: 1, user_public_profile_pic: 1, avatar_config: 1 } }]
+                }
+            },
+            { $unwind: { path: '$question_posted_by', preserveNullAndEmptyArrays: true } }
+        ];
+
+        const questions = await QuestionModel.aggregate(pipeline);
 
         const hasMore = questions.length > limit;
         const resultQuestions = hasMore ? questions.slice(0, limit) : questions;
@@ -139,7 +185,6 @@ const getquestions = async (req, res) => {
 
         const responseData = { questions: resultQuestions, nextCursor, hasMore };
 
-        // Cache first page results
         if (shouldCache) {
             await cache.set(cacheKey, responseData, TTL.QUESTIONS_LIST);
         }
@@ -164,7 +209,6 @@ const deletequestion = async (req, res) => {
         const _id = req.params.id
         const updatedQuestion = await QuestionModel.findByIdAndUpdate(_id, { access: false }, { new: true })
         if (updatedQuestion) {
-            // Invalidate caches
             const questionKey = cache.generateKey('question', _id);
             await cache.del(questionKey);
             await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
@@ -182,7 +226,6 @@ const deletequestion = async (req, res) => {
             })
         }
     } catch (error) {
-
         return res.status(500).json({
             data: null,
             status: 'Failed',
@@ -194,11 +237,17 @@ const deletequestion = async (req, res) => {
 const getquestionbyid = async (req, res) => {
     try {
         const _id = req.params.id
+        const activeOrganizationId = req.activeOrganizationId || null;
 
-        // Try to get from cache
         const cacheKey = cache.generateKey('question', _id);
         const cached = await cache.get(cacheKey);
         if (cached) {
+            // Workspace enforcement on cached result
+            if (cached.visibility === 'workspace') {
+                if (!activeOrganizationId || activeOrganizationId !== cached.workspace_id?.toString()) {
+                    return res.status(403).json({ status: 'Failed', message: 'Access restricted to workspace members', data: null });
+                }
+            }
             return res.status(200).json({
                 status: 'Success',
                 data: cached,
@@ -206,7 +255,7 @@ const getquestionbyid = async (req, res) => {
             });
         }
 
-        const question = await QuestionModel.findById(_id)
+        let question = await QuestionModel.findById(_id)
             .populate("question_posted_by", "public_user_name user_public_profile_pic avatar_config")
             .populate({
                 path: "answers",
@@ -217,22 +266,38 @@ const getquestionbyid = async (req, res) => {
                 }
             })
 
-        if (question) {
-            // Cache the question
-            await cache.set(cacheKey, question.toObject(), TTL.QUESTION_DETAIL);
-
-            return res.status(200).json({
-                status: 'Success',
-                data: question,
-                message: "Question Fetched successfully"
-            })
-        } else {
-            return res.status(404).json({
-                status: 'Failed',
-                message: "Question not found",
-                data: null
-            })
+        if (!question) {
+            return res.status(404).json({ status: 'Failed', message: "Question not found", data: null })
         }
+
+        // Workspace enforcement
+        if (question.visibility === 'workspace') {
+            if (!activeOrganizationId || activeOrganizationId !== question.workspace_id?.toString()) {
+                return res.status(403).json({ status: 'Failed', message: 'Access restricted to workspace members', data: null });
+            }
+        }
+
+        // Auto-transition status if closeAt has passed
+        if (question.closeAt && question.closeAt < new Date() && question.status === 'open') {
+            question = await QuestionModel.findByIdAndUpdate(_id, { status: 'closed' }, { new: true })
+                .populate("question_posted_by", "public_user_name user_public_profile_pic avatar_config")
+                .populate({
+                    path: "answers",
+                    match: { access: true },
+                    populate: {
+                        path: "answered_by",
+                        select: "public_user_name user_public_profile_pic avatar_config"
+                    }
+                });
+        }
+
+        await cache.set(cacheKey, question.toObject(), TTL.QUESTION_DETAIL);
+
+        return res.status(200).json({
+            status: 'Success',
+            data: question,
+            message: "Question Fetched successfully"
+        })
     } catch (error) {
         console.log(error)
         return res.status(500).json({
@@ -243,9 +308,43 @@ const getquestionbyid = async (req, res) => {
     }
 }
 
+const updatequestion = async (req, res) => {
+    try {
+        const _id = req.params.id;
+        const question = await QuestionModel.findById(_id);
+        if (!question) {
+            return res.status(404).json({ status: 'Failed', message: 'Question not found', data: null });
+        }
+        if (question.question_posted_by?.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ status: 'Failed', message: 'Not authorised', data: null });
+        }
+        const { status, visibility, openAt, closeAt } = req.body;
+        const updates = {};
+        if (status !== undefined) updates.status = status;
+        if (visibility !== undefined) {
+            updates.visibility = visibility;
+            updates.workspace_id = visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
+        }
+        if (openAt !== undefined) updates.openAt = openAt ? new Date(openAt) : null;
+        if (closeAt !== undefined) updates.closeAt = closeAt ? new Date(closeAt) : null;
+
+        const updated = await QuestionModel.findByIdAndUpdate(_id, updates, { new: true })
+            .populate('question_posted_by', 'public_user_name user_public_profile_pic avatar_config');
+
+        const cacheKey = cache.generateKey('question', _id);
+        await cache.del(cacheKey);
+        await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:questions:list:*`);
+
+        return res.status(200).json({ status: 'Success', data: updated, message: 'Question updated' });
+    } catch (error) {
+        return res.status(500).json({ data: null, status: 'Failed', message: 'Something went Wrong' });
+    }
+};
+
 module.exports = {
     createquestion,
     getquestions,
     deletequestion,
-    getquestionbyid
+    getquestionbyid,
+    updatequestion,
 }

@@ -294,6 +294,10 @@ async function startServer() {
       try {
         updatedAnswer = await questionAnswerModel.findByIdAndUpdate(payload.answer_id, { access: false }, { new: true })
         if (updatedAnswer) {
+          // Remove answer ID from question's answers array to keep count accurate
+          await questionModel.findByIdAndUpdate(payload.question_id, {
+            $pull: { answers: new mongoose.Types.ObjectId(payload.answer_id) }
+          });
           // Update question cache with fresh data
           await updateQuestionCache(payload.question_id);
           await invalidateQuestionsListCache();
@@ -366,7 +370,8 @@ async function startServer() {
         const answerData = {
           answered_by: payload.user_id,
           answer: stripAllHtml(payload.answer?.trim() || ''),
-          question_id: payload.question_id
+          question_id: payload.question_id,
+          ...(payload.parent_answer_id && { parent_answer_id: payload.parent_answer_id }),
         }
 
         try {
@@ -375,7 +380,7 @@ async function startServer() {
             if (!!answerToAquestion.answered_by) {
               await answerToAquestion.populate({
                 path: "answered_by",
-                select: "public_user_name user_public_profile_pic"
+                select: "public_user_name user_public_profile_pic avatar_config"
               })
             } else {
               answerToAquestion = answerToAquestion.toObject();
@@ -588,6 +593,96 @@ async function startServer() {
           status: 'Failed',
           message: "Failed to delete question"
         });
+      }
+    });
+
+    // Upvote/un-upvote an answer with Redis-based rate limiting
+    socket.on("upvote_answer", async (payload) => {
+      const { answer_id, user_id, question_id } = payload;
+      if (!answer_id || !user_id || !question_id) return;
+
+      try {
+        const redis = cache.getRedis();
+
+        // Per-user rate limit: max 20 upvote actions per minute
+        if (redis) {
+            const rateLimitKey = `${process.env.APP_ENV || 'DEV'}:upvote_rl:${user_id}`;
+            const count = await redis.incr(rateLimitKey);
+            if (count === 1) await redis.expire(rateLimitKey, 60);
+            if (count > 20) {
+                socket.emit("upvote_answer_response", {
+                    status: 'Failed',
+                    message: 'Too many upvotes, please slow down.',
+                    data: null
+                });
+                return;
+            }
+        }
+        // (rate limiter skipped if Redis unavailable — fail open)
+
+        const answer = await questionAnswerModel.findOne({ _id: answer_id, access: true });
+        if (!answer) {
+          socket.emit("upvote_answer_response", { status: 'Failed', message: 'Answer not found', data: null });
+          return;
+        }
+
+        const userId = new mongoose.Types.ObjectId(user_id);
+        const alreadyUpvoted = answer.upvoted_by.some(id => id.toString() === user_id);
+
+        const updated = await questionAnswerModel.findByIdAndUpdate(
+          answer_id,
+          alreadyUpvoted ? { $pull: { upvoted_by: userId } } : { $addToSet: { upvoted_by: userId } },
+          { new: true }
+        ).populate('answered_by', 'public_user_name user_public_profile_pic avatar_config');
+
+        await updateQuestionCache(question_id);
+
+        io.to(question_id).emit("upvote_answer_response", {
+          status: 'Success',
+          data: updated,
+          message: alreadyUpvoted ? 'Upvote removed' : 'Upvoted successfully'
+        });
+      } catch (error) {
+        console.error('Error upvoting answer:', error);
+        socket.emit("upvote_answer_response", { status: 'Failed', message: 'Something went wrong', data: null });
+      }
+    });
+
+    // Host toggles resolved state on a top-level answer thread
+    socket.on("toggle_answer_resolved", async (payload) => {
+      const { answer_id, question_id, user_id } = payload;
+      if (!answer_id || !question_id || !user_id) return;
+
+      try {
+        // Only question owner can mark resolved
+        const question = await questionModel.findOne({ _id: question_id, access: true }).select('question_posted_by').lean();
+        if (!question || question.question_posted_by.toString() !== user_id) {
+          socket.emit("answer_resolved_response", { status: 'Failed', message: 'Only the question owner can mark answers as resolved', data: null });
+          return;
+        }
+
+        const answer = await questionAnswerModel.findOne({ _id: answer_id, access: true });
+        if (!answer) {
+          socket.emit("answer_resolved_response", { status: 'Failed', message: 'Answer not found', data: null });
+          return;
+        }
+
+        const updated = await questionAnswerModel.findByIdAndUpdate(
+          answer_id,
+          { is_resolved: !answer.is_resolved },
+          { new: true }
+        ).populate('answered_by', 'public_user_name user_public_profile_pic avatar_config');
+
+        await updateQuestionCache(question_id);
+
+        io.to(question_id).emit("answer_resolved_response", {
+          status: 'Success',
+          data: updated,
+          message: updated.is_resolved ? 'Marked as resolved' : 'Marked as unresolved'
+        });
+      } catch (error) {
+        console.error('Error toggling resolved:', error);
+        socket.emit("answer_resolved_response", { status: 'Failed', message: 'Something went wrong', data: null });
       }
     });
 
