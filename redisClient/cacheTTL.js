@@ -21,4 +21,7 @@ module.exports = {
     BENTO_PROFILE: 7200,           // 2 hours
     BENTO_PAGE_PROFILE: 7200,      // 2 hours
     BENTO_PAGE_BLOCKS: 7200,       // 2 hours
+    POLLS_LIST: 1800,              // 30 minutes
+    POLL_DETAIL: 3600,             // 1 hour
+    POLL_ANALYTICS: 300,           // 5 minutes
 };
