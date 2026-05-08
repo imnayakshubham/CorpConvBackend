@@ -167,6 +167,18 @@ const backupCodeVerifyLimiter = rateLimit({
   handler: buildHandler('Too many backup code attempts. Please wait before trying again.'),
 });
 
+const UPVOTE_MAX = parseInt(process.env.RATE_LIMIT_UPVOTE_MAX ?? '20', 10);
+
+// Answer upvote limiter — 20 upvotes/min per user (for use in socket handlers via Redis)
+const upvoteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: UPVOTE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
+  handler: buildHandler('Too many upvotes, please slow down.'),
+});
+
 module.exports = {
   globalLimiter,
   authLimiter,
@@ -181,4 +193,5 @@ module.exports = {
   emailOtpVerifyLimiter,
   backupCodeGenerateLimiter,
   backupCodeVerifyLimiter,
+  upvoteLimiter,
 };

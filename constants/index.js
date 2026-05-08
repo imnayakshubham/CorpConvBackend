@@ -230,7 +230,28 @@ const projection = {
     username: 1,
     usernameChangedAt: 1,
     usernameHistory: 1,
+    current_plan: 1,
 };
 
 
-module.exports = { jobPostSites, verifiedLinkSources, tokenkeyName, cookieOptions, isProd, MODELS, getModelsByTask, projection }
+const PUBLIC_EMAIL_DOMAINS = new Set([
+    'gmail.com', 'googlemail.com',
+    'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+    'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in', 'ymail.com',
+    'icloud.com', 'me.com', 'mac.com',
+    'aol.com',
+    'protonmail.com', 'pm.me', 'proton.me',
+    'tutanota.com', 'tutamail.com', 'tuta.io',
+    'mail.com', 'inbox.com',
+    'fastmail.com', 'fastmail.fm',
+    'zohomail.com', 'zoho.com',
+    'yandex.com', 'yandex.ru',
+    'hushmail.com',
+    'gmx.com', 'gmx.net', 'gmx.de',
+    'web.de', 't-online.de',
+    'rediffmail.com',
+    'naver.com', 'daum.net',
+    'qq.com', '163.com', '126.com',
+]);
+
+module.exports = { jobPostSites, verifiedLinkSources, tokenkeyName, cookieOptions, isProd, MODELS, getModelsByTask, projection, PUBLIC_EMAIL_DOMAINS }

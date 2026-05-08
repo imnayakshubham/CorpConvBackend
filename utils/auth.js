@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const User = require("../models/userModel");
-const { projection } = require("../constants");
+const { projection, PUBLIC_EMAIL_DOMAINS } = require("../constants");
 const cacheTTL = require("../redisClient/cacheTTL");
 
 let _auth;
@@ -19,7 +19,7 @@ const getAuth = async () => {
         // Dynamic imports for ESM-only packages
         const { betterAuth } = await import("better-auth");
         const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-        const { customSession, admin } = await import("better-auth/plugins");
+        const { customSession, admin, organization } = await import("better-auth/plugins");
         const { passkey } = await import("@better-auth/passkey");
         const { createAuthEndpoint } = await import("@better-auth/core/api");
         const { sensitiveSessionMiddleware } = await import("better-auth/api");
@@ -407,9 +407,8 @@ const getAuth = async () => {
                             console.log({ user })
                             const cache = require('../redisClient/cacheHelper');
                             const eventBus = require('./eventBus');
-                            const userId = user._id || user.id;
+                            const userId = (user._id || user.id)?.toString();
                             if (userId) {
-
                                 const cacheKey = cache.generateKey('user', 'info', userId);
                                 await cache.set(cacheKey, user, cacheTTL.USER_PROFILE);
                             }
@@ -419,9 +418,7 @@ const getAuth = async () => {
                 },
                 session: {
                     create: {
-
                         after: async (session) => {
-
                             const cache = require('../redisClient/cacheHelper');
                             const eventBus = require('./eventBus');
                             const cacheKey = cache.generateKey('user', 'info', session.userId);
@@ -439,12 +436,96 @@ const getAuth = async () => {
                                 const emailDoc = await User.findById(session.userId, { user_email_id: 1, _id: 0 }).lean();
                                 eventBus.emit('user:login', { ...user, user_email_id: emailDoc?.user_email_id });
                             }
+
+                            // Ensure user has a personal workspace; set it as active if session has none
+                            if (!session.activeOrganizationId) {
+                                const orgDb = mongoose.connection.db;
+                                const userId = session.userId.toString();
+                                const personalSlug = `personal-${userId}`;
+
+                                let personalOrg = await orgDb.collection('organization').findOne({ slug: personalSlug });
+
+                                if (!personalOrg) {
+                                    const { randomUUID } = require('crypto');
+                                    const now = new Date();
+                                    const orgId = randomUUID();
+                                    const UserModel = require('../models/userModel');
+                                    const userDoc = await UserModel.findById(userId, { actual_user_name: 1 }).lean();
+                                    const orgName = `${userDoc?.actual_user_name || 'My'}'s Workspace`;
+
+                                    await orgDb.collection('organization').insertOne({
+                                        _id: orgId,
+                                        name: orgName,
+                                        slug: personalSlug,
+                                        logo: null,
+                                        metadata: JSON.stringify({ type: 'personal' }),
+                                        createdAt: now,
+                                        updatedAt: now,
+                                    });
+                                    await orgDb.collection('member').insertOne({
+                                        _id: randomUUID(),
+                                        organizationId: orgId,
+                                        userId,
+                                        role: 'owner',
+                                        createdAt: now,
+                                        teamId: null,
+                                    });
+                                    personalOrg = { _id: orgId };
+                                }
+
+                                await orgDb.collection('sessions').updateOne(
+                                    { _id: session.id },
+                                    { $set: { activeOrganizationId: personalOrg._id } }
+                                );
+                            }
                         },
                     },
                 },
             },
             plugins: [
                 accountRecoveryPlugin(),
+                organization({
+                    allowUserToCreateOrganization: true,
+                    organizationLimit: 3,
+                    membershipLimit: 500,
+                    invitationExpiresIn: 60 * 60 * 48,
+                    schema: {
+                        organization: {
+                            additionalFields: {
+                                type: {
+                                    type: "string",
+                                    required: false,
+                                    defaultValue: "workspace",
+                                },
+                                domain: {
+                                    type: "string",
+                                    required: false,
+                                    defaultValue: null,
+                                },
+                            },
+                        },
+                    },
+                    sendInvitationEmail: async (data) => {
+                        try {
+                            const { sendTemplateEmail } = require('./emailService');
+                            const WorkspaceInviteEmail = require('../emails/WorkspaceInvite');
+                            const inviteLink = `${process.env.FRONTEND_URL}/workspace/invite/${data.id}`;
+                            await sendTemplateEmail({
+                                to: data.email,
+                                subject: `You've been invited to join ${data.organization.name} on Hushwork`,
+                                component: WorkspaceInviteEmail.default,
+                                props: {
+                                    inviterName: data.inviter?.user?.name || data.inviter?.user?.actual_user_name || 'A teammate',
+                                    orgName: data.organization.name,
+                                    role: data.role,
+                                    inviteLink,
+                                },
+                            });
+                        } catch (err) {
+                            console.error('[Workspace] Failed to send invitation email:', err);
+                        }
+                    },
+                }),
                 passkey({
                     rpID: process.env.APP_ENV === 'PROD' ? 'hushworknow.com' : 'localhost',
                     rpName: 'Hushwork',
@@ -463,6 +544,9 @@ const getAuth = async () => {
                         superAdminIds.includes(user?.id?.toString()) ||
                         superAdminEmails.includes(user?.user_email_id);
 
+                    const emailDomain = (user?.email ?? '').split('@')[1]?.toLowerCase() ?? '';
+                    const hasCustomDomain = emailDomain.length > 0 && !PUBLIC_EMAIL_DOMAINS.has(emailDomain);
+
                     const userInfo = Object.keys(user ?? {}).reduce((acc, key) => {
                         if (projection[key] === 1) {
                             acc[key] = user[key]
@@ -471,7 +555,7 @@ const getAuth = async () => {
                     }, {})
 
                     return {
-                        user: { ...userInfo, isSuperAdmin },
+                        user: { ...userInfo, isSuperAdmin, hasCustomDomain },
                         session,
                     }
                 })

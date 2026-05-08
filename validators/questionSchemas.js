@@ -16,13 +16,23 @@ const questionIdParam = z.object({
 });
 
 const createQuestionBody = z.object({
-  title: z.string().min(1, 'Question title is required').max(500),
-  description: z.string().max(5000).optional(),
-  tags: z.array(z.string().max(50)).max(10).optional(),
-}).strict();
+  question: z.string().min(1, 'Question text is required').max(500).optional(),
+  status: z.enum(['draft', 'open', 'closed']).optional(),
+  visibility: z.enum(['public', 'workspace']).optional(),
+  openAt: z.string().datetime({ offset: true }).optional().nullable(),
+  closeAt: z.string().datetime({ offset: true }).optional().nullable(),
+}).strip();
+
+const updateQuestionBody = z.object({
+  status: z.enum(['draft', 'open', 'closed']).optional(),
+  visibility: z.enum(['public', 'workspace']).optional(),
+  openAt: z.string().datetime({ offset: true }).optional().nullable(),
+  closeAt: z.string().datetime({ offset: true }).optional().nullable(),
+}).strip();
 
 module.exports = {
   getQuestionsQuery,
   questionIdParam,
   createQuestionBody,
+  updateQuestionBody,
 };
