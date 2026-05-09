@@ -39,10 +39,24 @@ function safePoll(poll) {
     return obj;
 }
 
+// 'open' is a legacy DB value — collapse it to 'published' before responding to clients.
+function normalizeStatus(status) {
+    return status === 'open' ? 'published' : status;
+}
+
+function applyStatusNormalization(pollOrPolls) {
+    if (Array.isArray(pollOrPolls)) {
+        pollOrPolls.forEach((p) => { if (p) p.status = normalizeStatus(p.status); });
+    } else if (pollOrPolls) {
+        pollOrPolls.status = normalizeStatus(pollOrPolls.status);
+    }
+    return pollOrPolls;
+}
+
 async function lazyAutoClose(polls) {
     const now = new Date();
     const staleIds = polls
-        .filter((p) => p.status === 'open' && p.closeAt && new Date(p.closeAt) < now)
+        .filter((p) => (p.status === 'published' || p.status === 'open') && p.closeAt && new Date(p.closeAt) < now)
         .map((p) => p._id);
     if (staleIds.length > 0) {
         await Poll.updateMany({ _id: { $in: staleIds } }, { status: 'closed' });
@@ -55,7 +69,7 @@ async function lazyAutoClose(polls) {
 
 const createPoll = async (req, res) => {
     try {
-        const { question, options, allow_multiple_choice, visibility = 'public', closeAt, pin_enabled, pin } = req.body;
+        const { question, options, allow_multiple_choice, visibility = 'public', closeAt, pin_enabled, pin, status } = req.body;
         const created_by = req.user._id;
 
         const workspace_id = visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
@@ -66,6 +80,7 @@ const createPoll = async (req, res) => {
         }
 
         const pollOptions = options.map((text) => ({ text }));
+        const initialStatus = status === 'published' ? 'published' : 'draft';
 
         const newPoll = new Poll({
             created_by,
@@ -77,6 +92,7 @@ const createPoll = async (req, res) => {
             closeAt: closeAt ? new Date(closeAt) : null,
             pin_enabled: !!pin_enabled,
             pin_hash,
+            status: initialStatus,
         });
 
         await newPoll.save();
@@ -89,6 +105,7 @@ const createPoll = async (req, res) => {
             .lean();
 
         delete populated.pin_hash;
+        applyStatusNormalization(populated);
 
         return res.status(201).json({
             status: 'Success',
@@ -133,12 +150,22 @@ const getPolls = async (req, res) => {
         }
 
         if (sortBy === 'closing-soon') {
-            matchQuery.status = 'open';
+            matchQuery.status = { $in: ['published', 'open'] };
             matchQuery.closeAt = { $ne: null, $gt: now };
         }
 
-        if (filter === 'my-polls' && userId) {
+        const requesterId = req.user ? (req.user._id || req.user.id)?.toString() : null;
+        const isOwnerView = filter === 'my-polls' && userId && requesterId && userId.toString() === requesterId;
+
+        if (isOwnerView) {
             matchQuery.created_by = new mongoose.Types.ObjectId(userId);
+            // Owner sees own drafts in My Polls; everywhere else they're hidden.
+        } else {
+            // Hide drafts from anyone who isn't the verified owner
+            matchQuery.status = matchQuery.status || { $in: ['published', 'open', 'closed'] };
+            if (filter === 'my-polls' && userId) {
+                matchQuery.created_by = new mongoose.Types.ObjectId(userId);
+            }
         }
 
         if (cursor) {
@@ -179,6 +206,7 @@ const getPolls = async (req, res) => {
 
         const polls = await Poll.aggregate(pipeline);
         await lazyAutoClose(polls);
+        applyStatusNormalization(polls);
 
         const hasMore = polls.length > limit;
         const resultPolls = hasMore ? polls.slice(0, limit) : polls;
@@ -217,8 +245,19 @@ const getPollBySlug = async (req, res) => {
             return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
         }
 
-        // Lazy auto-close
-        if (poll.status === 'open' && poll.closeAt && new Date(poll.closeAt) < now) {
+        // Normalize legacy 'open' status to 'published' for all downstream logic.
+        poll.status = normalizeStatus(poll.status);
+
+        const requesterId = req.user ? (req.user._id || req.user.id) : null;
+        const isCreator = requesterId && poll.created_by.toString() === requesterId.toString();
+
+        // Drafts are visible only to their creator.
+        if (poll.status === 'draft' && !isCreator) {
+            return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
+        }
+
+        // Lazy auto-close (only published polls can transition to closed)
+        if (poll.status === 'published' && poll.closeAt && new Date(poll.closeAt) < now) {
             await Poll.findByIdAndUpdate(poll._id, { status: 'closed' });
             poll.status = 'closed';
             await cache.del(cacheKey);
@@ -290,10 +329,17 @@ const castVote = async (req, res) => {
             return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
         }
 
+        // Normalize legacy status before any branching
+        poll.status = normalizeStatus(poll.status);
+
         // Auto-close check
-        if (poll.status === 'open' && poll.closeAt && new Date(poll.closeAt) < now) {
+        if (poll.status === 'published' && poll.closeAt && new Date(poll.closeAt) < now) {
             await Poll.findByIdAndUpdate(poll._id, { status: 'closed' });
             poll.status = 'closed';
+        }
+
+        if (poll.status === 'draft') {
+            return res.status(403).json({ status: 'Failed', data: null, message: 'This poll is a draft and not open for voting yet' });
         }
 
         if (poll.status === 'closed') {
@@ -375,7 +421,23 @@ const updatePollSettings = async (req, res) => {
         }
 
         const updates = {};
-        const { closeAt, pin_enabled, pin, visibility, status } = req.body;
+        const { closeAt, pin_enabled, pin, visibility, status, question, options, allow_multiple_choice } = req.body;
+
+        const currentStatus = normalizeStatus(poll.status);
+        const contentEditAllowed = currentStatus === 'draft' || (poll.total_votes || 0) === 0;
+
+        if (question !== undefined || options !== undefined || allow_multiple_choice !== undefined) {
+            if (!contentEditAllowed) {
+                return res.status(409).json({
+                    status: 'Failed',
+                    data: null,
+                    message: 'Question and options are locked once voting begins. Move the poll back to draft to edit.',
+                });
+            }
+            if (question !== undefined) updates.question = question;
+            if (options !== undefined) updates.options = options.map((text) => ({ text }));
+            if (allow_multiple_choice !== undefined) updates.allow_multiple_choice = !!allow_multiple_choice;
+        }
 
         if (closeAt !== undefined) updates.closeAt = closeAt ? new Date(closeAt) : null;
         if (status !== undefined) updates.status = status;
@@ -401,6 +463,7 @@ const updatePollSettings = async (req, res) => {
             .lean();
 
         delete updated.pin_hash;
+        applyStatusNormalization(updated);
 
         await cache.del(pollDetailCacheKey(poll.slug));
         await cache.delByPattern(pollListCachePattern());
@@ -474,7 +537,7 @@ const getPollAnalytics = async (req, res) => {
 
         const analyticsData = {
             total_votes: poll.total_votes,
-            status: poll.status,
+            status: normalizeStatus(poll.status),
             closeAt: poll.closeAt,
             options: results,
             timeline: timeline.map((t) => ({ date: t._id, count: t.count })),

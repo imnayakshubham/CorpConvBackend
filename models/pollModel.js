@@ -44,8 +44,10 @@ const pollSchema = new mongoose.Schema({
     workspace_id: { type: mongoose.Schema.Types.ObjectId, default: null },
     status: {
         type: String,
-        enum: ['open', 'closed'],
-        default: 'open',
+        // 'open' is a legacy synonym for 'published' kept here so pre-rename docs still validate on save.
+        // Read paths normalize 'open' → 'published' before responding.
+        enum: ['draft', 'published', 'closed', 'open'],
+        default: 'draft',
     },
     closeAt: { type: Date, default: null },
     pin_enabled: { type: Boolean, default: false },
