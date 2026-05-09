@@ -11,6 +11,7 @@ const createPollBody = z.object({
     closeAt: z.string().datetime({ offset: true }).optional().nullable(),
     pin_enabled: z.boolean().optional(),
     pin: pinField.optional(),
+    status: z.enum(['draft', 'published']).optional(),
 }).strip().refine(
     (data) => !data.pin_enabled || !!data.pin,
     { message: 'PIN is required when pin_enabled is true', path: ['pin'] }
@@ -22,11 +23,14 @@ const castVoteBody = z.object({
 }).strip();
 
 const updatePollSettingsBody = z.object({
+    question: z.string().min(1).max(300).optional(),
+    options: z.array(z.string().min(1).max(200)).min(2).max(6).optional(),
+    allow_multiple_choice: z.boolean().optional(),
     closeAt: z.string().datetime({ offset: true }).optional().nullable(),
     pin_enabled: z.boolean().optional(),
     pin: pinField.optional().nullable(),
     visibility: z.enum(['public', 'logged_in', 'workspace']).optional(),
-    status: z.enum(['open', 'closed']).optional(),
+    status: z.enum(['draft', 'published', 'closed']).optional(),
 }).strip().refine(
     (data) => data.pin_enabled !== true || !!data.pin,
     { message: 'PIN is required when enabling pin protection', path: ['pin'] }
