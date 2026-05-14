@@ -108,4 +108,68 @@ const requestJoinWorkspace = async (req, res) => {
     }
 };
 
-module.exports = { discoverWorkspaces, requestJoinWorkspace };
+/**
+ * GET /api/workspace/:orgId/members
+ * Returns workspace members. Owners and superAdmins see full user info (name, email).
+ * All other roles see only public_user_name and @username.
+ * Uses auth.api.getFullOrganization to avoid MongoDB ID-format mismatches.
+ */
+const getWorkspaceMembers = async (req, res) => {
+    try {
+        const orgId = req.params.orgId;
+        const { getAuth } = require('../utils/auth');
+        const auth = await getAuth();
+
+        let orgData;
+        try {
+            const orgRes = await auth.api.getFullOrganization({
+                query: { organizationId: orgId },
+                headers: req.headers,
+            });
+            orgData = orgRes?.data ?? orgRes;
+        } catch {
+            return res.status(404).json({ message: 'Workspace not found or access denied' });
+        }
+
+        if (!orgData || !Array.isArray(orgData.members)) {
+            return res.status(404).json({ message: 'Workspace not found' });
+        }
+
+        const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+        const requestingUserId = req.user._id?.toString() || req.user.id?.toString();
+        const isSuperAdmin = superAdminIds.includes(requestingUserId);
+
+        const requesterMember = orgData.members.find(
+            (m) => m.userId === requestingUserId || m.user?.id === requestingUserId
+        );
+
+        if (!requesterMember && !isSuperAdmin) {
+            return res.status(403).json({ message: 'Not a member of this workspace' });
+        }
+
+        const canSeeFullInfo = requesterMember?.role === 'owner' || isSuperAdmin;
+
+        const members = orgData.members.map((m) => {
+            const user = canSeeFullInfo
+                ? {
+                    name: m.user?.name ?? null,
+                    email: m.user?.email ?? null,
+                    public_user_name: m.user?.public_user_name ?? null,
+                    username: m.user?.username ?? null,
+                    image: m.user?.image ?? null,
+                }
+                : {
+                    public_user_name: m.user?.public_user_name ?? null,
+                    username: m.user?.username ?? null,
+                };
+            return { id: m.id, userId: m.userId, role: m.role, createdAt: m.createdAt, user };
+        });
+
+        res.json({ members });
+    } catch (err) {
+        console.error('[getWorkspaceMembers]', err);
+        res.status(500).json({ message: 'Failed to fetch workspace members' });
+    }
+};
+
+module.exports = { discoverWorkspaces, requestJoinWorkspace, getWorkspaceMembers };
