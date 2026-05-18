@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
-const { hushAiChat } = require('../controllers/hushAiController');
+const { hushAiChat, hushAiSummarize } = require('../controllers/hushAiController');
 const { writeLimiter } = require('../middleware/rateLimiter');
 const aiQuota = require('../middleware/aiQuotaMiddleware');
 const User = require('../models/userModel');
@@ -9,6 +9,9 @@ const router = express.Router();
 
 // protect → writeLimiter (30/min) → aiQuota (15/month free) → hushAiChat
 router.post('/ai/chat/:id', protect, writeLimiter, aiQuota, hushAiChat);
+
+// Condense a conversation slice for the rewind "Summarize" options.
+router.post('/ai/summarize/:id', protect, writeLimiter, aiQuota, hushAiSummarize);
 
 router.get('/ai/quota', protect, async (req, res, next) => {
     try {
