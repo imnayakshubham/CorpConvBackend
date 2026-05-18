@@ -485,7 +485,7 @@ const hushAiChat = async (req, res) => {
 
   let modelMessages;
   try {
-    modelMessages = convertToModelMessages(messages);
+    modelMessages = await convertToModelMessages(messages);
   } catch (err) {
     req.off('close', onClose);
     return res.status(400).json({ error: 'Invalid messages format.' });
