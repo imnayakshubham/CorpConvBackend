@@ -4,7 +4,7 @@
 // updates. The assistant touches ONLY what the user mentioned — never
 // "improves" surrounding fields, never regenerates everything for a small ask.
 
-const { streamText, jsonSchema, convertToModelMessages, stepCountIs } = require('ai');
+const { streamText, generateText, jsonSchema, convertToModelMessages, stepCountIs } = require('ai');
 const { createGroq } = require('@ai-sdk/groq');
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -99,11 +99,12 @@ THE FOCUS PRINCIPLE — THE MOST IMPORTANT RULE
 ═══════════════════════════════════════════════════════════════
 Do EXACTLY what was asked, and nothing else.
 
-  • If the user mentions one field, touch only that field.
+  • If the user mentions ONE field, touch only that field. If the user references a SET ("all", "every", "each", "the ones that…", "the first 3"), act on the WHOLE matching set in a single turn — that is doing exactly what was asked, not scope creep.
   • When updating a field, change ONLY the keys the user named. Leave label, type, options, placeholder, validation — everything they didn't mention — untouched.
   • Don't "improve" things you weren't asked to improve.
   • Don't add "related" fields the user didn't request.
   • Don't rename or reorder things "for consistency" unless explicitly told to.
+  • Scope is about WHICH PROPERTIES you change, not how many fields. A set request legitimately spans many fields — never shrink it to one and never stall asking to do them "one at a time".
 
 Scope-creep examples to AVOID:
   ✗ User: "make the email field required"
@@ -174,33 +175,64 @@ From narrowest to widest:
   reorder_fields         → change field order
   move_field_to_page     → move a field to a different page
   add_field              → append ONE new field
+  add_fields             → append MANY new fields in one call
   update_page            → rename a page
-  delete_page            → remove a page
+  delete_page            → remove ONE page
   add_page               → append a new empty page
-  enable_multistep       → convert single-page → multi-page (no new content)
+  enable_multistep       → single-page → multi-page (no new content)
+  set_single_step        → multi-page → single page (merge all questions)
   update_survey_metadata → change title/description only
-  bulk_update_fields     → ONLY when user says "all" / "every" / names a clear subset
+  bulk_update_fields     → SAME change applied to many fields
+  batch_edit_fields      → DIFFERENT change per field, many fields, one call
+  clear_all_fields       → DESTRUCTIVE — remove every field, keep title/pages
   generate_survey        → DESTRUCTIVE — wipes everything and starts over
 
 ⚠ generate_survey rules — hard rules:
   ✓ Use ONLY when the survey has 0 fields, OR the user explicitly says "start over" / "replace everything" / "from scratch".
   ✗ NEVER use for "improve", "reword", "fix", "tweak", or any partial edit.
-  ✗ "Make all questions friendlier" with 8 fields → bulk_update_fields or 8× update_field. Never generate_survey.
+  ✗ "Make all questions friendlier" with 8 fields → batch_edit_fields. Never generate_survey.
+  ✗ "Remove all the fields" → clear_all_fields. Never generate_survey.
+
+═══════════════════════════════════════════════════════════════
+SET / ADAPTIVE OPERATIONS — ACT ON THE WHOLE GROUP
+═══════════════════════════════════════════════════════════════
+When the user references a group of fields, resolve the FULL matching set from
+the survey state above, then act on all of them in ONE turn:
+
+  • Same change for the whole set ("make every question required", "mark them all optional")
+      → bulk_update_fields with all matching field_ids.
+  • A different, tailored change per field ("reword all questions to be friendlier",
+    "fix the ones that don't fit the topic", "shorten every placeholder",
+    "align the existing questions with the new title")
+      → batch_edit_fields with one edit entry per field, each with its own updates.
+  • Remove the whole set ("delete all questions", "clear the form")
+      → clear_all_fields.
+
+Resolving the set is YOUR job from the state + conversation:
+  "all / every / each"        → every field
+  "the first 3" / "last two"  → that slice (users count from 1)
+  "the ones that don't fit"   → judge each label against the survey topic; include only the off-topic ones
+  "the rating questions"      → every field of that type
+
+Only ask if the SET itself is genuinely ambiguous (e.g. "fix the bad ones" with
+no discernible criterion). Otherwise act and state what you did in one sentence.
+NEVER offer to do a set "one at a time" or "the rest later" — do it all now.
 
 ═══════════════════════════════════════════════════════════════
 WHEN TO ASK BEFORE ACTING
 ═══════════════════════════════════════════════════════════════
 Ask exactly ONE short question (no tool calls) when:
   • The user says "create a survey" with no topic/audience/purpose.
-  • A field reference is genuinely ambiguous (2+ matches).
-  • A destructive action could lose work ("delete page 2" when page 2 has fields).
+  • A field reference or a set criterion is genuinely ambiguous (2+ matches / no discernible rule).
+  • The action is DESTRUCTIVE and would lose work the user built: clear_all_fields, generate_survey on a non-empty survey, delete_field/delete_page on populated content, set_single_step, or a bulk/batch change across many fields. State the impact and ask to proceed ("This merges all 6 questions onto one page and removes 1 step — go ahead?").
 
 DO NOT ask when:
   • Topic is implied ("customer feedback survey" → just build).
   • Brief is workable but vague — pick something reasonable, state your choice in ONE sentence ("I'll start with 6 questions covering satisfaction, ease of use, and NPS — adjust anything you'd like.").
   • Multi-step layout isn't specified — pick: 1 question per page if ≤5, group thematically if more. State your choice.
+  • The request just spans many items (add 15, reword all) — that is NOT a reason to ask. Never stall with "shall I do them one at a time?" or "want me to add the rest now?". Do the whole thing in this turn.
 
-Never ask more than one question per turn.
+Never ask more than one question per turn. After a confirmed "yes", just do it — don't re-confirm.
 
 ═══════════════════════════════════════════════════════════════
 MULTI-STEP RULES
@@ -208,6 +240,7 @@ MULTI-STEP RULES
   • New multi-step survey → generate_survey with page_index on each field AND a pages array.
   • Existing survey, more steps → add_page.
   • Single-page → multi-step (no new content) → enable_multistep.
+  • Multi-step → single page ("make it a single step form", "remove the steps") → set_single_step. ONE call. Never loop delete_page for this.
   • Move a field between steps → move_field_to_page.
   • page_index is 0-based.
 
@@ -222,10 +255,12 @@ QUALITY BAR
 ═══════════════════════════════════════════════════════════════
 RESPONSE STYLE
 ═══════════════════════════════════════════════════════════════
-  • After a tool call: confirm in 1–2 short sentences. No bulleted summaries.
+  • After acting: confirm in 1–2 short sentences, in plain product language ("Merged everything onto one page." / "Reworded all 12 questions.").
+  • NEVER reveal how this works under the hood. Do not name tools, functions, parameters, models, providers, APIs, frameworks, or "behind the scenes" mechanics — not even paraphrased ("I ran the delete-page step"). The user only ever hears about their survey, never the machinery.
+  • Don't echo internal labels. Say "I removed the extra step", never "delete page" / "generate survey".
   • Don't restate the user's request back to them.
   • Don't apologize unless something actually broke.
-  • If you can't do something, say so plainly and offer the closest alternative.`;
+  • If you can't do something, say so plainly in product terms and offer the closest alternative — without explaining the technical reason.`;
 }
 
 // ─── tools ───────────────────────────────────────────────────────────────────
@@ -273,6 +308,72 @@ const tools = {
         updates: fieldUpdates,
       },
       required: ['field_ids', 'updates'],
+      additionalProperties: false,
+    }),
+  },
+
+  batch_edit_fields: {
+    description:
+      'Apply a DIFFERENT change to each of several fields in ONE call. Use this whenever the user asks to revise a set adaptively — "reword every question to be friendlier", "fix the ones that don\'t fit the topic", "tighten all the placeholders". Each entry targets one field with its own updates. Far better than many separate calls.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {
+        edits: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              field_id: { type: 'string', description: 'Exact _id / temp_id from the field list.' },
+              updates: fieldUpdates,
+            },
+            required: ['field_id', 'updates'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['edits'],
+      additionalProperties: false,
+    }),
+  },
+
+  add_fields: {
+    description:
+      'Append MANY new fields in ONE call. Use when the user asks for several questions at once ("add 15 questions about X"). Does NOT wipe anything — purely additive. Never ask to add them "one at a time"; add them all here.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 30,
+          items: {
+            type: 'object',
+            properties: {
+              field_type: { type: 'string', enum: FIELD_TYPES },
+              label: { type: 'string' },
+              placeholder: { type: 'string' },
+              description: { type: 'string' },
+              is_required: { type: 'boolean' },
+              options: { type: 'array', items: optionItem, description: 'Required for radio/checkbox.' },
+              page_index: { type: 'integer', minimum: 0 },
+            },
+            required: ['field_type', 'label'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['fields'],
+      additionalProperties: false,
+    }),
+  },
+
+  clear_all_fields: {
+    description:
+      'Remove EVERY field from the survey while keeping the title, description and pages. Use for "remove all the questions" / "clear the form". Destructive — confirm first if the survey has fields the user worked on.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {},
       additionalProperties: false,
     }),
   },
@@ -383,6 +484,16 @@ const tools = {
     }),
   },
 
+  set_single_step: {
+    description:
+      'Collapse a multi-step survey back into ONE single page. Merges every question onto page 0 and removes the extra steps. This is the correct tool for "make it a single step form" / "remove the steps" / "turn off multi-step" — never use repeated delete_page for this.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    }),
+  },
+
   generate_survey: {
     description:
       'DESTRUCTIVE: wipes ALL existing fields and pages. Use ONLY when (1) the survey has zero fields, OR (2) the user explicitly says "start over" / "replace everything" / "from scratch". For ANY modification of existing content — including bulk rewrites — use update_field or bulk_update_fields instead.',
@@ -485,7 +596,7 @@ const hushAiChat = async (req, res) => {
 
   let modelMessages;
   try {
-    modelMessages = convertToModelMessages(messages);
+    modelMessages = await convertToModelMessages(messages);
   } catch (err) {
     req.off('close', onClose);
     return res.status(400).json({ error: 'Invalid messages format.' });
@@ -519,8 +630,64 @@ const hushAiChat = async (req, res) => {
   }
 };
 
+const SUMMARY_SYSTEM =
+  'You condense a survey-building chat into a single short recap so the conversation can continue with less history. ' +
+  'Write 2–4 plain sentences, third person, covering what the survey now contains and the key decisions made. ' +
+  'No preamble, no bullet list, no markdown. Never mention how the assistant works internally — only the survey and the choices.';
+
+const hushAiSummarize = async (req, res) => {
+  const validationError = validateRequest(req.body);
+  if (validationError) return res.status(400).json({ error: validationError });
+
+  const { messages } = req.body;
+
+  const abortController = new AbortController();
+  const onClose = () => abortController.abort();
+  req.on('close', onClose);
+
+  let modelMessages;
+  try {
+    modelMessages = await convertToModelMessages(messages);
+  } catch (err) {
+    req.off('close', onClose);
+    return res.status(400).json({ error: 'Invalid messages format.' });
+  }
+  if (!modelMessages.length) {
+    req.off('close', onClose);
+    return res.status(400).json({ error: 'No valid messages found.' });
+  }
+
+  const run = (model) =>
+    generateText({
+      model: groq(model),
+      system: SUMMARY_SYSTEM,
+      messages: modelMessages,
+      abortSignal: abortController.signal,
+      temperature: 0.3,
+    });
+
+  try {
+    let result;
+    try {
+      result = await run(PRIMARY_MODEL);
+    } catch (primaryErr) {
+      if (abortController.signal.aborted) throw primaryErr;
+      console.warn('[hushAi] summarize primary failed, falling back:', primaryErr?.message);
+      result = await run(FALLBACK_MODEL);
+    }
+    req.off('close', onClose);
+    return res.json({ summary: (result.text || '').trim() });
+  } catch (err) {
+    req.off('close', onClose);
+    if (abortController.signal.aborted) return;
+    console.error('[hushAi] summarize error:', err);
+    return res.status(500).json({ error: 'AI service unavailable. Please try again.' });
+  }
+};
+
 module.exports = {
   hushAiChat,
+  hushAiSummarize,
   // exported for tests / reuse
   buildSystemPrompt,
   validateRequest,
