@@ -20,6 +20,7 @@ const createPollBody = z.object({
 const castVoteBody = z.object({
     option_ids: z.array(mongoId).min(1).max(6),
     pin: pinField.optional(),
+    voter_fingerprint: z.string().uuid().optional(),
 }).strip();
 
 const updatePollSettingsBody = z.object({
@@ -32,8 +33,8 @@ const updatePollSettingsBody = z.object({
     visibility: z.enum(['public', 'logged_in', 'workspace']).optional(),
     status: z.enum(['draft', 'published', 'closed']).optional(),
 }).strip().refine(
-    (data) => data.pin_enabled !== true || !!data.pin,
-    { message: 'PIN is required when enabling pin protection', path: ['pin'] }
+    (data) => !data.pin || /^\d{6}$/.test(data.pin),
+    { message: 'PIN must be exactly 6 digits', path: ['pin'] }
 );
 
 const getPollsQuery = z.object({

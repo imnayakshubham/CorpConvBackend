@@ -27,7 +27,7 @@ const router = express.Router();
 // Static routes first to avoid conflict with /:slug
 router.route('/').get(optionalAuth, validate({ query: getPollsQuery }), getPolls);
 router.route('/create').post(protect, writeLimiter, validate({ body: createPollBody }), createPoll);
-router.route('/vote/:id').post(protect, submissionLimiter, validate({ params: pollIdParam, body: castVoteBody }), castVote);
+router.route('/vote/:id').post(optionalAuth, submissionLimiter, validate({ params: pollIdParam, body: castVoteBody }), castVote);
 router.route('/settings/:id').patch(protect, writeLimiter, validate({ params: pollIdParam, body: updatePollSettingsBody }), updatePollSettings);
 router.route('/verify-pin/:id').post(submissionLimiter, validate({ params: pollIdParam, body: verifyPinBody }), verifyPin);
 router.route('/delete/:id').delete(protect, validate({ params: pollIdParam }), deletePoll);

@@ -133,7 +133,12 @@ const getAuth = async () => {
 
         const superAdminIds = process.env.SUPER_ADMIN_IDS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
 
-        db.collection("verification").deleteMany({ id: null })
+        (async () => {
+            const col = db.collection("verification");
+            await col.deleteMany({ id: null });
+            try { await col.dropIndex("id_1"); } catch (_) { /* index may not exist yet */ }
+            await col.createIndex({ id: 1 }, { unique: true, sparse: true });
+        })();
 
 
         // Parse ALLOW_ORIGIN from env
@@ -149,6 +154,9 @@ const getAuth = async () => {
                 enabled: true,
             },
             trustedOrigins: allowedOrigins,
+            onAPIError: {
+                errorURL: `${process.env.FRONTEND_URL}/auth/error`,
+            },
             user: {
                 modelName: "users",
                 fields: {

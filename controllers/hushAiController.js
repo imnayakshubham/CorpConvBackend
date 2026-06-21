@@ -23,7 +23,7 @@ const MAX_STEPS = Number(process.env.HUSH_AI_MAX_STEPS || 8);
 const REQUEST_TOKEN_BUDGET = Number(process.env.HUSH_AI_REQUEST_TOKEN_BUDGET || 6500);
 // Conservative post-trim estimate of the tool-schema block (all 18 tools). Used to
 // size the history budget without serializing the jsonSchema wrappers each request.
-const TOOLS_TOKEN_EST = Number(process.env.HUSH_AI_TOOLS_TOKEN_EST || 2600);
+const TOOLS_TOKEN_EST = Number(process.env.HUSH_AI_TOOLS_TOKEN_EST || 2800);
 const MAX_FIELDS_IN_PROMPT = Number(process.env.HUSH_AI_MAX_FIELDS_IN_PROMPT || 25);
 const MIN_HISTORY_TOKENS = 1200; // never starve history below this, even on huge surveys
 
@@ -171,6 +171,7 @@ Pick the type matching the answer's shape (email/tel/number/date when the format
 ## TOOL CHOICE — pick the narrowest tool that fits
 update_field (one field) · delete_field · duplicate_field · reorder_fields · move_field_to_page · add_field (one) · add_fields (many) · update_page (rename) · delete_page · add_page · enable_multistep (single→multi, no new content) · set_single_step (multi→single, merge all) · update_survey_metadata (title/description only) · bulk_update_fields (SAME change to many) · batch_edit_fields (DIFFERENT change per field, many, one call) · clear_all_fields (DESTRUCTIVE: remove all fields, keep title/pages) · generate_survey (DESTRUCTIVE: wipe everything, start over).
 generate_survey ONLY when the survey has 0 fields OR the user explicitly says "start over"/"replace everything"/"from scratch". NEVER for improve/reword/fix/tweak/partial edits ("make all questions friendlier" → batch_edit_fields; "remove all fields" → clear_all_fields).
+web_search — use for ANY request that benefits from real-world or up-to-date knowledge: survey question examples, best practices, industry standards, statistics, definitions, how-to guidance, product/topic research, or any factual question the user asks. Search FIRST, then respond using the results. Do NOT search for pure mutations (add field, rename, reorder, delete) where no external knowledge is needed. Never mention you searched or name any tool to the user — fold findings naturally into your reply.
 
 ## SET / ADAPTIVE OPERATIONS — act on the whole group in ONE turn
 Resolve the full matching set from the state ("all/every/each" → every field · "first 3"/"last two" → that slice · "the ones that don't fit" → judge each label vs the topic, include only off-topic ones · "the rating questions" → every field of that type), then:
@@ -488,6 +489,39 @@ const tools = {
       additionalProperties: false,
     }),
   },
+
+  web_search: {
+    description: 'Search the web for any information the user asks about or that would improve the response — survey best practices, example questions, industry standards, statistics, definitions, current events, how-to guides, product research, or any factual question. Use whenever the user asks something that benefits from real-world or up-to-date information. Search FIRST, then respond. Do NOT search for pure survey mutations (add field, rename, reorder, delete) where no external knowledge is needed.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Concise, specific search query optimised for web results. Include relevant context, e.g. "best NPS survey questions 2024", "how to write employee satisfaction survey", "what is Net Promoter Score".',
+        },
+        max_results: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 8,
+          description: 'Number of results to return. Default 5.',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    }),
+    execute: async ({ query, max_results = 5 }) => {
+      try {
+        const { search } = require('duck-duck-scrape');
+        const data = await search(query, { safeSearch: 0 });
+        const results = (data.results || [])
+          .slice(0, max_results)
+          .map(r => ({ title: r.title, snippet: r.description, url: r.url }));
+        return { query, results, no_results: results.length === 0 };
+      } catch (err) {
+        return { query, error: 'Search temporarily unavailable.', results: [] };
+      }
+    },
+  },
 };
 
 // ─── validation ──────────────────────────────────────────────────────────────
@@ -544,9 +578,9 @@ function toClientErrorMessage(error) {
   if (isRateLimitLike(error)) {
     const retryAfter = Number(error?.responseHeaders?.['retry-after']);
     const wait = Number.isFinite(retryAfter) && retryAfter > 0
-      ? ` Try again in about ${retryAfter} seconds.`
-      : ' Try again in a few seconds.';
-    return `Hush AI is handling a lot right now.${wait}`;
+      ? ` Please wait about ${Math.max(30, retryAfter)} seconds before retrying.`
+      : ' Please wait about 30 seconds before retrying.';
+    return `Hush AI is busy right now.${wait}`;
   }
   return 'Something went wrong reaching Hush AI. Please try again.';
 }
@@ -813,17 +847,84 @@ function wantsLargeBuild(messages, surveyContext) {
   return bigCount || (multistep && text.length > 40);
 }
 
+// ─── D&C large-message helpers ────────────────────────────────────────────────
+const LARGE_MSG_THRESHOLD = 3500; // ~1000 tokens — trigger D&C above this
+const DC_CHUNK_SIZE = 1800;        // ~500 tokens per extraction chunk
+
+function splitAtParagraphs(text, chunkSize) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= chunkSize) { chunks.push(remaining); break; }
+    let cut = chunkSize;
+    const paraIdx = remaining.lastIndexOf('\n\n', chunkSize);
+    if (paraIdx > chunkSize * 0.5) cut = paraIdx + 2;
+    else {
+      const lineIdx = remaining.lastIndexOf('\n', chunkSize);
+      if (lineIdx > chunkSize * 0.5) cut = lineIdx + 1;
+    }
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+  }
+  return chunks;
+}
+
+function replaceLastMessageText(msgs, newText) {
+  if (!msgs || !msgs.length) return msgs;
+  const last = msgs[msgs.length - 1];
+  let updated;
+  if (typeof last.content === 'string') {
+    updated = { ...last, content: newText };
+  } else if (Array.isArray(last.parts)) {
+    updated = { ...last, parts: last.parts.map((p) => (p?.type === 'text' ? { ...p, text: newText } : p)) };
+  } else {
+    updated = { ...last, content: newText };
+  }
+  return [...msgs.slice(0, -1), updated];
+}
+
 const hushAiChat = async (req, res) => {
   const validationError = validateRequest(req.body);
   if (validationError) return res.status(400).json({ error: validationError });
 
-  const { messages, surveyContext = {} } = req.body;
+  let { messages, surveyContext = {} } = req.body; // `let` — D&C may replace last message
 
   // Forward client disconnects to the upstream model.
   const abortController = new AbortController();
   const onClose = () => abortController.abort();
   req.on('close', onClose);
   res.on('finish', () => req.off('close', onClose));
+
+  // D&C preprocessing: if the user's current message is very large (e.g. a pasted
+  // document), split it into chunks and extract survey-relevant content from each in
+  // parallel, then merge and replace the raw message. This keeps the main call within
+  // the model's token budget without losing the intent.
+  {
+    const lastUserMsg = [...messages].reverse().find((m) => m?.role === 'user');
+    const rawText = extractUserText(lastUserMsg);
+    if (rawText && rawText.length > LARGE_MSG_THRESHOLD) {
+      try {
+        const chunks = splitAtParagraphs(rawText, DC_CHUNK_SIZE);
+        const extractions = await Promise.all(
+          chunks.map((chunk) =>
+            generateText({
+              model: groq(FALLBACK_MODEL),
+              system: 'Extract survey-relevant content only: questions to ask, topics, audience, tone, constraints, requirements. Be concise.',
+              prompt: chunk,
+              maxTokens: 300,
+            })
+              .then((r) => r.text)
+              .catch(() => chunk.slice(0, 500))
+          )
+        );
+        const merged = extractions.filter(Boolean).join('\n\n');
+        messages = replaceLastMessageText(messages, merged);
+        console.log(`[hushAI] D&C ${rawText.length}c → ${merged.length}c (${chunks.length} chunks)`);
+      } catch {
+        // silent fallback — original message passes through unchanged
+      }
+    }
+  }
 
   // Large from-scratch multi-step builds can't fit one generate_survey call under the
   // per-minute token cap, so build them in small paced pieces instead of the single

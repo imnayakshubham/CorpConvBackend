@@ -77,7 +77,11 @@ const pollVoteSchema = new mongoose.Schema({
     voter_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
+        default: null,
+    },
+    voter_fingerprint: {
+        type: String,
+        default: null,
     },
     option_ids: [{
         type: mongoose.Schema.Types.ObjectId,
@@ -85,7 +89,9 @@ const pollVoteSchema = new mongoose.Schema({
     }],
 }, { timestamps: true });
 
-pollVoteSchema.index({ poll_id: 1, voter_id: 1 }, { unique: true });
+// sparse: true means null values are excluded from the index, allowing multiple anonymous votes per poll
+pollVoteSchema.index({ poll_id: 1, voter_id: 1 }, { unique: true, sparse: true });
+pollVoteSchema.index({ poll_id: 1, voter_fingerprint: 1 }, { unique: true, sparse: true });
 pollVoteSchema.index({ poll_id: 1 });
 
 const Poll = mongoose.model('Poll', pollSchema);
