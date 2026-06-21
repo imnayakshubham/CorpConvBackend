@@ -320,9 +320,9 @@ const getPollBySlug = async (req, res) => {
 const castVote = async (req, res) => {
     try {
         const { id } = req.params;
-        const { option_ids, pin } = req.body;
-        const userId = req.user._id || req.user.id;
+        const { option_ids, pin, voter_fingerprint } = req.body;
         const now = new Date();
+        const isAuthenticated = !!req.user;
 
         const poll = await Poll.findOne({ _id: id, access: true }).select('+pin_hash');
         if (!poll) {
@@ -346,6 +346,16 @@ const castVote = async (req, res) => {
             return res.status(403).json({ status: 'Failed', data: null, message: 'This poll has closed' });
         }
 
+        // Anonymous voting is only allowed on public polls
+        if (!isAuthenticated) {
+            if (poll.visibility !== 'public') {
+                return res.status(401).json({ status: 'Failed', data: null, message: 'Sign in to vote on this poll' });
+            }
+            if (!voter_fingerprint) {
+                return res.status(400).json({ status: 'Failed', data: null, message: 'Fingerprint required for anonymous voting' });
+            }
+        }
+
         // PIN check
         if (poll.pin_enabled) {
             if (!pin) {
@@ -357,10 +367,20 @@ const castVote = async (req, res) => {
             }
         }
 
-        const existingVote = await PollVote.findOne({ poll_id: poll._id, voter_id: userId });
+        // Look up existing vote by voter_id (auth) or voter_fingerprint (anon)
+        const userId = isAuthenticated ? (req.user._id || req.user.id) : null;
+        const voteQuery = isAuthenticated
+            ? { poll_id: poll._id, voter_id: userId }
+            : { poll_id: poll._id, voter_fingerprint };
+
+        const existingVote = await PollVote.findOne(voteQuery);
 
         if (existingVote) {
-            // Unvote (toggle)
+            if (!isAuthenticated) {
+                // Anonymous users cannot unvote — they already submitted
+                return res.status(409).json({ status: 'Failed', data: null, message: 'You have already voted on this poll' });
+            }
+            // Authenticated: toggle (unvote)
             const voteCount = existingVote.option_ids.length;
             await PollVote.deleteOne({ _id: existingVote._id });
             await Poll.findByIdAndUpdate(poll._id, { $inc: { total_votes: -voteCount } });
@@ -384,19 +404,26 @@ const castVote = async (req, res) => {
             return res.status(400).json({ status: 'Failed', data: null, message: 'This poll only allows one vote' });
         }
 
-        await PollVote.create({
+        const voteDoc = {
             poll_id: poll._id,
-            voter_id: userId,
-            option_ids: option_ids.map((id) => new mongoose.Types.ObjectId(id)),
-        });
+            option_ids: option_ids.map((oid) => new mongoose.Types.ObjectId(oid)),
+        };
+        if (isAuthenticated) {
+            voteDoc.voter_id = userId;
+        } else {
+            voteDoc.voter_fingerprint = voter_fingerprint;
+        }
 
+        await PollVote.create(voteDoc);
         await Poll.findByIdAndUpdate(poll._id, { $inc: { total_votes: option_ids.length } });
         poll.total_votes += option_ids.length;
 
         await cache.del(pollDetailCacheKey(poll.slug));
         await cache.delByPattern(pollListCachePattern());
 
-        ActivityEvent.create({ userId: req.user._id, eventType: 'poll_voted' }).catch(() => {});
+        if (isAuthenticated) {
+            ActivityEvent.create({ userId: req.user._id, eventType: 'poll_voted' }).catch(() => {});
+        }
 
         const results = await computeResults(poll._id, poll.options, poll.total_votes);
         return res.status(200).json({ status: 'Success', data: { voted: true, option_ids, results, total_votes: poll.total_votes }, message: 'Vote cast successfully' });

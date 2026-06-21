@@ -171,7 +171,7 @@ app.get("/", (req, res) => {
     res.redirect(process.env.FRONTEND_URL || "http://localhost:3005")
 
   } else {
-    res.send(`Hushwork Now is live @ ${process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS[0]}`)
+    res.send(`Hushwork is live @ ${process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS[0]}`)
   }
 });
 
@@ -608,17 +608,17 @@ async function startServer() {
 
         // Per-user rate limit: max 20 upvote actions per minute
         if (redis) {
-            const rateLimitKey = `${process.env.APP_ENV || 'DEV'}:upvote_rl:${user_id}`;
-            const count = await redis.incr(rateLimitKey);
-            if (count === 1) await redis.expire(rateLimitKey, 60);
-            if (count > 20) {
-                socket.emit("upvote_answer_response", {
-                    status: 'Failed',
-                    message: 'Too many upvotes, please slow down.',
-                    data: null
-                });
-                return;
-            }
+          const rateLimitKey = `${process.env.APP_ENV || 'DEV'}:upvote_rl:${user_id}`;
+          const count = await redis.incr(rateLimitKey);
+          if (count === 1) await redis.expire(rateLimitKey, 60);
+          if (count > 20) {
+            socket.emit("upvote_answer_response", {
+              status: 'Failed',
+              message: 'Too many upvotes, please slow down.',
+              data: null
+            });
+            return;
+          }
         }
         // (rate limiter skipped if Redis unavailable — fail open)
 
