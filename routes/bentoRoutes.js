@@ -10,6 +10,7 @@ const {
     deleteBlock,
     reorderItems,
     getBentoPageProfile,
+    ogPreview,
 } = require('../controllers/bentoController');
 const validate = require('../middleware/validate');
 const { writeLimiter } = require('../middleware/rateLimiter');
@@ -28,6 +29,7 @@ const router = express.Router();
 
 // Literal routes MUST be registered before /:username
 router.route('/me').get(protect, getMyProfile);
+router.route('/og-preview').get(protect, writeLimiter, ogPreview);
 router.route('/profile').post(protect, writeLimiter, validate({ body: upsertProfileBody }), upsertProfile);
 router.route('/section').patch(protect, writeLimiter, validate({ body: upsertSectionBody }), upsertSection);
 router.route('/section').delete(protect, writeLimiter, validate({ body: deleteSectionBody }), deleteSection);

@@ -15,6 +15,26 @@ const {
 
 const getBentoCacheKey = (username) => cache.generateKey('bento', 'profile', username);
 
+const isHttpUrl = (value) => {
+    if (!value || typeof value !== 'string') return false;
+    try {
+        return ['http:', 'https:'].includes(new URL(value).protocol);
+    } catch {
+        return false;
+    }
+};
+
+// Sanitize client-supplied link_metadata: strip HTML from text, drop non-http(s) image/favicon URLs
+const sanitizeLinkMetadata = (meta) => {
+    if (!meta || typeof meta !== 'object') return undefined;
+    return {
+        meta_title: stripAllHtml(meta.meta_title || '').substring(0, 200),
+        meta_description: stripAllHtml(meta.meta_description || '').substring(0, 500),
+        meta_image: isHttpUrl(meta.meta_image) ? meta.meta_image.substring(0, 2000) : '',
+        favicon: isHttpUrl(meta.favicon) ? meta.favicon.substring(0, 2000) : '',
+    };
+};
+
 const getPublicProfile = asyncHandler(async (req, res) => {
     try {
         const { username } = req.params;
@@ -121,7 +141,7 @@ const getMyProfile = asyncHandler(async (req, res) => {
 
 const upsertProfile = asyncHandler(async (req, res) => {
     try {
-        const { sections, is_published, version } = req.body;
+        const { sections, is_published, version, vibe } = req.body;
 
         // Sanitize text fields in sections/blocks
         const sanitizedSections = sections.map((section, sIdx) => ({
@@ -130,9 +150,13 @@ const upsertProfile = asyncHandler(async (req, res) => {
             order: section.order ?? sIdx,
             blocks: (section.blocks || []).map((block, bIdx) => ({
                 ...block,
-                title: block.title ? stripAllHtml(block.title) : '',
-                subtitle: block.subtitle ? stripAllHtml(block.subtitle) : '',
-                text_content: block.text_content ? stripAllHtml(block.text_content) : '',
+                // Lengths/ranges are already clamped by the Zod schema; here we only strip
+                // HTML from the canonical user-text fields.
+                ...(block.text ? { text: stripAllHtml(block.text) } : {}),
+                ...(block.name ? { name: stripAllHtml(block.name) } : {}),
+                ...(block.link_metadata
+                    ? { link_metadata: sanitizeLinkMetadata(block.link_metadata) }
+                    : {}),
                 order: block.order ?? bIdx,
             })),
         }));
@@ -155,6 +179,7 @@ const upsertProfile = asyncHandler(async (req, res) => {
         // Build the update object based on save type
         const updateSet = {
             sections: sanitizedSections,
+            ...(vibe ? { vibe } : {}),
         };
 
         if (is_published) {
@@ -444,6 +469,25 @@ const getBentoPageProfile = asyncHandler(async (req, res) => {
 });
 
 
+const { fetchLinkMetadata } = require('../utils/fetchLinkMetadata');
+
+const ogPreview = asyncHandler(async (req, res) => {
+    const { url } = req.query;
+    if (!url) {
+        return res.status(400).json({ status: 'Failed', message: 'url query param is required' });
+    }
+    try {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return res.status(400).json({ status: 'Failed', message: 'Only http/https URLs are supported' });
+        }
+    } catch {
+        return res.status(400).json({ status: 'Failed', message: 'Invalid URL' });
+    }
+    const meta = await fetchLinkMetadata(url);
+    return res.status(200).json({ status: 'Success', data: meta });
+});
+
 module.exports = {
     getPublicProfile,
     getMyProfile,
@@ -454,4 +498,5 @@ module.exports = {
     deleteBlock,
     reorderItems,
     getBentoPageProfile,
+    ogPreview,
 };

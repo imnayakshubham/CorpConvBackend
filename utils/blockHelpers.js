@@ -8,12 +8,18 @@ const { projection } = require('../constants');
 // Cache key generators (block-namespaced)
 const getBlocksCacheKey = (idOrUsername) => cache.generateKey('block', 'page-blocks', idOrUsername);
 const getBlockProfileCacheKey = (idOrUsername) => cache.generateKey('block', 'page-profile', idOrUsername);
+// Public bento profile cache key (username-keyed) - must match getBentoCacheKey in bentoController.js
+const getBentoProfileCacheKey = (username) => cache.generateKey('bento', 'profile', username);
 
 // Resolve user by ID or username, handling released usernames
 const resolveUser = async (idOrUsername) => {
+    const isMongoId = /^[a-fA-F0-9]{24}$/.test(idOrUsername);
+    const orConditions = [{ username: idOrUsername }];
+    if (isMongoId) orConditions.unshift({ _id: idOrUsername });
+
     const user = await User.findOne({
         access: true,
-        $or: [{ _id: idOrUsername }, { username: idOrUsername }],
+        $or: orConditions,
     }, projection).lean();
 
     if (user) return { user };
@@ -33,6 +39,7 @@ const invalidateBlockCache = async (userId) => {
     if (user?.username) {
         keys.push(getBlocksCacheKey(user.username));
         keys.push(getBlockProfileCacheKey(user.username));
+        keys.push(getBentoProfileCacheKey(user.username));
     }
     keys.push(getBlocksCacheKey(userId.toString()));
     keys.push(getBlockProfileCacheKey(userId.toString()));
