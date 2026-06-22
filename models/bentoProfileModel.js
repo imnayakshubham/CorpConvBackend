@@ -27,13 +27,8 @@ const blockSchema = new mongoose.Schema({
         minH: { type: Number, default: 1 },
     },
     // link fields
-    title: { type: String, maxlength: 200, default: '' },
-    subtitle: { type: String, maxlength: 300, default: '' },
     url: { type: String, maxlength: 2000, default: '' },
-    icon_url: { type: String, maxlength: 2000, default: '' },
-    image_url: { type: String, maxlength: 2000, default: '' },
-    // text fields
-    text_content: { type: String, maxlength: 2000, default: '' },
+    // text fields (canonical text lives in `text` below)
     background_color: { type: String, maxlength: 20, default: '#1a1a1a' },
     text_color: { type: String, maxlength: 20, default: '#ffffff' },
     // embed fields
