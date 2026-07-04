@@ -11,10 +11,11 @@ const createPollBody = z.object({
     closeAt: z.string().datetime({ offset: true }).optional().nullable(),
     pin_enabled: z.boolean().optional(),
     pin: pinField.optional(),
+    pins: z.array(pinField).max(10).optional(),
     status: z.enum(['draft', 'published']).optional(),
 }).strip().refine(
-    (data) => !data.pin_enabled || !!data.pin,
-    { message: 'PIN is required when pin_enabled is true', path: ['pin'] }
+    (data) => !data.pin_enabled || !!data.pin || (data.pins && data.pins.length > 0),
+    { message: 'At least one access code is required when PIN is enabled', path: ['pins'] }
 );
 
 const castVoteBody = z.object({
@@ -30,6 +31,7 @@ const updatePollSettingsBody = z.object({
     closeAt: z.string().datetime({ offset: true }).optional().nullable(),
     pin_enabled: z.boolean().optional(),
     pin: pinField.optional().nullable(),
+    pins: z.array(pinField).max(10).optional(),
     visibility: z.enum(['public', 'logged_in', 'workspace']).optional(),
     status: z.enum(['draft', 'published', 'closed']).optional(),
 }).strip().refine(

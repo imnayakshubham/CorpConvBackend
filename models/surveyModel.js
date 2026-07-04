@@ -212,6 +212,19 @@ const surveySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // Who can access the survey. 'workspace' restricts to the creator's active organization.
+    visibility: {
+        type: String,
+        enum: ['public', 'logged_in', 'workspace'],
+        default: 'public'
+    },
+    workspace_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Optional shared access codes required to access/submit. `pins` holds AES-encrypted
+    // 6-digit codes (creator-visible); `pin_hash` is a legacy single hashed PIN kept only for
+    // verifying pre-existing surveys until the creator regenerates codes.
+    pin_enabled: { type: Boolean, default: false },
+    pins: { type: [String], default: [], select: false },
+    pin_hash: { type: String, default: null, select: false },
     // Quiz mode settings
     quiz_settings: {
         type: quizSettingsSchema,

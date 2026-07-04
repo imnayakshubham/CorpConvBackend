@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const mongoId = z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid ID format');
+const pinField = z.string().length(6).regex(/^\d{6}$/, 'PIN must be exactly 6 digits');
 
 const createSurveyBody = z.object({
   survey_title: z.string().min(3, 'Title must be at least 3 characters').max(100),
@@ -17,6 +18,10 @@ const editSurveyBody = z.object({
   is_multi_step: z.boolean().optional(),
   status: z.enum(['draft', 'published', 'archived']).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
+  visibility: z.enum(['public', 'logged_in', 'workspace']).optional(),
+  // Creator-managed list of access codes; sending it replaces the list (see controller).
+  pin_enabled: z.boolean().optional(),
+  pins: z.array(pinField).max(10).optional(),
   quiz_settings: z.record(z.string(), z.unknown()).optional(),
   sharing: z.record(z.string(), z.unknown()).optional(),
   response_settings: z.record(z.string(), z.unknown()).optional(),
@@ -35,6 +40,7 @@ const surveySubmissionBody = z.object({
   is_partial: z.boolean().optional(),
   current_page: z.number().int().min(0).optional(),
   turnstile_token: z.string().optional(),
+  pin: pinField.optional(),
 }).strict();
 
 const listSurveysQuery = z.object({
@@ -53,6 +59,10 @@ const listSurveysQuery = z.object({
 const surveyIdParam = z.object({
   id: mongoId,
 });
+
+const verifyPinBody = z.object({
+  pin: pinField,
+}).strip();
 
 // No query params expected; unknown keys are silently stripped.
 const tagsQuery = z.object({}).strip();
@@ -76,6 +86,7 @@ module.exports = {
   surveySubmissionBody,
   listSurveysQuery,
   surveyIdParam,
+  verifyPinBody,
   tagsQuery,
   hushAiChatBody,
 };

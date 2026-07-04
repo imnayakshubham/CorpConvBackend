@@ -188,6 +188,9 @@ async function startServer() {
   await connectDB();
   require('./utils/slackService').init();
 
+  // AI SDK v7 is ESM-only; load + cache the agent engine's SDK bindings before serving.
+  await require('./lib/agent/engine').init();
+
   const PORT = process.env.PORT;
   const server = app.listen(PORT, () => {
     console.log(`Server running on PORT ${PORT}...`.yellow.bold);

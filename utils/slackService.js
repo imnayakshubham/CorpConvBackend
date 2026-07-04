@@ -56,7 +56,6 @@ function buildFields(user) {
   return {
     type: 'section',
     fields: [
-      { type: 'mrkdwn', text: `*Email:*\n${user.user_email_id || user.email || 'N/A'}` },
       { type: 'mrkdwn', text: `*Handle:*\n${user.username || user.actual_user_name || 'N/A'}` },
       { type: 'mrkdwn', text: `*Company:*\n${user.user_current_company_name || 'N/A'}` },
       { type: 'mrkdwn', text: `*Role:*\n${user.user_job_role || 'N/A'}` },
@@ -121,7 +120,6 @@ async function onFeedback(user, feedback) {
         fields: [
           { type: 'mrkdwn', text: `*Type:*\n${feedback.type || 'N/A'}` },
           { type: 'mrkdwn', text: `*Title:*\n${feedback.title || 'N/A'}` },
-          { type: 'mrkdwn', text: `*Email:*\n${user.user_email_id || user.email || 'N/A'}` },
           { type: 'mrkdwn', text: `*Handle:*\n${user.username || user.actual_user_name || 'N/A'}` },
         ],
       },
