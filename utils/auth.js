@@ -439,10 +439,7 @@ const getAuth = async () => {
                                 }
                             }
                             if (user) {
-                                // Fetch email only for the Slack notification — never cached, never sent to client
-                                const User = require('../models/userModel');
-                                const emailDoc = await User.findById(session.userId, { user_email_id: 1, _id: 0 }).lean();
-                                eventBus.emit('user:login', { ...user, user_email_id: emailDoc?.user_email_id });
+                                eventBus.emit('user:login', user);
                             }
 
                             // Ensure user has a personal workspace; set it as active if session has none

@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 const { Poll, PollVote } = require('../models/pollModel');
 const ActivityEvent = require('../models/activityEventModel');
 const cache = require('../redisClient/cacheHelper');
 const TTL = require('../redisClient/cacheTTL');
+const { encryptCodes, decryptCodes, verifyPin: matchAccessCode } = require('../utils/pinCrypto');
 
 const ENV = process.env.APP_ENV || 'DEV';
 
@@ -36,6 +36,7 @@ async function computeResults(pollId, options, totalVotes) {
 function safePoll(poll) {
     const obj = poll.toObject ? poll.toObject() : { ...poll };
     delete obj.pin_hash;
+    delete obj.pins;
     return obj;
 }
 
@@ -69,15 +70,14 @@ async function lazyAutoClose(polls) {
 
 const createPoll = async (req, res) => {
     try {
-        const { question, options, allow_multiple_choice, visibility = 'public', closeAt, pin_enabled, pin, status } = req.body;
+        const { question, options, allow_multiple_choice, visibility = 'public', closeAt, pin_enabled, pin, pins, status } = req.body;
         const created_by = req.user._id;
 
         const workspace_id = visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
 
-        let pin_hash = null;
-        if (pin_enabled && pin) {
-            pin_hash = await bcrypt.hash(pin, 10);
-        }
+        // Encrypt the creator-managed access codes. Accept a legacy single `pin` too.
+        const codes = Array.isArray(pins) ? pins : (pin ? [pin] : []);
+        const encryptedPins = pin_enabled ? encryptCodes(codes) : [];
 
         const pollOptions = options.map((text) => ({ text }));
         const initialStatus = status === 'published' ? 'published' : 'draft';
@@ -91,7 +91,7 @@ const createPoll = async (req, res) => {
             workspace_id,
             closeAt: closeAt ? new Date(closeAt) : null,
             pin_enabled: !!pin_enabled,
-            pin_hash,
+            pins: encryptedPins,
             status: initialStatus,
         });
 
@@ -105,6 +105,7 @@ const createPoll = async (req, res) => {
             .lean();
 
         delete populated.pin_hash;
+        delete populated.pins;
         applyStatusNormalization(populated);
 
         return res.status(201).json({
@@ -240,7 +241,7 @@ const getPollBySlug = async (req, res) => {
 
         const now = new Date();
 
-        let poll = await Poll.findOne({ slug, access: true }).select('+pin_hash').lean();
+        let poll = await Poll.findOne({ slug, access: true }).select('+pin_hash +pins').lean();
         if (!poll) {
             return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
         }
@@ -289,6 +290,13 @@ const getPollBySlug = async (req, res) => {
             created_by: creator || poll.created_by,
         };
         delete responseData.pin_hash;
+        // Access codes are creator-only; decrypt for the creator, strip for everyone else.
+        if (isCreator) {
+            responseData.pins = decryptCodes(poll.pins);
+            responseData.pin_legacy = (!poll.pins || poll.pins.length === 0) && !!poll.pin_hash;
+        } else {
+            delete responseData.pins;
+        }
 
         let userVote = null;
         let results = null;
@@ -324,7 +332,7 @@ const castVote = async (req, res) => {
         const now = new Date();
         const isAuthenticated = !!req.user;
 
-        const poll = await Poll.findOne({ _id: id, access: true }).select('+pin_hash');
+        const poll = await Poll.findOne({ _id: id, access: true }).select('+pin_hash +pins');
         if (!poll) {
             return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
         }
@@ -356,13 +364,12 @@ const castVote = async (req, res) => {
             }
         }
 
-        // PIN check
+        // PIN check — matches any current access code (or the legacy hash).
         if (poll.pin_enabled) {
             if (!pin) {
                 return res.status(401).json({ status: 'Failed', data: null, message: 'PIN required' });
             }
-            const pinMatch = await bcrypt.compare(pin, poll.pin_hash || '');
-            if (!pinMatch) {
+            if (!(await matchAccessCode(pin, poll))) {
                 return res.status(401).json({ status: 'Failed', data: null, message: 'Invalid PIN' });
             }
         }
@@ -448,7 +455,7 @@ const updatePollSettings = async (req, res) => {
         }
 
         const updates = {};
-        const { closeAt, pin_enabled, pin, visibility, status, question, options, allow_multiple_choice } = req.body;
+        const { closeAt, pin_enabled, pin, pins, visibility, status, question, options, allow_multiple_choice } = req.body;
 
         const currentStatus = normalizeStatus(poll.status);
         const contentEditAllowed = currentStatus === 'draft' || (poll.total_votes || 0) === 0;
@@ -474,23 +481,32 @@ const updatePollSettings = async (req, res) => {
             updates.workspace_id = visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
         }
 
+        // Access codes: sending `pins` (or a legacy single `pin`) replaces the list and
+        // migrates off the old hash. Disabling clears both.
         if (pin_enabled !== undefined) {
             updates.pin_enabled = pin_enabled;
             if (!pin_enabled) {
+                updates.pins = [];
                 updates.pin_hash = null;
-            } else if (pin) {
-                updates.pin_hash = await bcrypt.hash(pin, 10);
             }
-        } else if (pin) {
-            updates.pin_hash = await bcrypt.hash(pin, 10);
+        }
+        if ((Array.isArray(pins) || pin) && (pin_enabled === undefined || pin_enabled)) {
+            const codes = Array.isArray(pins) ? pins : [pin];
+            updates.pins = encryptCodes(codes);
+            updates.pin_hash = null;
         }
 
         const updated = await Poll.findByIdAndUpdate(id, updates, { new: true })
             .populate('created_by', 'public_user_name user_public_profile_pic avatar_config')
+            .select('+pins')
             .lean();
 
         delete updated.pin_hash;
         applyStatusNormalization(updated);
+        // Return the updated code list to the creator so the settings UI stays in sync.
+        const decryptedPins = decryptCodes(updated.pins);
+        delete updated.pins;
+        updated.pins = decryptedPins;
 
         await cache.del(pollDetailCacheKey(poll.slug));
         await cache.delByPattern(pollListCachePattern());
@@ -584,7 +600,7 @@ const verifyPin = async (req, res) => {
         const { id } = req.params;
         const { pin } = req.body;
 
-        const poll = await Poll.findOne({ _id: id, access: true }).select('+pin_hash');
+        const poll = await Poll.findOne({ _id: id, access: true }).select('+pin_hash +pins');
         if (!poll) {
             return res.status(404).json({ status: 'Failed', data: null, message: 'Poll not found' });
         }
@@ -592,7 +608,7 @@ const verifyPin = async (req, res) => {
             return res.status(400).json({ status: 'Failed', data: null, message: 'Poll is not PIN protected' });
         }
 
-        const match = await bcrypt.compare(pin, poll.pin_hash || '');
+        const match = await matchAccessCode(pin, poll);
         if (!match) {
             return res.status(401).json({ status: 'Failed', data: null, message: 'Invalid PIN' });
         }

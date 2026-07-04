@@ -1,9 +1,35 @@
 const { Survey, Submission } = require("../models/surveyModel");
 const ActivityEvent = require("../models/activityEventModel");
+const Tag = require("../models/tagModel");
 const cache = require("../redisClient/cacheHelper");
 const TTL = require("../redisClient/cacheTTL");
 const escapeRegex = require("../utils/escapeRegex");
 const { sanitizeRichText } = require("../utils/sanitize");
+const { encryptCodes, decryptCodes, verifyPin } = require("../utils/pinCrypto");
+
+// Trim + case-insensitive dedupe a list of tag strings, preserving first-seen casing.
+const normalizeTags = (tags) => {
+    const seen = new Map();
+    for (const t of Array.isArray(tags) ? tags : []) {
+        const trimmed = String(t ?? '').trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (!seen.has(key)) seen.set(key, trimmed);
+    }
+    return seen; // Map<lowercaseKey, displayName>
+};
+
+// Upsert each of the user's tags into the per-user Tag collection so they can be
+// suggested next time. Best-effort: failures never block the survey save.
+const persistUserTags = async (tagMap, userId) => {
+    await Promise.all([...tagMap].map(([name, display_name]) =>
+        Tag.findOneAndUpdate(
+            { name, created_by: userId },
+            { $setOnInsert: { name, display_name, created_by: userId } },
+            { upsert: true }
+        ).catch(() => {})
+    ));
+};
 
 // CREATE Survey API
 const createSurvey = async (req, res) => {
@@ -265,7 +291,7 @@ const editSurvey = async (req, res) => {
         // Allowlisted fields only
         const allowedFields = [
             'survey_title', 'survey_description', 'survey_form', 'pages',
-            'is_multi_step', 'status', 'tags', 'quiz_settings', 'sharing',
+            'is_multi_step', 'status', 'tags', 'visibility', 'quiz_settings', 'sharing',
             'response_settings', 'theme', 'notifications', 'form_settings', 'slug'
         ];
         const updatedPayload = {};
@@ -273,6 +299,27 @@ const editSurvey = async (req, res) => {
             if (req.body[field] !== undefined) {
                 updatedPayload[field] = req.body[field];
             }
+        }
+
+        // Workspace visibility binds the survey to the creator's active organization.
+        if (updatedPayload.visibility !== undefined) {
+            updatedPayload.workspace_id = updatedPayload.visibility === 'workspace'
+                ? (req.activeOrganizationId || null)
+                : null;
+        }
+
+        // Shared access codes: store the creator-managed list encrypted. Sending `pins`
+        // replaces the list and migrates off any legacy hashed PIN. Disabling clears both.
+        if (req.body.pin_enabled !== undefined) {
+            updatedPayload.pin_enabled = !!req.body.pin_enabled;
+            if (!req.body.pin_enabled) {
+                updatedPayload.pins = [];
+                updatedPayload.pin_hash = null;
+            }
+        }
+        if (Array.isArray(req.body.pins) && (req.body.pin_enabled === undefined || req.body.pin_enabled)) {
+            updatedPayload.pins = encryptCodes(req.body.pins);
+            updatedPayload.pin_hash = null; // migrated to the visible code list
         }
 
         if (updatedPayload.survey_title) {
@@ -289,11 +336,24 @@ const editSurvey = async (req, res) => {
             updatedPayload.survey_description = sanitizeRichText(updatedPayload.survey_description.trim());
         }
 
+        // Trim + dedupe tags before persisting; keep a map to feed the suggestion store.
+        let tagMap;
+        if (updatedPayload.tags !== undefined) {
+            tagMap = normalizeTags(updatedPayload.tags);
+            updatedPayload.tags = [...tagMap.values()];
+        }
+
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, updatedPayload, { new: true })
+
+        // Record the user's tags for future suggestions (best-effort, non-blocking).
+        if (tagMap && tagMap.size > 0) {
+            await persistUserTags(tagMap, req.user._id);
+        }
 
         // Invalidate caches
         await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
         await cache.del(cache.generateKey('surveys', 'tags'));
+        await cache.del(cache.generateKey('surveys', 'tags', String(req.user._id)));
         await cache.del(cache.generateKey('survey', surveyId));
 
         return res.status(200).json({
@@ -356,6 +416,22 @@ const unpublishSurvey = async (req, res) => {
     }
 };
 
+// Gate a survey by its visibility. Returns null when access is allowed, or a
+// { status, message } describing the denial. The creator always has access.
+const checkVisibilityAccess = (survey, req) => {
+    if (req.user && String(survey.created_by) === String(req.user._id)) return null;
+    if (survey.visibility === 'logged_in' && !req.user) {
+        return { status: 401, message: 'Login required to access this survey' };
+    }
+    if (survey.visibility === 'workspace') {
+        const org = req.activeOrganizationId;
+        if (!org || String(org) !== String(survey.workspace_id)) {
+            return { status: 403, message: 'Access restricted to workspace members' };
+        }
+    }
+    return null;
+};
+
 const getSurvey = async (req, res) => {
     try {
         const surveyId = req.params.id;
@@ -363,31 +439,47 @@ const getSurvey = async (req, res) => {
         // Try to get from cache
         const cacheKey = cache.generateKey('survey', surveyId);
         const cached = await cache.get(cacheKey);
-        if (cached) {
-            return res.status(200).json({
-                status: 'Success',
-                data: cached,
-                message: 'Survey Fetch successfully (Cached)'
-            });
+
+        let surveyObj = cached;
+        if (!surveyObj) {
+            const survey = await Survey.findById(surveyId);
+            if (!survey) {
+                return res.status(404).json({
+                    status: 'Failed',
+                    message: 'Survey not found',
+                    data: null
+                });
+            }
+            surveyObj = survey.toObject();
+            await cache.set(cacheKey, surveyObj, TTL.SURVEY_DETAIL);
         }
 
-        const survey = await Survey.findById(surveyId);
-
-        if (!survey) {
-            return res.status(404).json({
+        // Enforce visibility per-request (the cached doc is shared across requesters).
+        const denied = checkVisibilityAccess(surveyObj, req);
+        if (denied) {
+            return res.status(denied.status).json({
                 status: 'Failed',
-                message: 'Survey not found',
+                message: denied.message,
                 data: null
             });
         }
 
-        // Cache the survey
-        await cache.set(cacheKey, survey.toObject(), TTL.SURVEY_DETAIL);
+        // Only the creator may see the access codes. `pins`/`pin_hash` are select:false, so the
+        // cached/public object never carries them — fetch + decrypt just for the creator, uncached.
+        const isCreator = req.user && String(surveyObj.created_by) === String(req.user._id);
+        if (isCreator) {
+            const secret = await Survey.findById(surveyId).select('+pins +pin_hash').lean();
+            surveyObj = {
+                ...surveyObj,
+                pins: decryptCodes(secret?.pins),
+                pin_legacy: (!secret?.pins || secret.pins.length === 0) && !!secret?.pin_hash,
+            };
+        }
 
         return res.status(200).json({
             status: 'Success',
-            data: survey,
-            message: 'Survey Fetch successfully'
+            data: surveyObj,
+            message: cached ? 'Survey Fetch successfully (Cached)' : 'Survey Fetch successfully'
         });
     } catch (error) {
         return res.status(500).json({
@@ -504,7 +596,8 @@ const surveySubmission = async (req, res) => {
     try {
         const surveyId = req.params.id;
 
-        const survey = await Survey.findById(surveyId);
+        // pins/pin_hash are select:false; include them so the PIN gate below can verify.
+        const survey = await Survey.findById(surveyId).select('+pins +pin_hash');
 
         if (!survey) {
             return res.status(404).json({
@@ -512,6 +605,28 @@ const surveySubmission = async (req, res) => {
                 message: 'Survey not found',
                 data: null
             });
+        }
+
+        // Enforce visibility (workspace / logged-in) before accepting a submission.
+        const denied = checkVisibilityAccess(survey, req);
+        if (denied) {
+            return res.status(denied.status).json({
+                status: 'Failed',
+                message: denied.message,
+                data: null
+            });
+        }
+
+        // Enforce the shared access code if enabled (matches any current code, or legacy hash).
+        if (survey.pin_enabled) {
+            const ok = await verifyPin(req.body.pin, survey);
+            if (!ok) {
+                return res.status(403).json({
+                    status: 'Failed',
+                    message: 'Invalid or missing PIN',
+                    data: null
+                });
+            }
         }
 
         // Validate Turnstile CAPTCHA if enabled
@@ -727,10 +842,15 @@ const getSurveySubmission = async (req, res) => {
 
 
 // GET Available Tags API
-const getAvailableTags = async (_req, res) => {
+// Logged in: returns the user's own previously-used tags (from the Tag collection),
+// merged with globally popular published tags for discovery. Logged out: popular tags only.
+const getAvailableTags = async (req, res) => {
     try {
-        // Try to get from cache
-        const cacheKey = cache.generateKey('surveys', 'tags');
+        const userId = req.user?._id ? String(req.user._id) : null;
+        const cacheKey = userId
+            ? cache.generateKey('surveys', 'tags', userId)
+            : cache.generateKey('surveys', 'tags');
+
         const cached = await cache.get(cacheKey);
         if (cached) {
             return res.status(200).json({
@@ -740,8 +860,8 @@ const getAvailableTags = async (_req, res) => {
             });
         }
 
-        // Aggregate unique tags with counts from published surveys only
-        const tagsAggregation = await Survey.aggregate([
+        // Globally popular tags from published, publicly-accessible surveys (discovery).
+        const popularTags = await Survey.aggregate([
             { $match: { status: 'published', access: true } },
             { $unwind: '$tags' },
             { $group: { _id: '$tags', count: { $sum: 1 } } },
@@ -750,12 +870,28 @@ const getAvailableTags = async (_req, res) => {
             { $project: { _id: 0, tag: '$_id', count: 1 } }
         ]);
 
-        // Cache the tags
-        await cache.set(cacheKey, tagsAggregation, TTL.SURVEYS_LIST);
+        let tags = popularTags;
+        if (userId) {
+            // Surface the user's own tags first, then popular ones, deduped case-insensitively.
+            const ownTags = await Tag.find({ created_by: req.user._id })
+                .sort({ updatedAt: -1 })
+                .limit(50)
+                .lean();
+
+            const byKey = new Map();
+            for (const t of ownTags) byKey.set(t.name, { tag: t.display_name, count: 0 });
+            for (const t of popularTags) {
+                const key = String(t.tag).toLowerCase();
+                if (!byKey.has(key)) byKey.set(key, t);
+            }
+            tags = [...byKey.values()];
+        }
+
+        await cache.set(cacheKey, tags, TTL.SURVEYS_LIST);
 
         return res.status(200).json({
             status: 'Success',
-            data: tagsAggregation,
+            data: tags,
             message: 'Tags retrieved successfully'
         });
     } catch (error) {
@@ -1042,6 +1178,32 @@ const getSurveyAnalytics = async (req, res) => {
     }
 };
 
+// Verify a survey's shared PIN so respondents can unlock the form before submitting.
+const verifySurveyPin = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { pin } = req.body;
+
+        const survey = await Survey.findById(id).select('+pins +pin_hash');
+        if (!survey) {
+            return res.status(404).json({ status: 'Failed', data: null, message: 'Survey not found' });
+        }
+        if (!survey.pin_enabled) {
+            return res.status(400).json({ status: 'Failed', data: null, message: 'Survey is not PIN protected' });
+        }
+
+        const match = await verifyPin(pin, survey);
+        if (!match) {
+            return res.status(401).json({ status: 'Failed', data: null, message: 'Invalid PIN' });
+        }
+
+        return res.json({ status: 'Success', data: { valid: true }, message: 'PIN verified' });
+    } catch (error) {
+        console.error('verifySurveyPin error:', error);
+        return res.status(500).json({ status: 'Failed', data: null, message: 'Something went wrong' });
+    }
+};
+
 module.exports = {
     createSurvey,
     listSurveys,
@@ -1053,5 +1215,6 @@ module.exports = {
     getSurveySubmission,
     getAvailableTags,
     trackSurveyView,
-    getSurveyAnalytics
+    getSurveyAnalytics,
+    verifySurveyPin
 }

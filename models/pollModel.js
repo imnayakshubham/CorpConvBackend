@@ -50,7 +50,10 @@ const pollSchema = new mongoose.Schema({
         default: 'draft',
     },
     closeAt: { type: Date, default: null },
+    // `pins` holds AES-encrypted creator-visible access codes; `pin_hash` is a legacy single
+    // hashed PIN kept only for verifying pre-existing polls until the creator regenerates codes.
     pin_enabled: { type: Boolean, default: false },
+    pins: { type: [String], default: [], select: false },
     pin_hash: { type: String, default: null, select: false },
     slug: { type: String, unique: true },
     total_votes: { type: Number, default: 0 },
