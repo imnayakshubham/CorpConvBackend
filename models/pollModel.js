@@ -1,17 +1,5 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto');
-
-function generateSlug(text) {
-    const base = (text || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .trim()
-        .replace(/\s+/g, '-')
-        .slice(0, 50)
-        .replace(/-+$/, '');
-    const random = crypto.randomBytes(4).toString('hex');
-    return base ? `${base}-${random}` : random;
-}
+const generateSlug = require('../utils/generateSlug');
 
 const pollOptionSchema = new mongoose.Schema({
     text: { type: String, required: true, maxlength: 200 },

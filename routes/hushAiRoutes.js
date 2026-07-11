@@ -1,11 +1,8 @@
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
 const { hushAiChat, hushAiSummarize } = require('../controllers/hushAiController');
-const {
-  loadConversation,
-  saveConversation,
-  clearConversation,
-} = require('../controllers/hushAiConversationController');
+const { createConversationHandlers } = require('../controllers/hushAiConversationController');
+const surveyAgent = require('../features/surveyAgent');
 const { writeLimiter } = require('../middleware/rateLimiter');
 const aiQuota = require('../middleware/aiQuotaMiddleware');
 const { isSuperAdmin } = require('../middleware/superAdminMiddleware');
@@ -13,15 +10,21 @@ const User = require('../models/userModel');
 
 const router = express.Router();
 
+// Records are namespaced by the plugin's key, so a sibling feature mounts its own conversation
+// routes by calling this with its own plugin.
+const { loadConversation, saveConversation, clearConversation } =
+  createConversationHandlers(surveyAgent.key);
+
 // protect → writeLimiter (30/min) → aiQuota (15/month free) → hushAiChat
 router.post('/ai/chat/:id', protect, writeLimiter, aiQuota, hushAiChat);
 
 // Condense a conversation slice for the rewind "Summarize" options.
 router.post('/ai/summarize/:id', protect, writeLimiter, aiQuota, hushAiSummarize);
 
-// Durable conversation store (cross-device). NOT quota-metered — persistence must never
-// burn the monthly AI budget. Messages are written by the chat's onEnd hook; PUT saves
-// only the client-only rewind/versioning state.
+// Durable conversation store (cross-device). NOT quota-metered — persistence must never burn
+// the monthly AI budget. The PUT is the sole writer of the transcript AND the rewind/branch
+// state; the chat's onEnd hook writes only the rolling summary. PUT carries a `baseVersion`
+// and 409s on a stale write rather than clobbering.
 router.get('/ai/conversation/:id', protect, loadConversation);
 router.put('/ai/conversation/:id', protect, writeLimiter, saveConversation);
 router.delete('/ai/conversation/:id', protect, writeLimiter, clearConversation);

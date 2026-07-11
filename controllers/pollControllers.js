@@ -301,12 +301,17 @@ const getPollBySlug = async (req, res) => {
         let userVote = null;
         let results = null;
 
+        // Closed polls reveal results to everyone (voting is over; no PIN needed).
+        if (poll.status === 'closed') {
+            results = await computeResults(poll._id, poll.options, poll.total_votes);
+        }
+
         if (req.user) {
             const userId = req.user._id || req.user.id;
             userVote = await PollVote.findOne({ poll_id: poll._id, voter_id: userId }).lean();
             const isCreator = poll.created_by.toString() === userId.toString();
 
-            if (userVote || poll.status === 'closed' || isCreator) {
+            if (userVote || isCreator) {
                 results = await computeResults(poll._id, poll.options, poll.total_votes);
             }
         }

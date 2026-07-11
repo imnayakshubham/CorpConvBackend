@@ -38,6 +38,11 @@ const getToNodeHandler = async () => {
 const cors = require("cors");
 
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
+const {
+  GENERAL_MAX_BODY_BYTES,
+  CONVERSATION_MAX_BODY_BYTES,
+  isConversationSave,
+} = require("./config/payloadLimits");
 const path = require("path");
 const { initializeSocket, getIo } = require("./utils/socketManger");
 const notificationService = require("./utils/notificationService");
@@ -109,8 +114,14 @@ app.use(helmet({
   // noSniff, frameguard, xssFilter remain on (helmet defaults).
 }));
 app.use(globalLimiter);
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// The Hush AI conversation transcript is legitimately larger than any other payload, so it
+// gets its own parser instead of widening the ceiling for the whole API. Both limits live in
+// config/payloadLimits.js alongside the controller that enforces them.
+const generalJson = express.json({ limit: GENERAL_MAX_BODY_BYTES });
+const conversationJson = express.json({ limit: CONVERSATION_MAX_BODY_BYTES });
+app.use((req, res, next) => (isConversationSave(req) ? conversationJson : generalJson)(req, res, next));
+app.use(express.urlencoded({ extended: true, limit: GENERAL_MAX_BODY_BYTES }));
 
 if (process.env.APP_ENV === "PROD") {
   job.start()
