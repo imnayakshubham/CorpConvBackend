@@ -28,7 +28,7 @@
 | API4 | Unrestricted Resource Consumption | Covered | 7 rate limiters with env-configurable limits |
 | API5 | Broken Function Level Authorization | Covered | `protect` + `superAdmin` on all privileged routes |
 | API6 | Unrestricted Access to Sensitive Business Flows | Partial | `submissionLimiter` on surveys; no bot detection |
-| API7 | Server Side Request Forgery | N/A | No outbound requests triggered by user input |
+| API7 | Server Side Request Forgery | Partial | `safeGet()` (`utils/safeHttp.js`) guards the Hush AI web crawler: http(s) only, connect-time private/link-local/metadata IP block, manual redirect re-validation, content-type allowlist. `utils/fetchLinkMetadata.js` is **not yet migrated** |
 | API8 | Security Misconfiguration | Covered | Explicit Helmet config, no sensitive logs, secrets in env |
 | API9 | Improper Inventory Management | N/A | Single-version API |
 | API10 | Unsafe Consumption of APIs | Partial | No validation on third-party webhook payloads |
@@ -64,10 +64,24 @@ When rotating secrets, update both the environment and any active sessions/conne
 
 ---
 
+## Hush AI (Agent Harness)
+
+| Concern | Status | Controls |
+|---|---|---|
+| Model self-committing a mutation | Covered (structural) | Mutation tools declare no `execute` — the server can only *propose*. The client applies, behind a mandatory human approval gate. `web_search` is the only tool with `execute`, and it reads the public web, never user data |
+| SSRF via the web crawler | Covered | `safeGet()` — see API7 above |
+| Prompt injection from crawled pages | Partial | Passages are wrapped in `<untrusted_web_content>` with explicit "reference data, not instructions" framing (`lib/agent/webSearch.js`). The approval gate bounds the blast radius to *proposals*; injected text still enters model context |
+| Per-tool capability/permission model | Missing | Tools are gated only by `protect` + `writeLimiter` + `aiQuota`. No scoped capabilities |
+| AI usage quota | Covered | `aiQuotaMiddleware.js` — 15 calls/month free; paid plans and super admins exempt. Returns `429 quota_exceeded` |
+| Object-level authz on `resourceId` | Missing | The chat route never verifies the caller owns the target survey; `surveyContext` is supplied by the client. All conversation records are user-scoped, so impact is limited to the caller's own namespace — but the server cannot audit what was applied to a given survey |
+
+---
+
 ## Known Limitations (Out of Scope)
 
 | Limitation | Reason | Mitigation |
 |---|---|---|
+| `fetchLinkMetadata.js` not behind `safeGet()` | Predates `utils/safeHttp.js`; used by links/messages/bento previews | TODO: migrate to `safeGet()` — same SSRF exposure class as the crawler had |
 | Socket.IO events lack per-event auth | Requires client-side changes; socket events are display-only (creation goes through HTTP) | Socket joins require `userData._id`; no data-modifying events are unauthenticated in production flows |
 | No CSRF tokens | Would require frontend changes | Mitigated by `SameSite=None; Secure` cookies + CORS whitelist |
 | No MFA | Product feature, not a security fix | — |

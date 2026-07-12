@@ -3,16 +3,10 @@ const { z } = require('zod');
 const mongoId = z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid ID format');
 const pinField = z.string().length(6).regex(/^\d{6}$/, 'PIN must be exactly 6 digits');
 
-const createSurveyBody = z.object({
-  survey_title: z.string().min(3, 'Title must be at least 3 characters').max(100),
-  survey_description: z.string().max(2000).default(''),
-}).strict();
-
-const editSurveyBody = z.object({
-  survey_title: z.string().min(3).max(100).optional(),
-  survey_description: z.string().max(2000).optional(),
-  // z.record(z.string(), z.unknown()) is functionally equivalent to z.object({}).passthrough()
-  // but removes the explicit passthrough() opt-in that bypasses Zod's prototype handling.
+// Shared optional settings accepted by both create and edit, so the two schemas
+// never drift. z.record(z.string(), z.unknown()) is equivalent to z.object({}).passthrough()
+// but without the explicit passthrough() opt-in that bypasses Zod's prototype handling.
+const surveySettingsShape = {
   survey_form: z.array(z.record(z.string(), z.unknown())).optional(),
   pages: z.array(z.record(z.string(), z.unknown())).optional(),
   is_multi_step: z.boolean().optional(),
@@ -28,7 +22,19 @@ const editSurveyBody = z.object({
   theme: z.record(z.string(), z.unknown()).optional(),
   notifications: z.record(z.string(), z.unknown()).optional(),
   form_settings: z.record(z.string(), z.unknown()).optional(),
+};
+
+const createSurveyBody = z.object({
+  survey_title: z.string().min(3, 'Title must be at least 3 characters').max(100),
+  survey_description: z.string().max(2000).default(''),
+  ...surveySettingsShape,
+}).strict();
+
+const editSurveyBody = z.object({
+  survey_title: z.string().min(3).max(100).optional(),
+  survey_description: z.string().max(2000).optional(),
   slug: z.string().max(100).optional(),
+  ...surveySettingsShape,
 }).strict();
 
 const surveySubmissionBody = z.object({

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const generateSlug = require('../utils/generateSlug');
 
 // Structured response for each field in a submission
 const submissionResponseSchema = new mongoose.Schema({
@@ -283,20 +284,19 @@ surveySchema.index({ tags: 1 });
 
 surveySchema.pre('save', function (next) {
     try {
-        console.log("Pre-save hook triggered");
         if (this.survey_title) {
             this.survey_title = this.survey_title.trim();
-            // addd below slug creation like notion
-            this.slug = this.survey_title.toLowerCase().replace(/\s+/g, '-')
+            // Generate a unique, URL-safe slug once. The controller retries on a
+            // slug collision (E11000) to make uniqueness a hard guarantee.
+            if (!this.slug) this.slug = generateSlug(this.survey_title);
         }
-
 
         if (this.survey_description) {
             this.survey_description = this.survey_description.trim();
         }
         next();
     } catch (error) {
-        console.error("Error in pre-save hook:", error);
+        console.error("Error in survey pre-save hook:", error);
         next(error);
     }
 });

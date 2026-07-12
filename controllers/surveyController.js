@@ -6,6 +6,7 @@ const TTL = require("../redisClient/cacheTTL");
 const escapeRegex = require("../utils/escapeRegex");
 const { sanitizeRichText } = require("../utils/sanitize");
 const { encryptCodes, decryptCodes, verifyPin } = require("../utils/pinCrypto");
+const generateSlug = require("../utils/generateSlug");
 
 // Trim + case-insensitive dedupe a list of tag strings, preserving first-seen casing.
 const normalizeTags = (tags) => {
@@ -31,13 +32,45 @@ const persistUserTags = async (tagMap, userId) => {
     ));
 };
 
+// Settings fields shared by create and edit. Copied verbatim from the request body.
+const SURVEY_SETTINGS_FIELDS = ['survey_form', 'pages', 'is_multi_step', 'status', 'tags',
+    'visibility', 'quiz_settings', 'sharing', 'response_settings', 'theme', 'notifications', 'form_settings'];
+
+// Copy allowlisted settings from `body` onto `target`, handling workspace binding,
+// access-code encryption, and tag normalization. Returns the tag Map (for suggestions).
+const applySurveySettings = (target, body, req) => {
+    for (const f of SURVEY_SETTINGS_FIELDS) {
+        if (body[f] !== undefined) target[f] = body[f];
+    }
+    if (target.visibility !== undefined) {
+        target.workspace_id = target.visibility === 'workspace' ? (req.activeOrganizationId || null) : null;
+    }
+    if (body.pin_enabled !== undefined) {
+        target.pin_enabled = !!body.pin_enabled;
+        if (!body.pin_enabled) {
+            target.pins = [];
+            target.pin_hash = null;
+        }
+    }
+    if (Array.isArray(body.pins) && (body.pin_enabled === undefined || body.pin_enabled)) {
+        target.pins = encryptCodes(body.pins);
+        target.pin_hash = null; // migrated to the visible code list
+    }
+    let tagMap;
+    if (target.tags !== undefined) {
+        tagMap = normalizeTags(target.tags);
+        target.tags = [...tagMap.values()];
+    }
+    return tagMap;
+};
+
 // CREATE Survey API
 const createSurvey = async (req, res) => {
     try {
         const payload = req.body;
         const updatedPayload = {
             survey_title: payload.survey_title.trim(),
-            survey_description: payload.survey_description.trim(),
+            survey_description: sanitizeRichText((payload.survey_description || '').trim()),
             created_by: req.user._id
         }
 
@@ -50,17 +83,41 @@ const createSurvey = async (req, res) => {
             });
         }
 
+        // Persist the full step-2 settings in this single create call.
+        const tagMap = applySurveySettings(updatedPayload, payload, req);
+
         const newSurvey = new Survey({
             ...updatedPayload,
         });
 
 
-        const savedSurvey = await newSurvey.save();
+        // Persist, retrying on a slug uniqueness collision (E11000) so the slug is
+        // always unique. The DB `slug_1` unique index is the source of truth; the
+        // random-suffixed slug makes iteration effectively never happen.
+        let savedSurvey;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                savedSurvey = await newSurvey.save();
+                break;
+            } catch (err) {
+                if (err?.code === 11000 && err?.keyPattern?.slug && attempt < 4) {
+                    newSurvey.slug = generateSlug(newSurvey.survey_title);
+                    continue;
+                }
+                throw err;
+            }
+        }
         ActivityEvent.create({ userId: req.user._id, eventType: 'survey_created' }).catch(() => {});
+
+        // Record the user's tags for future suggestions (best-effort, non-blocking).
+        if (tagMap && tagMap.size > 0) {
+            persistUserTags(tagMap, req.user._id).catch(() => {});
+        }
 
         // Invalidate surveys list cache (all patterns)
         await cache.delByPattern(`${process.env.APP_ENV || 'DEV'}:surveys:list:*`);
         await cache.del(cache.generateKey('surveys', 'tags'));
+        await cache.del(cache.generateKey('surveys', 'tags', String(req.user._id)));
 
         return res.status(201).json({
             status: 'Success',
@@ -68,7 +125,7 @@ const createSurvey = async (req, res) => {
             message: 'Survey created successfully'
         });
     } catch (error) {
-        console.log({ error })
+        console.error('createSurvey error:', error);
         return res.status(500).json({
             status: 'Failed',
             message: 'Server Error: Survey not created',
@@ -288,42 +345,14 @@ const editSurvey = async (req, res) => {
                 data: null
             });
         }
-        // Allowlisted fields only
-        const allowedFields = [
-            'survey_title', 'survey_description', 'survey_form', 'pages',
-            'is_multi_step', 'status', 'tags', 'visibility', 'quiz_settings', 'sharing',
-            'response_settings', 'theme', 'notifications', 'form_settings', 'slug'
-        ];
+        // Settings (visibility/pin/tags/etc.) via the shared applier; title/description/slug below.
         const updatedPayload = {};
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) {
-                updatedPayload[field] = req.body[field];
-            }
-        }
+        const tagMap = applySurveySettings(updatedPayload, req.body, req);
 
-        // Workspace visibility binds the survey to the creator's active organization.
-        if (updatedPayload.visibility !== undefined) {
-            updatedPayload.workspace_id = updatedPayload.visibility === 'workspace'
-                ? (req.activeOrganizationId || null)
-                : null;
-        }
+        if (req.body.slug !== undefined) updatedPayload.slug = req.body.slug;
 
-        // Shared access codes: store the creator-managed list encrypted. Sending `pins`
-        // replaces the list and migrates off any legacy hashed PIN. Disabling clears both.
-        if (req.body.pin_enabled !== undefined) {
-            updatedPayload.pin_enabled = !!req.body.pin_enabled;
-            if (!req.body.pin_enabled) {
-                updatedPayload.pins = [];
-                updatedPayload.pin_hash = null;
-            }
-        }
-        if (Array.isArray(req.body.pins) && (req.body.pin_enabled === undefined || req.body.pin_enabled)) {
-            updatedPayload.pins = encryptCodes(req.body.pins);
-            updatedPayload.pin_hash = null; // migrated to the visible code list
-        }
-
-        if (updatedPayload.survey_title) {
-            updatedPayload.survey_title = updatedPayload.survey_title.trim();
+        if (req.body.survey_title !== undefined) {
+            updatedPayload.survey_title = req.body.survey_title.trim();
             if (updatedPayload.survey_title.length < 3) {
                 return res.status(400).json({
                     status: 'Failed',
@@ -332,15 +361,8 @@ const editSurvey = async (req, res) => {
                 });
             }
         }
-        if (updatedPayload.survey_description !== undefined) {
-            updatedPayload.survey_description = sanitizeRichText(updatedPayload.survey_description.trim());
-        }
-
-        // Trim + dedupe tags before persisting; keep a map to feed the suggestion store.
-        let tagMap;
-        if (updatedPayload.tags !== undefined) {
-            tagMap = normalizeTags(updatedPayload.tags);
-            updatedPayload.tags = [...tagMap.values()];
+        if (req.body.survey_description !== undefined) {
+            updatedPayload.survey_description = sanitizeRichText(req.body.survey_description.trim());
         }
 
         const updatedSurvey = await Survey.findByIdAndUpdate(surveyId, updatedPayload, { new: true })
@@ -432,6 +454,19 @@ const checkVisibilityAccess = (survey, req) => {
     return null;
 };
 
+// Whether a survey is currently open for responses. Mirrors the authoritative
+// checks in surveySubmission() so respondents see a proper "closed" screen up
+// front instead of filling the whole form and failing at submit time.
+const computeAcceptingResponses = (s) => {
+    const now = new Date();
+    const rs = s.response_settings || {};
+    if (s.status === 'archived' || s.access === false) return { accepting: false, reason: 'unavailable' };
+    if (rs.start_date && new Date(rs.start_date) > now) return { accepting: false, reason: 'not_started' };
+    if (rs.end_date && new Date(rs.end_date) < now) return { accepting: false, reason: 'ended' };
+    if (rs.max_responses && (s.submissions?.length || 0) >= rs.max_responses) return { accepting: false, reason: 'full' };
+    return { accepting: true, reason: null };
+};
+
 const getSurvey = async (req, res) => {
     try {
         const surveyId = req.params.id;
@@ -475,6 +510,11 @@ const getSurvey = async (req, res) => {
                 pin_legacy: (!secret?.pins || secret.pins.length === 0) && !!secret?.pin_hash,
             };
         }
+
+        // Derived per-request (depends on `now` and submission count) so it is never
+        // served stale from the cached survey doc.
+        const { accepting, reason } = computeAcceptingResponses(surveyObj);
+        surveyObj = { ...surveyObj, accepting_responses: accepting, closed_reason: reason };
 
         return res.status(200).json({
             status: 'Success',
