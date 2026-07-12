@@ -3,9 +3,10 @@ const { z } = require('zod');
 const mongoId = z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid ID format');
 
 const sendMessageBody = z.object({
-  content: z.string().min(1, 'Message content is required').max(5000),
+  content: z.string().min(1, 'Message content is required').max(20000),
   chatId: mongoId,
   replyTo: mongoId.optional().nullable(),
+  threadRoot: mongoId.optional().nullable(),
 });
 
 const chatIdParam = z.object({

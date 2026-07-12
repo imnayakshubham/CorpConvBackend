@@ -2,9 +2,11 @@ const asyncHandler = require("express-async-handler");
 const Message = require("../models/messageModel");
 const User = require("../models/userModel");
 const Chat = require("../models/chatModel");
+const ConversationMembership = require("../models/conversationMembershipModel");
 const ActivityEvent = require("../models/activityEventModel");
 const notificationService = require("../utils/notificationService");
 const { getIo } = require("../utils/socketManger");
+const { sanitizeRichText } = require("../utils/sanitize");
 const cache = require("../redisClient/cacheHelper");
 const { fetchLinkMetadata } = require("../utils/fetchLinkMetadata");
 
@@ -15,8 +17,19 @@ function extractUrls(text) {
   return [...new Set(matches)].slice(0, 3);
 }
 
-const SENDER_SELECT = "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic";
+const SENDER_SELECT = "public_user_name username user_bio user_job_role user_job_experience user_current_company_name user_public_location avatar_config user_public_profile_pic lastActiveAt";
+// Room message sender projection — the identity seam. v1 reuses the public-persona
+// fields above (never actual name/email); swap this to an alias projection later
+// without touching any room read path.
+const ROOM_SENDER_SELECT = SENDER_SELECT;
 const MESSAGE_PAGE_SIZE = 20;
+
+// A room's owner is stored on `groupAdmin`; extra moderators live in `moderators[]`.
+function isRoomModerator(chat, userId) {
+  const uid = userId.toString();
+  if (chat.groupAdmin?.toString() === uid) return true;
+  return (chat.moderators || []).some((m) => m.toString() === uid);
+}
 
 async function populateMessage(msg) {
   msg = await msg.populate("sender", SENDER_SELECT);
@@ -33,14 +46,28 @@ const allMessages = asyncHandler(async (req, res) => {
     const { before, limit } = req.query;
     const parsedLimit = Math.min(parseInt(limit, 10) || MESSAGE_PAGE_SIZE, 100);
     const isPaginating = !!before;
+    const chatId = req.params.chatId;
 
-    // Mark all unread as read (idempotent)
-    await Message.updateMany(
-      { chat: req.params.chatId, readBy: { $nin: [req.user._id] } },
-      { $addToSet: { readBy: req.user._id } }
-    );
+    const conv = await Chat.findById(chatId).select('type');
+    const isRoom = conv?.type === 'room';
 
-    const filter = { chat: req.params.chatId };
+    if (isRoom) {
+      // Channels require active membership to read; no per-message readBy (doesn't scale).
+      const mem = await ConversationMembership.findOne({ conversation: chatId, user: req.user._id, access: true });
+      if (!mem || mem.status !== 'active') {
+        return res.status(403).send({ status: "Failed", message: "Join this channel to view messages." });
+      }
+    } else {
+      // DM/group: mark all unread as read (idempotent) — unchanged behavior.
+      await Message.updateMany(
+        { chat: chatId, readBy: { $nin: [req.user._id] } },
+        { $addToSet: { readBy: req.user._id } }
+      );
+    }
+
+    // `threadRoot: null` keeps thread replies out of the main list; it also matches
+    // every existing message where the field is absent, so DM behavior is unchanged.
+    const filter = { chat: chatId, threadRoot: null };
     if (before) {
       const cursorMsg = await Message.findById(before, 'createdAt').lean();
       if (cursorMsg) filter.createdAt = { $lt: cursorMsg.createdAt };
@@ -49,7 +76,7 @@ const allMessages = asyncHandler(async (req, res) => {
     const messages = await Message.find(filter)
       .sort({ createdAt: -1 })
       .limit(parsedLimit)
-      .populate("sender", SENDER_SELECT)
+      .populate("sender", isRoom ? ROOM_SENDER_SELECT : SENDER_SELECT)
       .populate({ path: "replyTo", select: "content sender isDeleted", populate: { path: "sender", select: "public_user_name" } })
       .populate("chat");
 
@@ -61,17 +88,29 @@ const allMessages = asyncHandler(async (req, res) => {
     // Only fetch chatData on initial load (no cursor) to avoid redundant DB work
     let chatData = null;
     if (!isPaginating) {
-      chatData = await Chat.findByIdAndUpdate(
-        { _id: req.params.chatId },
-        { unreadMessage: [], $set: { [`unreadCounts.${req.user._id}`]: 0 } },
-        { new: true }
-      )
-        .populate({ path: "users", select: SENDER_SELECT })
-        .populate("groupAdmin")
-        .populate("latestMessage");
+      if (isRoom) {
+        // Bump this member's read pointer instead of per-user unread reset.
+        await ConversationMembership.updateOne(
+          { conversation: chatId, user: req.user._id },
+          { lastReadAt: new Date() }
+        );
+        chatData = await Chat.findById(chatId)
+          .populate("groupAdmin", ROOM_SENDER_SELECT)
+          .populate("latestMessage");
+        await User.populate(chatData, { path: "latestMessage.sender", select: ROOM_SENDER_SELECT });
+      } else {
+        chatData = await Chat.findByIdAndUpdate(
+          { _id: chatId },
+          { unreadMessage: [], $set: { [`unreadCounts.${req.user._id}`]: 0 } },
+          { new: true }
+        )
+          .populate({ path: "users", select: SENDER_SELECT })
+          .populate("groupAdmin")
+          .populate("latestMessage");
 
-      await User.populate(chatData, { path: "latestMessage.sender", select: SENDER_SELECT });
-      await cache.del(cache.generateKey('chats', 'user', req.user._id));
+        await User.populate(chatData, { path: "latestMessage.sender", select: SENDER_SELECT });
+        await cache.del(cache.generateKey('chats', 'user', req.user._id));
+      }
     }
 
     res.status(200).send({ status: "Success", message: "chats found for the user.", result: { messages, chatData, hasMore } });
@@ -81,8 +120,70 @@ const allMessages = asyncHandler(async (req, res) => {
   }
 });
 
+async function sendRoomMessage(req, res, chat, { content, replyTo, threadRoot }) {
+  const chatId = chat._id.toString();
+
+  if (chat.status === 'archived') {
+    return res.status(403).json({ message: 'This channel is archived.' });
+  }
+
+  const mem = await ConversationMembership.findOne({ conversation: chat._id, user: req.user._id, access: true });
+  if (!mem || mem.status !== 'active') {
+    return res.status(403).json({ message: 'Join this channel to send messages.' });
+  }
+
+  let message = await Message.create({
+    sender: req.user._id,
+    content,
+    chat: chat._id,
+    replyTo: replyTo || null,
+    threadRoot: threadRoot || null,
+  });
+
+  message = await message.populate('sender', ROOM_SENDER_SELECT);
+  message = await message.populate('chat');
+  if (message.replyTo) {
+    message = await message.populate({ path: 'replyTo', select: 'content sender isDeleted', populate: { path: 'sender', select: 'public_user_name' } });
+  }
+
+  ActivityEvent.create({ userId: req.user._id, eventType: 'message_sent' }).catch(() => {});
+
+  if (threadRoot) {
+    await Message.findByIdAndUpdate(threadRoot, { $inc: { replyCount: 1 }, lastReplyAt: new Date() });
+  } else {
+    await Chat.findByIdAndUpdate(chat._id, { latestMessage: message._id });
+  }
+
+  const io = getIo();
+  if (io) {
+    if (threadRoot) {
+      io.to(chatId).emit('thread_reply', { threadRoot, message });
+      io.to(chatId).emit('message_thread_updated', { messageId: threadRoot });
+    } else {
+      io.to(chatId).emit('message recieved', message);
+    }
+  }
+
+  res.json(message);
+
+  const urls = extractUrls(content);
+  if (urls.length > 0) {
+    (async () => {
+      try {
+        const settled = await Promise.allSettled(urls.map((url) => fetchLinkMetadata(url)));
+        const links = settled.filter((r) => r.status === 'fulfilled' && r.value?.url).map((r) => r.value);
+        if (links.length === 0) return;
+        await Message.findByIdAndUpdate(message._id, { links });
+        if (io) io.to(chatId).emit('message_links_updated', { messageId: message._id, links });
+      } catch (_) { /* ignore */ }
+    })();
+  }
+}
+
 const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, replyTo } = req.body;
+  const { chatId, replyTo, threadRoot } = req.body;
+  // Messages may contain rich-text HTML from the composer — sanitize to a safe subset.
+  const content = sanitizeRichText(req.body.content);
   if (!content || !chatId) {
     return res.sendStatus(400);
   }
@@ -90,6 +191,10 @@ const sendMessage = asyncHandler(async (req, res) => {
   try {
     const chat = await Chat.findById(chatId);
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
+
+    if (chat.type === 'room') {
+      return await sendRoomMessage(req, res, chat, { content, replyTo, threadRoot });
+    }
 
     if (chat.status === 'rejected' && chat.requestedBy?.toString() === req.user._id.toString()) {
       return res.status(403).json({ message: 'This user has declined your message request.' });
@@ -106,34 +211,42 @@ const sendMessage = asyncHandler(async (req, res) => {
       readBy: [req.user._id],
       deliveredTo: [req.user._id],
       replyTo: replyTo || null,
+      threadRoot: threadRoot || null,
     });
 
     message = await populateMessage(message);
 
     ActivityEvent.create({ userId: req.user._id, eventType: 'message_sent' }).catch(() => {});
-    await Chat.findByIdAndUpdate(chatId, { latestMessage: message });
-    // Clear cached chat lists for all members so latestMessage appears immediately
-    const cacheKeys = chat.users.map(uid => cache.generateKey('chats', 'user', uid));
-    await cache.del(...cacheKeys).catch(() => {});
 
-    // Increment per-user unread count for everyone except the sender
-    const otherMembers = chat.users.filter(id => id.toString() !== req.user._id.toString());
-    const unreadIncrements = {};
-    otherMembers.forEach(uid => { unreadIncrements[`unreadCounts.${uid}`] = 1; });
-    if (Object.keys(unreadIncrements).length) {
-      await Chat.findByIdAndUpdate(chatId, { $inc: unreadIncrements });
+    if (threadRoot) {
+      // Thread replies bump the root's counters; they don't touch the conversation's
+      // latestMessage, unread counts, or notifications.
+      await Message.findByIdAndUpdate(threadRoot, { $inc: { replyCount: 1 }, lastReplyAt: new Date() });
+    } else {
+      await Chat.findByIdAndUpdate(chatId, { latestMessage: message });
+      // Clear cached chat lists for all members so latestMessage appears immediately
+      const cacheKeys = chat.users.map(uid => cache.generateKey('chats', 'user', uid));
+      await cache.del(...cacheKeys).catch(() => {});
+
+      // Increment per-user unread count for everyone except the sender
+      const otherMembers = chat.users.filter(id => id.toString() !== req.user._id.toString());
+      const unreadIncrements = {};
+      otherMembers.forEach(uid => { unreadIncrements[`unreadCounts.${uid}`] = 1; });
+      if (Object.keys(unreadIncrements).length) {
+        await Chat.findByIdAndUpdate(chatId, { $inc: unreadIncrements });
+      }
+
+      // Notify all other chat members
+      otherMembers.forEach(receiverId => {
+        notificationService.createAndEmit({
+          actorId: req.user._id,
+          receiverId,
+          type: 'MESSAGE',
+          targetId: chatId,
+          targetType: 'chat',
+        }).catch(() => {});
+      });
     }
-
-    // Notify all other chat members
-    otherMembers.forEach(receiverId => {
-      notificationService.createAndEmit({
-        actorId: req.user._id,
-        receiverId,
-        type: 'MESSAGE',
-        targetId: chatId,
-        targetType: 'chat',
-      }).catch(() => {});
-    });
 
     res.json(message);
 
@@ -162,7 +275,7 @@ const sendMessage = asyncHandler(async (req, res) => {
 });
 
 const editMessage = asyncHandler(async (req, res) => {
-  const { content } = req.body;
+  const content = sanitizeRichText(req.body.content);
   const message = await Message.findById(req.params.id);
 
   if (!message) return res.status(404).json({ message: 'Message not found' });
@@ -197,8 +310,14 @@ const editMessage = asyncHandler(async (req, res) => {
 const deleteMessage = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id);
   if (!message) return res.status(404).json({ message: 'Message not found' });
-  if (message.sender.toString() !== req.user._id.toString()) {
-    return res.status(403).json({ message: 'Only the sender can delete this message.' });
+
+  const isSender = message.sender.toString() === req.user._id.toString();
+  if (!isSender) {
+    // In a channel, the owner and moderators can also delete others' messages.
+    const chat = await Chat.findById(message.chat).select('type groupAdmin moderators');
+    if (!(chat?.type === 'room' && isRoomModerator(chat, req.user._id))) {
+      return res.status(403).json({ message: 'Only the sender can delete this message.' });
+    }
   }
 
   const updated = await Message.findByIdAndUpdate(
@@ -248,6 +367,31 @@ const addReaction = asyncHandler(async (req, res) => {
   return res.json({ status: 'Success', result: message.reactions });
 });
 
+const getThreadMessages = asyncHandler(async (req, res) => {
+  const root = await Message.findById(req.params.id).populate('sender', SENDER_SELECT);
+  if (!root) return res.status(404).json({ status: 'Failed', message: 'Message not found' });
+
+  const chat = await Chat.findById(root.chat).select('type users');
+  if (!chat) return res.status(404).json({ status: 'Failed', message: 'Conversation not found' });
+
+  if (chat.type === 'room') {
+    const mem = await ConversationMembership.findOne({ conversation: chat._id, user: req.user._id, access: true });
+    if (!mem || mem.status !== 'active') {
+      return res.status(403).json({ status: 'Failed', message: 'Join this channel to view the thread.' });
+    }
+  } else if (!chat.users.some((u) => u.toString() === req.user._id.toString())) {
+    return res.status(403).json({ status: 'Failed', message: 'Not a participant of this conversation.' });
+  }
+
+  const senderSelect = chat.type === 'room' ? ROOM_SENDER_SELECT : SENDER_SELECT;
+  const replies = await Message.find({ threadRoot: root._id })
+    .sort({ createdAt: 1 })
+    .populate('sender', senderSelect)
+    .lean();
+
+  return res.status(200).json({ status: 'Success', result: { root: root.toObject(), replies } });
+});
+
 const markDelivered = asyncHandler(async (req, res) => {
   const { chatId } = req.body;
   const userId = req.user._id;
@@ -274,4 +418,4 @@ const markRead = asyncHandler(async (req, res) => {
   return res.json({ status: 'Success' });
 });
 
-module.exports = { allMessages, sendMessage, editMessage, deleteMessage, addReaction, markDelivered, markRead };
+module.exports = { allMessages, sendMessage, editMessage, deleteMessage, addReaction, markDelivered, markRead, getThreadMessages };
