@@ -7,6 +7,7 @@ const {
   addReaction,
   markDelivered,
   markRead,
+  getThreadMessages,
 } = require("../controllers/messageControllers");
 const { protect } = require("../middleware/authMiddleware");
 const validate = require("../middleware/validate");
@@ -25,6 +26,7 @@ const router = express.Router();
 router.patch("/delivered", protect, validate({ body: deliveredBody }), markDelivered);
 router.patch("/read", protect, markRead);
 
+router.get("/:id/thread", protect, validate({ params: messageIdParam }), getThreadMessages);
 router.get("/:chatId", protect, validate({ params: chatIdParam }), allMessages);
 router.post("/", protect, validate({ body: sendMessageBody }), sendMessage);
 router.patch("/:id", protect, validate({ params: messageIdParam, body: editMessageBody }), editMessage);

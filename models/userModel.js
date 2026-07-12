@@ -121,6 +121,11 @@ const userSchema = mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
   }],
+  // Conversations (DMs or channels) the user has starred for the sidebar Starred section.
+  starred_conversations: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Chat',
+  }],
   secondary_email_id: {
     type: String,
     trim: true,
