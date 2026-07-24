@@ -23,6 +23,7 @@ const bentoRoutes = require("./routes/bentoRoutes");
 const blockRoutes = require("./routes/blockRoutes");
 const workspaceRoutes = require("./routes/workspaceRoutes");
 const pollRoutes = require("./routes/pollRoutes");
+const matchRoutes = require("./routes/matchRoutes");
 const conversationRoutes = require("./routes/conversationRoutes");
 const { trackActivity } = require("./middleware/activityMiddleware");
 // Dynamic import for ESM-only better-auth/node
@@ -167,6 +168,12 @@ app.use("/api/bento", trackActivity, bentoRoutes);
 app.use("/api/block", trackActivity, blockRoutes);
 app.use("/api/workspace", workspaceRoutes);
 app.use("/api/poll", trackActivity, pollRoutes);
+app.use("/api/match", trackActivity, matchRoutes);
+// Companion (personal OS) — per-user-private data slice + the coach AI (Hush AI harness).
+app.use("/api/companion", require("./routes/companionRoutes"));
+app.use("/api/companion", require("./routes/companionGoalHabitRoutes"));
+app.use("/api/companion", require("./routes/companionInsightsRoutes"));
+app.use("/api/companion", require("./routes/companionAiRoutes"));
 app.use("/api/conversation", trackActivity, conversationRoutes);
 app.use("/api/demo", require("./routes/demoRoutes"));
 
