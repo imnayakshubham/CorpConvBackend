@@ -1,4 +1,4 @@
-// models/hushAIConversationModel.js — durable, cross-device Hush AI conversations.
+// Durable, cross-device Hush AI conversations.
 //
 // Generic across features (keyed by featureKey = plugin.key), so any HushAIPlugin reuses
 // this one store. `messages` is the authoritative UIMessage[] transcript (persisted by the
