@@ -6,7 +6,7 @@
 
 const { CompanionCapture, CompanionNote, CompanionTask, CompanionPlanDay, CompanionJournal } = require('../models/companionModel');
 const { sanitizeRichText } = require('../utils/sanitize');
-const { runJournalReflection } = require('../features/journalReflectionRunner');
+const { runJournalReflection } = require('../ai/runners/journalReflectionRunner');
 
 const fail = (res, code, message) => res.status(code).json({ status: 'Failed', data: null, message });
 const ok = (res, data, message = 'Success', code = 200) => res.status(code).json({ status: 'Success', data, message });

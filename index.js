@@ -24,6 +24,7 @@ const blockRoutes = require("./routes/blockRoutes");
 const workspaceRoutes = require("./routes/workspaceRoutes");
 const pollRoutes = require("./routes/pollRoutes");
 const litmusRoutes = require("./routes/litmusRoutes");
+const litmusAiRoutes = require("./ai/routes/litmusAiRoutes");
 const conversationRoutes = require("./routes/conversationRoutes");
 const { trackActivity } = require("./middleware/activityMiddleware");
 // Dynamic import for ESM-only better-auth/node
@@ -52,7 +53,7 @@ const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
 const { job } = require("./restartServerCron");
-const { job: aiQuotaResetJob } = require("./scripts/resetMonthlyAiQuota");
+const { job: aiQuotaResetJob } = require("./ai/scripts/resetMonthlyAiQuota");
 const getRedisInstance = require("./redisClient/redisClient");
 const cache = require("./redisClient/cacheHelper");
 const TTL = require("./redisClient/cacheTTL");
@@ -157,7 +158,7 @@ app.use("/api/post", trackActivity, postRoutes);
 app.use("/api/comment", trackActivity, commentRoutes);
 app.use("/api/question", trackActivity, questionRoutes);
 app.use("/api/survey", trackActivity, surveyRoutes);
-app.use("/api/survey", require('./routes/hushAiRoutes'));
+app.use("/api/survey", require('./ai/routes/hushAiRoutes'));
 app.use("/api/notification", notificationRoutes);
 app.use("/api/site_map", siteMapRoutes);
 app.use("/api/upload", uploadRoutes);
@@ -168,12 +169,13 @@ app.use("/api/bento", trackActivity, bentoRoutes);
 app.use("/api/block", trackActivity, blockRoutes);
 app.use("/api/workspace", workspaceRoutes);
 app.use("/api/poll", trackActivity, pollRoutes);
-app.use("/api/litmus", trackActivity, litmusRoutes);
+// One variadic mount, not two app.use calls — two would run trackActivity twice per request.
+app.use("/api/litmus", trackActivity, litmusAiRoutes, litmusRoutes);
 // Companion (personal OS) — per-user-private data slice + the coach AI (Hush AI harness).
 app.use("/api/companion", require("./routes/companionRoutes"));
 app.use("/api/companion", require("./routes/companionGoalHabitRoutes"));
 app.use("/api/companion", require("./routes/companionInsightsRoutes"));
-app.use("/api/companion", require("./routes/companionAiRoutes"));
+app.use("/api/companion", require("./ai/routes/companionAiRoutes"));
 app.use("/api/conversation", trackActivity, conversationRoutes);
 app.use("/api/demo", require("./routes/demoRoutes"));
 
@@ -209,7 +211,7 @@ async function startServer() {
   require('./utils/slackService').init();
 
   // AI SDK v7 is ESM-only; load + cache the agent engine's SDK bindings before serving.
-  await require('./lib/agent/engine').init();
+  await require('./ai/adapter').init();
 
   const PORT = process.env.PORT;
   const server = app.listen(PORT, () => {

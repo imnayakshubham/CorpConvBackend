@@ -1,6 +1,6 @@
 const { Litmus, LitmusSubmission } = require('../models/litmusModel');
 const { encryptCodes, decryptCodes, verifyPin: litmusAccessCode } = require('../utils/pinCrypto');
-const { evaluateSubmission } = require('../features/litmusEvaluator');
+const { evaluateSubmission } = require('../ai/runners/litmusEvaluator');
 
 // ── helpers ────────────────────────────────────────────────────────────────────────
 const ok = (res, data, message, code = 200) => res.status(code).json({ status: 'Success', data, message });
