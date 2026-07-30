@@ -1,5 +1,5 @@
-// features/matchAgent.js — the MATCH question-builder FeaturePlugin for the generic
-// agent harness. Mirrors features/coachAgent.js: everything match-specific lives here and
+// features/litmusAgent.js — the LITMUS question-builder FeaturePlugin for the generic
+// agent harness. Mirrors features/coachAgent.js: everything litmus-specific lives here and
 // nothing leaks into lib/agent/*.
 //
 // INVARIANT: mutation tools have NO server `execute`. The server streams tool-input-available;
@@ -28,13 +28,13 @@ function buildSystemPrompt(ctx = {}) {
     const maxQ = Number.isFinite(ctx.maxQuestions) ? ctx.maxQuestions : 8;
     const questions = Array.isArray(ctx.questions) ? ctx.questions : [];
 
-    return `You are Hush AI, helping someone build an EVALUATION — a short set of questions used to test how well each respondent matches a described need (a hiring screen, a compatibility check, a culture/roommate/cofounder fit, and so on). The creator will send it to people; every answer is later scored 0-10 against the criteria.
+    return `You are Hush AI, helping someone build an EVALUATION — a short set of questions used to test how well each respondent fits a described need (a hiring screen, a compatibility check, a culture/roommate/cofounder fit, and so on). The creator will send it to people; every answer is later scored 0-10 against the criteria.
 
 ## YOUR JOB
-Turn the creator's needs + criteria into a tight, coherent question set, and refine it on request. You change the match ONLY through tool calls, and every change is shown to the creator for approval before it takes effect.
+Turn the creator's needs + criteria into a tight, coherent question set, and refine it on request. You change the litmus ONLY through tool calls, and every change is shown to the creator for approval before it takes effect.
 
 ## RULES FOR THE QUESTION SET
-- Between 2 and ${maxQ} questions. Never exceed ${maxQ}. Prefer the fewest questions that fully cover the needs.
+- Count: if the creator asks for a specific number of questions, produce EXACTLY that many — no more, no fewer (capped at ${maxQ}; if they ask for more than ${maxQ}, produce ${maxQ} and say so). Only choose the count yourself when they give no number — then prefer the fewest that fully cover the needs, between 2 and ${maxQ}. Never exceed ${maxQ}.
 - Every question must earn its place: each one must probe the needs and at least one criterion. The set should build a coherent picture together — no redundant or off-topic questions, and later questions should complement earlier ones rather than repeat them.
 - Choose the best FORMAT per question:
   - "text" — for nuanced, open judgement (experience, reasoning, examples). Default when in doubt.
@@ -51,7 +51,7 @@ Turn the creator's needs + criteria into a tight, coherent question set, and ref
 - CRITICAL: whenever you add or update a question, WRITE THE ACTUAL CONTENT. add_question must include the full, final question "text"; for single_choice give 2-5 real options; for rating give a real scale. update_question must include the concrete new values for every field you change. NEVER emit a blank, generic, or placeholder question (no empty text, no "Option 1"/"Option 2").
 - Keep chat replies brief and human. Do not describe how you work internally or name any tool or technology.
 
-## CURRENT MATCH
+## CURRENT LITMUS
 Title: ${title}
 Needs: ${needs}
 Criteria:
@@ -138,7 +138,7 @@ const tools = {
         },
     },
     set_details: {
-        description: 'Refine the match title, the needs description, or the evaluation criteria.',
+        description: 'Refine the litmus title, the needs description, or the evaluation criteria.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -161,20 +161,20 @@ const tools = {
 };
 
 function validateContext(ctx) {
-    if (ctx != null && typeof ctx !== 'object') return 'matchContext must be an object when provided.';
+    if (ctx != null && typeof ctx !== 'object') return 'litmusContext must be an object when provided.';
     return null;
 }
 
 const SUMMARY_SYSTEM =
-    'You condense an match-building chat into a short recap so it can continue with less history. ' +
-    'Write 2-4 plain sentences, third person, covering what the match is for, the criteria, and the ' +
+    'You condense a litmus-building chat into a short recap so it can continue with less history. ' +
+    'Write 2-4 plain sentences, third person, covering what the litmus is for, the criteria, and the ' +
     'key decisions made about the questions. No preamble, no markdown. Never mention how the assistant works internally.';
 
 /** @type {import('../lib/agent/types').FeaturePlugin} */
 module.exports = {
-    key: 'match',
-    domainNoun: 'match',
-    contextKey: 'matchContext',
+    key: 'litmus',
+    domainNoun: 'litmus',
+    contextKey: 'litmusContext',
     brandName: 'Hush AI',
     buildSystemPrompt,
     tools,

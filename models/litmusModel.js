@@ -1,34 +1,20 @@
 const mongoose = require('mongoose');
 const generateSlug = require('../utils/generateSlug');
+const { baseQuestionFields, QUESTION_TYPES } = require('./shared/questionSchema');
 
-// An Match is an AI-built, PIN-gated evaluation: the creator describes their needs +
+// A Litmus is an AI-built, PIN-gated evaluation: the creator describes their needs +
 // criteria, Hush AI generates a set of interrelated questions, and every submission is scored
-// 0-10 against the criteria. Independent of the Survey feature — nothing here is shared with it.
+// 0-10 against the criteria. The question shape reuses the shared base (models/shared/
+// questionSchema.js); everything else is Litmus-specific.
 
-const QUESTION_TYPES = ['text', 'single_choice', 'rating'];
-
-const ratingScaleSchema = new mongoose.Schema({
-    min: { type: Number, default: 1 },
-    max: { type: Number, default: 5 },
-    min_label: { type: String, default: '', maxlength: 60 },
-    max_label: { type: String, default: '', maxlength: 60 },
-}, { _id: false });
-
+// Shared base fields + the Litmus-only `rationale` (why the question ties to the needs/criteria —
+// powers the "interrelated" guarantee, shown to the creator, never to the respondent).
 const questionSchema = new mongoose.Schema({
-    text: { type: String, required: true, maxlength: 500 },
-    type: { type: String, enum: QUESTION_TYPES, default: 'text' },
-    // Only meaningful for single_choice.
-    options: { type: [String], default: undefined },
-    // Only meaningful for rating.
-    rating_scale: { type: ratingScaleSchema, default: undefined },
-    // Why this question ties back to the needs/criteria — powers the "interrelated" guarantee
-    // and is shown to the creator (never to the respondent).
+    ...baseQuestionFields(),
     rationale: { type: String, default: '', maxlength: 400 },
-    is_required: { type: Boolean, default: true },
-    order: { type: Number, default: 0 },
 }, { _id: true });
 
-const matchSchema = new mongoose.Schema({
+const litmusSchema = new mongoose.Schema({
     created_by: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -68,14 +54,14 @@ const matchSchema = new mongoose.Schema({
     access: { type: Boolean, default: true },
 }, { timestamps: true });
 
-matchSchema.pre('save', function (next) {
+litmusSchema.pre('save', function (next) {
     if (!this.slug) {
         this.slug = generateSlug(this.title);
     }
     next();
 });
 
-matchSchema.index({ created_by: 1, createdAt: -1 });
+litmusSchema.index({ created_by: 1, createdAt: -1 });
 
 const responseSchema = new mongoose.Schema({
     question_id: { type: mongoose.Schema.Types.ObjectId, required: true },
@@ -105,9 +91,9 @@ const evaluationSchema = new mongoose.Schema({
 }, { _id: false });
 
 const submissionSchema = new mongoose.Schema({
-    match_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Match', required: true },
-    // Denormalized so the creator's results query never needs a join back to the match.
-    match_created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    litmus_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Litmus', required: true },
+    // Denormalized so the creator's results query never needs a join back to the litmus.
+    litmus_created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     // Respondent-supplied, optional (feature is public + anonymous-first).
     respondent_name: { type: String, default: '', maxlength: 120 },
     // Populated only if the respondent happened to be logged in (optionalAuth).
@@ -116,10 +102,13 @@ const submissionSchema = new mongoose.Schema({
     evaluation: { type: evaluationSchema, default: () => ({}) },
 }, { timestamps: true });
 
-submissionSchema.index({ match_id: 1, createdAt: -1 });
-submissionSchema.index({ match_id: 1, 'evaluation.score': -1 });
+submissionSchema.index({ litmus_id: 1, createdAt: -1 });
+submissionSchema.index({ litmus_id: 1, 'evaluation.score': -1 });
 
-const Match = mongoose.model('Match', matchSchema);
-const MatchSubmission = mongoose.model('MatchSubmission', submissionSchema);
+// Explicit collection names so the model maps to the intended collections (mongoose would
+// otherwise pluralize 'Litmus' → 'litmuses'). See the migration script that renames the old
+// 'matches' / 'matchsubmissions' collections to these.
+const Litmus = mongoose.model('Litmus', litmusSchema, 'litmus');
+const LitmusSubmission = mongoose.model('LitmusSubmission', submissionSchema, 'litmussubmissions');
 
-module.exports = { Match, MatchSubmission, QUESTION_TYPES };
+module.exports = { Litmus, LitmusSubmission, QUESTION_TYPES };

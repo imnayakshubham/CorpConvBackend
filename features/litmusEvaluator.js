@@ -1,4 +1,4 @@
-// features/matchEvaluator.js — one-shot scoring for a match submission.
+// features/litmusEvaluator.js — one-shot scoring for a litmus submission.
 //
 // Uses the generic agent engine's `complete()` (no tool loop, no streaming, no conversation)
 // to score a submission 0-10 against the creator's needs + criteria, produce a short "why", and
@@ -41,7 +41,7 @@ function formatAnswer(r) {
     return String(r.answer);
 }
 
-function buildPrompt(match, criteriaList, submission) {
+function buildPrompt(litmus, criteriaList, submission) {
     const criteria = criteriaList.length
         ? criteriaList.map((c, i) => `  ${i + 1}. ${c}`).join('\n')
         : '  (no explicit criteria - judge overall fit against the needs)';
@@ -51,7 +51,7 @@ function buildPrompt(match, criteriaList, submission) {
         .join('\n\n');
 
     return [
-        `# What the creator is evaluating for\n${match.needs_description}`,
+        `# What the creator is evaluating for\n${litmus.needs_description}`,
         `\n# Evaluation criteria\n${criteria}`,
         `\n# The respondent's answers\n${qa}`,
         criteriaList.length
@@ -79,17 +79,17 @@ function parseCriteriaScores(parsed, criteriaList) {
  * Never throws — on any failure it records evaluation.status = 'failed' so the respondent flow
  * (which calls this fire-and-forget) is never affected.
  *
- * @param {object} match - lean or hydrated Match (needs needs_description, evaluation_criteria).
- * @param {import('mongoose').Document} submission - hydrated MatchSubmission doc to update.
+ * @param {object} litmus - lean or hydrated Litmus (needs needs_description, evaluation_criteria).
+ * @param {import('mongoose').Document} submission - hydrated LitmusSubmission doc to update.
  * @returns {Promise<object>} the saved evaluation subdocument.
  */
-async function evaluateSubmission(match, submission) {
-    const criteriaList = Array.isArray(match.evaluation_criteria) ? match.evaluation_criteria.filter(Boolean) : [];
+async function evaluateSubmission(litmus, submission) {
+    const criteriaList = Array.isArray(litmus.evaluation_criteria) ? litmus.evaluation_criteria.filter(Boolean) : [];
     try {
         const { text } = await engine.complete({
             role: EVAL_ROLE,
             system: systemFor(criteriaList.length > 0),
-            prompt: buildPrompt(match, criteriaList, submission),
+            prompt: buildPrompt(litmus, criteriaList, submission),
             temperature: 0.2,
             maxOutputTokens: 600,
         });
@@ -114,7 +114,7 @@ async function evaluateSubmission(match, submission) {
         await submission.save();
         return submission.evaluation;
     } catch (err) {
-        console.error('[match] evaluateSubmission error:', err.message);
+        console.error('[litmus] evaluateSubmission error:', err.message);
         try {
             submission.evaluation = { status: 'failed', evaluated_at: new Date(), model: roleSpec(EVAL_ROLE) };
             await submission.save();

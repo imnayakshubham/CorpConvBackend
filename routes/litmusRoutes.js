@@ -7,42 +7,42 @@ const { isSuperAdmin } = require('../middleware/superAdminMiddleware');
 const User = require('../models/userModel');
 
 const {
-    createMatch,
-    editMatch,
-    listMatches,
-    getMatchOwner,
-    getMatchPublic,
+    createLitmus,
+    editLitmus,
+    listLitmus,
+    getLitmusOwner,
+    getLitmusPublic,
     verifyPin,
-    submitMatch,
+    submitLitmus,
     getSubmissions,
     reEvaluateSubmission,
-    deleteMatch,
-} = require('../controllers/matchControllers');
+    deleteLitmus,
+} = require('../controllers/litmusControllers');
 const {
-    createMatchBody,
-    editMatchBody,
-    matchSubmissionBody,
+    createLitmusBody,
+    editLitmusBody,
+    litmusSubmissionBody,
     verifyPinBody,
     listQuery,
     idParam,
     submissionIdParam,
     slugParam,
-} = require('../validators/matchSchemas');
+} = require('../validators/litmusSchemas');
 
-const { matchAiChat, matchAiSummarize } = require('../controllers/matchAiController');
+const { litmusAiChat, litmusAiSummarize } = require('../controllers/litmusAiController');
 const { createConversationHandlers } = require('../controllers/hushAiConversationController');
-const matchAgent = require('../features/matchAgent');
+const litmusAgent = require('../features/litmusAgent');
 
 const router = express.Router();
 
 // Conversation store namespaced by the plugin key, so it never collides with the survey's.
 const { loadConversation, saveConversation, clearConversation } =
-    createConversationHandlers(matchAgent.key);
+    createConversationHandlers(litmusAgent.key);
 
 // ── Hush AI question-builder (static, before /:slug) ─────────────────────────────────
 // protect → writeLimiter → aiQuota (15/month free) → handler
-router.post('/ai/chat/:id', protect, writeLimiter, aiQuota, matchAiChat);
-router.post('/ai/summarize/:id', protect, writeLimiter, aiQuota, matchAiSummarize);
+router.post('/ai/chat/:id', protect, writeLimiter, aiQuota, litmusAiChat);
+router.post('/ai/summarize/:id', protect, writeLimiter, aiQuota, litmusAiSummarize);
 // Durable conversation store (NOT quota-metered — persistence must never burn the AI budget).
 router.get('/ai/conversation/:id', protect, loadConversation);
 router.put('/ai/conversation/:id', protect, writeLimiter, saveConversation);
@@ -63,19 +63,19 @@ router.get('/ai/quota', protect, async (req, res, next) => {
 });
 
 // ── CRUD / results (owner) ───────────────────────────────────────────────────────────
-router.post('/create', protect, writeLimiter, validate({ body: createMatchBody }), createMatch);
-router.get('/list', protect, validate({ query: listQuery }), listMatches);
-router.put('/edit/:id', protect, writeLimiter, validate({ params: idParam, body: editMatchBody }), editMatch);
-router.get('/own/:id', protect, validate({ params: idParam }), getMatchOwner);
+router.post('/create', protect, writeLimiter, validate({ body: createLitmusBody }), createLitmus);
+router.get('/list', protect, validate({ query: listQuery }), listLitmus);
+router.put('/edit/:id', protect, writeLimiter, validate({ params: idParam, body: editLitmusBody }), editLitmus);
+router.get('/own/:id', protect, validate({ params: idParam }), getLitmusOwner);
 router.get('/submissions/:id', protect, validate({ params: idParam }), getSubmissions);
 router.post('/re-evaluate/:submissionId', protect, writeLimiter, aiQuota, validate({ params: submissionIdParam }), reEvaluateSubmission);
-router.delete('/:id', protect, validate({ params: idParam }), deleteMatch);
+router.delete('/:id', protect, validate({ params: idParam }), deleteLitmus);
 
 // ── Respondent (public, PIN-gated) ────────────────────────────────────────────────────
 router.post('/verify-pin/:slug', submissionLimiter, validate({ params: slugParam, body: verifyPinBody }), verifyPin);
-router.post('/submit/:slug', optionalAuth, submissionLimiter, validate({ params: slugParam, body: matchSubmissionBody }), submitMatch);
+router.post('/submit/:slug', optionalAuth, submissionLimiter, validate({ params: slugParam, body: litmusSubmissionBody }), submitLitmus);
 
 // Dynamic slug route LAST so it never swallows the static routes above.
-router.get('/:slug', optionalAuth, validate({ params: slugParam }), getMatchPublic);
+router.get('/:slug', optionalAuth, validate({ params: slugParam }), getLitmusPublic);
 
 module.exports = router;
