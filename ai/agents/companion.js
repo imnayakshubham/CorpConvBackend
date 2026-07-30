@@ -4,6 +4,8 @@
 // the CLIENT applyFn is the executor, so the human Apply gate is the only path to real state
 // (docs/hush-ai-architecture.md §3). That is how "AI proposes, user approves" is enforced.
 
+const tools = require('../tools/companion');
+
 // ── system prompt ─────────────────────────────────────────────────────────────────
 function fmtList(items, empty) {
     if (!items || !items.length) return `  (${empty})`;
@@ -41,110 +43,6 @@ ${journal ? `\nA journal note they just wrote:\n"""\n${journal.slice(0, 1500)}\n
 Use this state. If they seem overloaded (many open tasks and low energy), help them subtract, not add. Never describe how you work internally or name any tool or technology.`;
 }
 
-// ── tools (plain JSON-schema inputSchema; NO execute — client applies via the Apply gate) ──
-const tools = {
-    add_task: {
-        description: 'Propose ONE concrete, small next action. Use when the person agrees to act, or when a tiny next step will unblock avoidance. Keep the title short and doable.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'The action, phrased as a short doable task.' },
-                energy: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Rough energy the task needs.' },
-                why: { type: 'string', description: 'Optional: the goal or reason this task serves, in a few words.' },
-            },
-            required: ['title'],
-            additionalProperties: false,
-        },
-    },
-    add_note: {
-        description: 'Capture a thought, insight, or reflection worth keeping. Use when the person shares something to remember, not an action to do.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'Short title for the note.' },
-                body: { type: 'string', description: 'The note content.' },
-            },
-            required: ['body'],
-            additionalProperties: false,
-        },
-    },
-    log_mood: {
-        description: "Log how the person is feeling today. Use whenever they express their mood or energy (e.g. 'I'm exhausted', 'not in a good place', 'feeling great').",
-        inputSchema: {
-            type: 'object',
-            properties: { mood: { type: 'string', enum: ['terrible', 'bad', 'neutral', 'good'] } },
-            required: ['mood'],
-            additionalProperties: false,
-        },
-    },
-    complete_task: {
-        description: 'Mark an EXISTING task done. Identify it by its exact title from the current state.',
-        inputSchema: {
-            type: 'object',
-            properties: { title: { type: 'string', description: 'The title of the task to complete.' } },
-            required: ['title'],
-            additionalProperties: false,
-        },
-    },
-    defer_task: {
-        description: "Move an existing task to later to protect the person's energy today. Identify it by title.",
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'The title of the task to defer.' },
-                until: { type: 'string', description: 'When to move it: "tomorrow", "next_week", or a YYYY-MM-DD date.' },
-            },
-            required: ['title', 'until'],
-            additionalProperties: false,
-        },
-    },
-    break_down_task: {
-        description: 'Break a task that feels big into 2-4 tiny, concrete steps. Use to unblock avoidance.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'The task to break down (an existing title, or a new one).' },
-                steps: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 5, description: 'The small steps.' },
-            },
-            required: ['title', 'steps'],
-            additionalProperties: false,
-        },
-    },
-    set_intention: {
-        description: "Set the person's one-line intention for today.",
-        inputSchema: {
-            type: 'object',
-            properties: { text: { type: 'string', description: "Today's intention, one short line." } },
-            required: ['text'],
-            additionalProperties: false,
-        },
-    },
-    create_goal: {
-        description: 'Turn an aspiration into a concrete goal. Include the vision (why it matters) and, when you can, the likeliest obstacle plus a plan for it (evidence-based, never wishful).',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'The goal, stated plainly.' },
-                vision: { type: 'string', description: 'Why this matters to them.' },
-                obstacle: { type: 'string', description: 'The likeliest obstacle and the plan for it.' },
-            },
-            required: ['title'],
-            additionalProperties: false,
-        },
-    },
-    create_habit: {
-        description: 'Start a small, repeatable habit that supports a goal. Prefer a modest weekly target the person can actually keep.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                title: { type: 'string', description: 'The habit, phrased as a small repeatable action.' },
-                targetPerWeek: { type: 'integer', minimum: 1, maximum: 7, description: 'Days per week (7 = daily).' },
-            },
-            required: ['title'],
-            additionalProperties: false,
-        },
-    },
-};
 
 function validateContext(ctx) {
     if (ctx != null && typeof ctx !== 'object') return 'coachContext must be an object when provided.';
