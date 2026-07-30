@@ -1,4 +1,4 @@
-// controllers/hushAiConversationController.js — durable Hush AI conversation store.
+// Durable Hush AI conversation store.
 //
 // The CLIENT is the sole writer of the transcript (`messages`) and of the rewind/branch state.
 // The server writes only the rolling summary (`contextSummary` / `summarizedThrough`) from the

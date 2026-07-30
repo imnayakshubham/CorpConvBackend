@@ -1,6 +1,5 @@
-// companionAiController.js — thin shim mounting the Companion coach plugin on the generic
-// agent harness (lib/agent/*). Mirrors hushAiController.js. All AI logic is generic; the
-// coach-specific behavior lives in features/coachAgent.js.
+// Thin shim mounting the Companion coach plugin on the harness. All AI logic is generic;
+// the coach behaviour lives in ../agents/companion.js.
 
 const { createAgentHandlers } = require('../orchestrator/routeFactory');
 const coachAgent = require('../agents/companion');

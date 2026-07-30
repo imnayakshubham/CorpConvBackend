@@ -1,11 +1,6 @@
-// hushAiController.js — Hush AI survey assistant.
-//
-// This is now a THIN SHIM. All AI logic lives in the generic agent harness
-// (lib/agent/*) and the survey-specific behavior lives in the survey feature plugin
-// (features/surveyAgent.js). The harness is model-agnostic (engine port + provider
-// registry) and multi-agent (orchestrator: supervisor → planner → parallel workers →
-// critic). To add another feature's assistant, create a sibling plugin + routes —
-// see lib/agent/types.js and docs/claude-cowork.md.
+// Thin shim mounting the survey plugin on the harness. All AI logic is generic; the
+// survey behaviour lives in ../agents/survey.js. To add another feature's assistant,
+// create a sibling plugin + routes — see ../types/types.js.
 
 const { createAgentHandlers, baseValidate } = require('../orchestrator/routeFactory');
 const surveyAgent = require('../agents/survey');

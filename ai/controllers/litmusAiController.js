@@ -1,6 +1,5 @@
-// litmusAiController.js — thin shim mounting the Litmus question-builder plugin on the
-// generic agent harness (lib/agent/*). Mirrors companionAiController.js. All AI logic is generic;
-// the litmus-specific behavior lives in features/litmusAgent.js.
+// Thin shim mounting the Litmus question-builder plugin on the harness. All AI logic is
+// generic; the litmus behaviour lives in ../agents/litmus.js.
 
 const { createAgentHandlers } = require('../orchestrator/routeFactory');
 const litmusAgent = require('../agents/litmus');
