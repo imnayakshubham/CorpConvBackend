@@ -4,7 +4,7 @@
 // to keep in sync). Insights are deterministic counts/trends — no AI dependency.
 
 const { CompanionJournal, CompanionTask, CompanionGoal, CompanionPlanDay, CompanionHabit } = require('../models/companionModel');
-const engine = require('../lib/agent/engine');
+const engine = require('../ai/adapter');
 const cache = require('../redisClient/cacheHelper');
 
 const fail = (res, code, message) => res.status(code).json({ status: 'Failed', data: null, message });
