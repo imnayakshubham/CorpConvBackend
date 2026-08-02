@@ -28,6 +28,12 @@ const litmusSchema = new mongoose.Schema({
     evaluation_criteria: { type: [String], default: [] },
     max_questions: { type: Number, default: 8, min: 2, max: 20 },
     questions: { type: [questionSchema], default: [] },
+    // Tracks the first-draft generation that runs at creation.
+    generation_status: {
+        type: String,
+        enum: ['pending', 'ready', 'failed'],
+        default: 'pending',
+    },
 
     status: {
         type: String,

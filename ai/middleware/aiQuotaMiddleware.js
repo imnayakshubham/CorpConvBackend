@@ -1,7 +1,6 @@
 const User = require('../../models/userModel');
 const { isSuperAdmin } = require('../../middleware/superAdminMiddleware');
-
-const FREE_LIMIT = 15;
+const { FREE_MONTHLY_CALLS: FREE_LIMIT } = require('../core/config');
 
 module.exports = async function aiQuota(req, res, next) {
     try {

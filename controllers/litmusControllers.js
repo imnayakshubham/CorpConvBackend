@@ -1,16 +1,24 @@
 const { Litmus, LitmusSubmission } = require('../models/litmusModel');
 const { encryptCodes, decryptCodes, verifyPin: litmusAccessCode } = require('../utils/pinCrypto');
 const { evaluateSubmission } = require('../ai/runners/litmusEvaluator');
+const { generateQuestions } = require('../ai/runners/litmusQuestionGenerator');
+const { extractBrief } = require('../ai/runners/briefExtractor');
+const litmusAgent = require('../ai/agents/litmus');
+const { ok, fail } = require('../shared/apiResponse');
+const { computeAccepting } = require('../shared/accepting');
+const { findByRef: findRef } = require('../shared/findByRef');
 
 // ── helpers ────────────────────────────────────────────────────────────────────────
-const ok = (res, data, message, code = 200) => res.status(code).json({ status: 'Success', data, message });
-const fail = (res, code, message) => res.status(code).json({ status: 'Failed', data: null, message });
-
 const uid = (req) => (req.user ? (req.user._id || req.user.id) : null);
 const isOwner = (litmus, req) => {
     const requester = uid(req);
     return requester && litmus.created_by.toString() === requester.toString();
 };
+
+// Content is frozen once published so nobody answers a moving target.
+const CONTENT_FIELDS = ['title', 'needs_description', 'evaluation_criteria', 'max_questions', 'questions'];
+
+const findByRef = (ref) => findRef(Litmus, ref);
 
 // Strip encrypted access codes before responding.
 function safeLitmus(litmus) {
@@ -20,7 +28,7 @@ function safeLitmus(litmus) {
 }
 
 // The respondent-facing shape: no rubric (needs/criteria), no rationale, no PINs.
-function publicView(litmus, submissionCount) {
+function publicView(litmus, submissionCount, locked = false) {
     const { accepting_responses, closed_reason } = computeAccepting(litmus, submissionCount);
     return {
         _id: litmus._id,
@@ -31,7 +39,7 @@ function publicView(litmus, submissionCount) {
         collect_name: litmus.response_settings?.collect_name !== false,
         accepting_responses,
         closed_reason,
-        questions: (litmus.questions || []).map((q) => ({
+        questions: locked ? [] : (litmus.questions || []).map((q) => ({
             _id: q._id,
             text: q.text,
             type: q.type,
@@ -43,29 +51,30 @@ function publicView(litmus, submissionCount) {
     };
 }
 
-function computeAccepting(litmus, submissionCount) {
-    if (litmus.status !== 'published') return { accepting_responses: false, closed_reason: 'unavailable' };
-    const closesAt = litmus.response_settings?.closes_at;
-    if (closesAt && new Date(closesAt) < new Date()) return { accepting_responses: false, closed_reason: 'ended' };
-    const max = litmus.response_settings?.max_responses;
-    const count = submissionCount ?? litmus.submission_count ?? 0;
-    if (max && count >= max) return { accepting_responses: false, closed_reason: 'full' };
-    return { accepting_responses: true, closed_reason: null };
+// ── create / edit / list / delete ───────────────────────────────────────────────────
+
+// Shared by both create paths: save the draft, then draft the questions in the background
+// so the builder is never an empty page.
+async function saveNewLitmus(fields, req) {
+    const litmus = new Litmus({
+        created_by: uid(req),
+        title: fields.title,
+        needs_description: fields.needs_description,
+        evaluation_criteria: fields.evaluation_criteria || [],
+        max_questions: fields.max_questions || 8,
+        status: 'draft',
+    });
+    await litmus.save();
+
+    generateQuestions(litmus.toObject()).catch((e) =>
+        console.error('[litmus] background generation failed:', e.message));
+
+    return litmus;
 }
 
-// ── create / edit / list / delete ───────────────────────────────────────────────────
 const createLitmus = async (req, res) => {
     try {
-        const { title, needs_description, evaluation_criteria = [], max_questions = 8 } = req.body;
-        const litmus = new Litmus({
-            created_by: uid(req),
-            title,
-            needs_description,
-            evaluation_criteria,
-            max_questions,
-            status: 'draft',
-        });
-        await litmus.save();
+        const litmus = await saveNewLitmus(req.body, req);
         return ok(res, safeLitmus(litmus), 'Litmus created', 201);
     } catch (error) {
         console.error('createLitmus error:', error);
@@ -73,9 +82,25 @@ const createLitmus = async (req, res) => {
     }
 };
 
+// One-box create: a free-text description in, a filled-in draft out.
+const quickCreateLitmus = async (req, res) => {
+    try {
+        const brief = await extractBrief(req.body.prompt, litmusAgent.briefSpec);
+        if (!brief) {
+            return fail(res, 422, 'Could not make sense of that. Try describing what you are evaluating for in a sentence or two.');
+        }
+
+        const litmus = await saveNewLitmus(brief, req);
+        return ok(res, safeLitmus(litmus), 'Litmus created', 201);
+    } catch (error) {
+        console.error('quickCreateLitmus error:', error);
+        return fail(res, 500, 'Something went wrong');
+    }
+};
+
 const editLitmus = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ _id: req.params.id, access: true }).select('+pins');
+        const litmus = await findByRef(req.params.ref).select('+pins');
         if (!litmus) return fail(res, 404, 'Litmus not found');
         if (!isOwner(litmus, req)) return fail(res, 403, 'Only the creator can edit this litmus');
 
@@ -83,6 +108,13 @@ const editLitmus = async (req, res) => {
             title, needs_description, evaluation_criteria, max_questions,
             questions, status, pin_enabled, pins, response_settings,
         } = req.body;
+
+        // A live litmus can't have its content change under people mid-response. Access codes
+        // and response limits stay editable so a leaked code can be revoked without taking
+        // the link down.
+        if (litmus.status === 'published' && CONTENT_FIELDS.some((f) => req.body[f] !== undefined)) {
+            return fail(res, 409, 'Unpublish this litmus before editing its questions or criteria');
+        }
 
         if (title !== undefined) litmus.title = title;
         if (needs_description !== undefined) litmus.needs_description = needs_description;
@@ -142,10 +174,11 @@ const listLitmus = async (req, res) => {
         const query = { created_by: uid(req), access: true };
         if (cursor) query.createdAt = { $lt: new Date(cursor) };
 
+        // Owner-scoped list, so the access codes come back decrypted for the share sheet.
         const rows = await Litmus.find(query)
             .sort({ createdAt: -1 })
             .limit(limit + 1)
-            .select('-pins')
+            .select('+pins')
             .lean();
 
         const hasMore = rows.length > limit;
@@ -155,6 +188,7 @@ const listLitmus = async (req, res) => {
         // Per-litmus "new responses" = submissions received since the creator last opened results.
         // Small owner-scoped page, so a bounded fan-out of counts is fine.
         await Promise.all(items.map(async (m) => {
+            m.pins = decryptCodes(m.pins);
             if (!m.submission_count) { m.new_responses = 0; return; }
             const since = m.results_viewed_at || new Date(0);
             m.new_responses = await LitmusSubmission.countDocuments({ litmus_id: m._id, createdAt: { $gt: since } });
@@ -170,7 +204,7 @@ const listLitmus = async (req, res) => {
 // Full owner view — decrypted PINs, needs + criteria included.
 const getLitmusOwner = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ _id: req.params.id, access: true }).select('+pins').lean();
+        const litmus = await findByRef(req.params.ref).select('+pins').lean();
         if (!litmus) return fail(res, 404, 'Litmus not found');
         if (!isOwner(litmus, req)) return fail(res, 403, 'Not authorized');
 
@@ -188,17 +222,17 @@ const getLitmusOwner = async (req, res) => {
 // Public respondent view — by slug. No rubric, no PINs, no rationale.
 const getLitmusPublic = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ slug: req.params.slug, access: true }).lean();
+        const litmus = await findByRef(req.params.slug).lean();
         if (!litmus) return fail(res, 404, 'Litmus not found');
 
-        // Drafts/archived are not publicly viewable (only the creator can preview via owner route).
-        if (litmus.status !== 'published') {
-            const requester = uid(req);
-            const owner = requester && litmus.created_by.toString() === requester.toString();
-            if (!owner) return fail(res, 404, 'Litmus not found');
-        }
+        const owner = isOwner(litmus, req);
 
-        return ok(res, publicView(litmus, litmus.submission_count), 'Litmus fetched');
+        // Drafts/archived are not publicly viewable (only the creator can preview via owner route).
+        if (litmus.status !== 'published' && !owner) return fail(res, 404, 'Litmus not found');
+
+        // Hold the questions back until the access code is verified.
+        const locked = !!litmus.pin_enabled && !owner;
+        return ok(res, publicView(litmus, litmus.submission_count, locked), 'Litmus fetched');
     } catch (error) {
         console.error('getLitmusPublic error:', error);
         return fail(res, 500, 'Something went wrong');
@@ -207,13 +241,16 @@ const getLitmusPublic = async (req, res) => {
 
 const verifyPin = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ slug: req.params.slug, access: true }).select('+pins');
+        const litmus = await findByRef(req.params.slug).select('+pins');
         if (!litmus) return fail(res, 404, 'Litmus not found');
         if (!litmus.pin_enabled) return fail(res, 400, 'This litmus is not PIN protected');
 
-        const litmused = await litmusAccessCode(req.body.pin, { pins: litmus.pins });
-        if (!litmused) return fail(res, 401, 'Invalid PIN');
-        return ok(res, { valid: true }, 'PIN verified');
+        const valid = await litmusAccessCode(req.body.pin, { pins: litmus.pins });
+        if (!valid) return fail(res, 401, 'Invalid PIN');
+
+        // The code is the credential, so hand the questions over here rather than
+        // making the taker re-fetch a route that would still be locked.
+        return ok(res, publicView(litmus, litmus.submission_count), 'PIN verified');
     } catch (error) {
         console.error('verifyPin error:', error);
         return fail(res, 500, 'Something went wrong');
@@ -223,7 +260,7 @@ const verifyPin = async (req, res) => {
 // ── submit + evaluate ────────────────────────────────────────────────────────────────
 const submitLitmus = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ slug: req.params.slug, access: true }).select('+pins');
+        const litmus = await findByRef(req.params.slug).select('+pins');
         if (!litmus) return fail(res, 404, 'Litmus not found');
 
         const { accepting_responses, closed_reason } = computeAccepting(litmus, litmus.submission_count);
@@ -276,7 +313,7 @@ const submitLitmus = async (req, res) => {
 // ── results (owner) ────────────────────────────────────────────────────────────────
 const getSubmissions = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ _id: req.params.id, access: true }).lean();
+        const litmus = await findByRef(req.params.ref).lean();
         if (!litmus) return fail(res, 404, 'Litmus not found');
         if (!isOwner(litmus, req)) return fail(res, 403, 'Not authorized');
 
@@ -328,9 +365,53 @@ const reEvaluateSubmission = async (req, res) => {
     }
 };
 
+// Retry the first draft after a failed generation. Waits for the result so the creator
+// who pressed the button gets a real answer.
+const regenerateLitmus = async (req, res) => {
+    try {
+        const litmus = await findByRef(req.params.ref);
+        if (!litmus) return fail(res, 404, 'Litmus not found');
+        if (!isOwner(litmus, req)) return fail(res, 403, 'Not authorized');
+        if (litmus.status === 'published') return fail(res, 409, 'Unpublish this litmus before regenerating its questions');
+
+        await generateQuestions(litmus.toObject());
+        const updated = await Litmus.findById(litmus._id).lean();
+        return ok(res, safeLitmus(updated), 'Questions regenerated');
+    } catch (error) {
+        console.error('regenerateLitmus error:', error);
+        return fail(res, 500, 'Something went wrong');
+    }
+};
+
+// Same brief and questions, fresh draft: no slug, no responses, no access codes.
+const duplicateLitmus = async (req, res) => {
+    try {
+        const source = await findByRef(req.params.ref).lean();
+        if (!source) return fail(res, 404, 'Litmus not found');
+        if (!isOwner(source, req)) return fail(res, 403, 'Not authorized');
+
+        const copy = new Litmus({
+            created_by: uid(req),
+            title: `${source.title} (copy)`.slice(0, 120),
+            needs_description: source.needs_description,
+            evaluation_criteria: source.evaluation_criteria,
+            max_questions: source.max_questions,
+            questions: (source.questions || []).map(({ _id, ...q }) => q),
+            response_settings: source.response_settings,
+            status: 'draft',
+            generation_status: 'ready',
+        });
+        await copy.save();
+        return ok(res, safeLitmus(copy), 'Litmus duplicated', 201);
+    } catch (error) {
+        console.error('duplicateLitmus error:', error);
+        return fail(res, 500, 'Something went wrong');
+    }
+};
+
 const deleteLitmus = async (req, res) => {
     try {
-        const litmus = await Litmus.findOne({ _id: req.params.id, access: true });
+        const litmus = await findByRef(req.params.ref);
         if (!litmus) return fail(res, 404, 'Litmus not found');
         if (!isOwner(litmus, req)) return fail(res, 403, 'Only the creator can delete this litmus');
 
@@ -345,6 +426,7 @@ const deleteLitmus = async (req, res) => {
 
 module.exports = {
     createLitmus,
+    quickCreateLitmus,
     editLitmus,
     listLitmus,
     getLitmusOwner,
@@ -353,5 +435,7 @@ module.exports = {
     submitLitmus,
     getSubmissions,
     reEvaluateSubmission,
+    regenerateLitmus,
+    duplicateLitmus,
     deleteLitmus,
 };

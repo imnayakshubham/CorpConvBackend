@@ -31,6 +31,10 @@ module.exports = {
   LARGE_MSG_THRESHOLD: 3500, // ~1000 tokens — trigger D&C above this
   DC_CHUNK_SIZE: 1800, // ~500 tokens per extraction chunk
 
+  // Monthly AI calls on the free plan. Both the quota middleware and the /quota
+  // endpoints read this, so the number the UI shows is the one we enforce.
+  FREE_MONTHLY_CALLS: num('AI_FREE_MONTHLY_CALLS', 20),
+
   // Default brand name used in user-facing error copy (a plugin may override).
   BRAND_NAME: process.env.HUSH_AI_BRAND || 'Hush AI',
 };

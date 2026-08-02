@@ -23,12 +23,20 @@ const createLitmusBody = z.object({
     max_questions: z.number().int().min(2).max(20).optional(),
 }).strip();
 
+// One-box create: a free-text description that Hush AI turns into the fields above.
+const quickCreateBody = z.object({
+    prompt: z.string()
+        .min(10, 'Tell us a little more about what you are evaluating for')
+        .max(6000, 'That is a lot of text. Trim it to the essentials.'),
+}).strip();
+
 const editLitmusBody = z.object({
     title: z.string().min(3).max(120).optional(),
     needs_description: z.string().min(1).max(4000).optional(),
     evaluation_criteria: criteriaField.optional(),
     max_questions: z.number().int().min(2).max(20).optional(),
-    questions: z.array(questionInput).min(2, 'A litmus needs at least 2 questions').max(20).optional(),
+    // A draft can hold any number while it is being built; publishing is what needs two.
+    questions: z.array(questionInput).max(20).optional(),
     status: z.enum(['draft', 'published', 'archived']).optional(),
     pin_enabled: z.boolean().optional(),
     pins: z.array(pinField).max(10).optional(),
@@ -59,17 +67,19 @@ const listQuery = z.object({
     cursor: z.string().optional(),
 }).strip();
 
-const idParam = z.object({ id: mongoId });
+// Owner routes take a slug or an id, so this only bounds the length.
+const refParam = z.object({ ref: z.string().min(1).max(200) });
 const submissionIdParam = z.object({ submissionId: mongoId });
 const slugParam = z.object({ slug: z.string().min(1).max(200) });
 
 module.exports = {
     createLitmusBody,
+    quickCreateBody,
     editLitmusBody,
     litmusSubmissionBody,
     verifyPinBody,
     listQuery,
-    idParam,
+    refParam,
     submissionIdParam,
     slugParam,
 };

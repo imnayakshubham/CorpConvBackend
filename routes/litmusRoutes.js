@@ -7,6 +7,7 @@ const aiQuota = require('../ai/middleware/aiQuotaMiddleware');
 
 const {
     createLitmus,
+    quickCreateLitmus,
     editLitmus,
     listLitmus,
     getLitmusOwner,
@@ -16,14 +17,17 @@ const {
     getSubmissions,
     reEvaluateSubmission,
     deleteLitmus,
+    duplicateLitmus,
+    regenerateLitmus,
 } = require('../controllers/litmusControllers');
 const {
     createLitmusBody,
+    quickCreateBody,
     editLitmusBody,
     litmusSubmissionBody,
     verifyPinBody,
     listQuery,
-    idParam,
+    refParam,
     submissionIdParam,
     slugParam,
 } = require('../validators/litmusSchemas');
@@ -32,12 +36,15 @@ const router = express.Router();
 
 // ── CRUD / results (owner) ───────────────────────────────────────────────────────────
 router.post('/create', protect, writeLimiter, validate({ body: createLitmusBody }), createLitmus);
+router.post('/quick-create', protect, writeLimiter, validate({ body: quickCreateBody }), quickCreateLitmus);
 router.get('/list', protect, validate({ query: listQuery }), listLitmus);
-router.put('/edit/:id', protect, writeLimiter, validate({ params: idParam, body: editLitmusBody }), editLitmus);
-router.get('/own/:id', protect, validate({ params: idParam }), getLitmusOwner);
-router.get('/submissions/:id', protect, validate({ params: idParam }), getSubmissions);
+router.put('/edit/:ref', protect, writeLimiter, validate({ params: refParam, body: editLitmusBody }), editLitmus);
+router.get('/own/:ref', protect, validate({ params: refParam }), getLitmusOwner);
+router.get('/submissions/:ref', protect, validate({ params: refParam }), getSubmissions);
+router.post('/duplicate/:ref', protect, writeLimiter, validate({ params: refParam }), duplicateLitmus);
+router.post('/regenerate/:ref', protect, writeLimiter, aiQuota, validate({ params: refParam }), regenerateLitmus);
 router.post('/re-evaluate/:submissionId', protect, writeLimiter, aiQuota, validate({ params: submissionIdParam }), reEvaluateSubmission);
-router.delete('/:id', protect, validate({ params: idParam }), deleteLitmus);
+router.delete('/:ref', protect, validate({ params: refParam }), deleteLitmus);
 
 // ── Respondent (public, PIN-gated) ────────────────────────────────────────────────────
 router.post('/verify-pin/:slug', submissionLimiter, validate({ params: slugParam, body: verifyPinBody }), verifyPin);

@@ -1,6 +1,66 @@
 // Supervisor + multi-agent pipelines. Uses only the engine port and plugin hooks, never `ai`.
 // Edit/chat runs the agentic tool loop; large builds run planner → parallel workers → critic
 // → assemble, streamed as the same tool-call wire format the client already reads.
+//
+// ─── topology ─────────────────────────────────────────────────────────────────────
+//
+// handleChat() is the supervisor. It makes ZERO model calls of its own — it observes,
+// routes, and runs:
+//
+//   1. Observe — applyDivideAndConquer() map-reduces an oversized pasted message.
+//   2. Route   — ask plugin.wantsLargeBuild(messages, ctx).
+//   3. Run     — exactly one of two paths, which share nothing but the wire format.
+//
+//                            handleChat()          ← supervisor, 0 model calls
+//                                 │
+//                 ┌───────────────┴───────────────┐
+//        wantsLargeBuild = true          wantsLargeBuild = false
+//                 │                               │
+//        streamBuildPipeline               streamEditLoop
+//                 │                               │
+//          planner  (1 call)              primary + TOOLS
+//                 │                       stepCountIs(MAX_STEPS)
+//          workers  (N, parallel)                 │
+//                 │   ← no tools           web_search is the only
+//          critics  (N, ≤1 revision)       tool with a server execute
+//                 │                               │
+//          plugin.assemble()               onEnd → summarizer
+//                 │                               │
+//          tool-input-available parts             │
+//                 └───────────────┬───────────────┘
+//                                 │
+//                     CLIENT approval gate — applyFn is the executor
+//
+// ─── the agents ───────────────────────────────────────────────────────────────────
+//
+// Nine agent types make model calls. Only ONE of them gets tools.
+//
+//   in a chat turn
+//     extractor        role extract  core/largeInput.js         no tools   N chunks ∥
+//     query rewriter   role fast     tools/shared/webSearch.js  no tools   1 per search
+//     planner          role planner  planBuild()                no tools   1
+//     worker           role primary  generateSection()           no tools   N sections ∥
+//     critic           role critic   critiqueSection()           no tools   N, ≤1 revision
+//     primary loop     role primary  streamEditLoop()           ★ TOOLS    1 stream
+//     summarizer       role summary  refreshRollingSummary()    no tools   1, background
+//   outside the chat path (not plugins, no tool loop)
+//     litmus evaluator  role critic  runners/litmusEvaluator.js
+//     journal reflector role extract runners/reflectJournal.js
+//
+// Roles are logical, not models: adapter/registry.js maps each to "<provider>:<modelId>"
+// from AGENT_* env, so swapping providers touches no callsite here.
+//
+// ─── three constraints, before you design a new plugin ────────────────────────────
+//
+//   1. Only the primary loop agent has tools. Every other agent is one-shot text in,
+//      text out via engine.complete().
+//   2. Build-pipeline sections run in parallel and cannot see each other's output —
+//      they meet only at plugin.assemble(). Sequential multi-stage work where stage 2
+//      consumes stage 1 does NOT fit this path.
+//   3. Workers cannot search the web (no tools, per 1). A stage that needs search calls
+//      the tools/shared/webSearch.js module function directly, bypassing the tool layer,
+//      the way runners/ already does. That is the escape hatch for most "the pipeline
+//      can't do X" cases: a pre-pass runner that lands data in the plugin's context.
 
 const { randomUUID } = require('crypto');
 const {

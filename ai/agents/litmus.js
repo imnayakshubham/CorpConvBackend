@@ -71,9 +71,24 @@ const SUMMARY_SYSTEM =
     'Write 2-4 plain sentences, third person, covering what the litmus is for, the criteria, and the ' +
     'key decisions made about the questions. No preamble, no markdown. Never mention how the assistant works internally.';
 
+// What the one-box create flow pulls out of a free-text description, so someone can
+// describe what they are screening for instead of filling in a form.
+const BRIEF_SPEC = {
+    what: 'an evaluation that screens people against a described need',
+    requiredField: 'needs_description',
+    titleField: 'title',
+    fields: {
+        title: { type: 'string', max: 120, describe: 'a short internal name for this evaluation, a few words' },
+        needs_description: { type: 'string', max: 4000, describe: 'what they are evaluating for and what a strong answer looks like, in 2 to 4 sentences' },
+        evaluation_criteria: { type: 'string[]', max: 20, itemMax: 300, describe: 'the distinct things each response is scored against, 3 to 6 of them, a short phrase each' },
+        max_questions: { type: 'int', min: 2, max: 20, default: 8, describe: 'how many questions to ask' },
+    },
+};
+
 /** @type {import('../types/types').FeaturePlugin} */
 module.exports = {
     key: 'litmus',
+    briefSpec: BRIEF_SPEC,
     domainNoun: 'litmus',
     contextKey: 'litmusContext',
     brandName: 'Hush AI',
