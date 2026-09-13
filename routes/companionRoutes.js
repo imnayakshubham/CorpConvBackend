@@ -35,6 +35,9 @@ router.route('/today')
     .get(protect, ctrl.getToday)
     .patch(protect, writeLimiter, validate({ body: V.updateTodayBody }), ctrl.updateToday);
 
+// The day as the companion sees it, plus the line it opens with.
+router.route('/checkin').get(protect, ctrl.getCheckin);
+
 // Journal (date spine) — entries for a day.
 router.route('/journal')
     .get(protect, validate({ query: V.listQuery }), ctrl.listJournal)

@@ -4,9 +4,11 @@
 // read paths. Uses the codebase's { status, data, message } response envelope and `access`
 // soft-delete. Mirrors the poll controller style.
 
-const { CompanionCapture, CompanionNote, CompanionTask, CompanionPlanDay, CompanionJournal } = require('../models/companionModel');
+const { CompanionCapture, CompanionNote, CompanionTask, CompanionPlanDay, CompanionJournal, CompanionGoal, CompanionHabit } = require('../models/companionModel');
 const { sanitizeRichText } = require('../utils/sanitize');
 const { runJournalReflection } = require('../ai/runners/journalReflectionRunner');
+const engine = require('../ai/adapter');
+const cache = require('../redisClient/cacheHelper');
 
 const fail = (res, code, message) => res.status(code).json({ status: 'Failed', data: null, message });
 const ok = (res, data, message = 'Success', code = 200) => res.status(code).json({ status: 'Success', data, message });
@@ -157,6 +159,103 @@ const updateToday = async (req, res) => {
         ).lean();
         return ok(res, plan, 'Updated');
     } catch (e) { console.error('updateToday error:', e); return fail(res, 500, 'Something went wrong'); }
+};
+
+
+// ── Check-in ─────────────────────────────────────────────────────────────────────
+// The day as the companion sees it, plus the line it opens with. The line costs one AI call
+// per person per day (cached) and falls back to a plain greeting if the provider is down.
+const OPENING_SYSTEM = [
+    'You are their personal companion inside Hushwork. You know how their week has gone.',
+    'Open the day the way a trusted colleague would: one or two short sentences, then stop.',
+    'Say something specific from their day by name, or say something small and ordinary. Never a generic opener.',
+    'Never say "How can I assist you", "I\'d be happy to", "Certainly", and never list what you can do.',
+    'Use contractions. No exclamation marks, no emoji, no markdown, no em dashes.',
+    'You do not have to ask a question. Vary how you open from day to day.',
+    'If they have been away, welcome them back and move on. Never count missed days, never shame.',
+    'Never mention being an AI or how you work.',
+].join(' ');
+
+function yesterdayOf(day) {
+    const d = new Date(`${day}T00:00:00`);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
+
+async function buildDayContext(userId, date) {
+    const yesterday = yesterdayOf(date);
+    const [plan, todayTasks, yesterdayTasks, goals, habits, inboxCount, journals, moodDays] = await Promise.all([
+        CompanionPlanDay.findOne({ user: userId, date }).lean(),
+        CompanionTask.find({ user: userId, access: true, day: date }).limit(50).lean(),
+        CompanionTask.find({ user: userId, access: true, day: yesterday, status: 'todo' }).limit(20).lean(),
+        CompanionGoal.find({ user: userId, access: true, status: 'active' }).limit(10).lean(),
+        CompanionHabit.find({ user: userId, access: true }).limit(20).lean(),
+        CompanionCapture.countDocuments({ user: userId, access: true, status: 'inbox' }),
+        CompanionJournal.find({ user: userId, access: true }).sort({ day: -1 }).limit(1).lean(),
+        CompanionPlanDay.find({ user: userId, mood: { $ne: null } }).sort({ date: -1 }).limit(7).lean(),
+    ]);
+
+    const journal = journals[0];
+    return {
+        date,
+        intention: plan?.intention || '',
+        mood: plan?.mood || null,
+        todayTasks: todayTasks.map((t) => ({ title: t.title, status: t.status, energy: t.energy })),
+        yesterdayUnfinished: yesterdayTasks.map((t) => t.title),
+        activeGoals: goals.map((g) => ({ title: g.title, obstacle: g.obstacle || null })),
+        habitsDue: habits.filter((h) => !(h.logs || []).includes(date)).map((h) => ({
+            title: h.title,
+            doneThisWeek: (h.logs || []).filter((d) => d > yesterdayOf(yesterdayOf(date))).length,
+            targetPerWeek: h.targetPerWeek,
+        })),
+        inboxCount,
+        latestJournal: journal ? { day: journal.day, emotions: journal.emotions || [], themes: journal.themes || [] } : null,
+        moodTrend: moodDays.map((d) => ({ day: d.date, mood: d.mood })),
+        lastActiveDay: moodDays[0]?.date || null,
+    };
+}
+
+function describeDay(ctx) {
+    return [
+        `Date: ${ctx.date}`,
+        `Mood logged today: ${ctx.mood || 'none yet'}`,
+        `Intention today: ${ctx.intention || 'none set'}`,
+        `Tasks today: ${ctx.todayTasks.map((t) => `${t.title} (${t.status})`).join(', ') || 'none'}`,
+        `Left unfinished yesterday: ${ctx.yesterdayUnfinished.join(', ') || 'nothing'}`,
+        `Active goals: ${ctx.activeGoals.map((g) => g.title).join(', ') || 'none'}`,
+        `Habits not yet done today: ${ctx.habitsDue.map((h) => `${h.title} ${h.doneThisWeek}/${h.targetPerWeek}`).join(', ') || 'none'}`,
+        `Untriaged captures waiting: ${ctx.inboxCount}`,
+        `Recent moods: ${ctx.moodTrend.map((m) => `${m.day} ${m.mood}`).join(', ') || 'none recorded'}`,
+        ctx.latestJournal ? `Last journal ${ctx.latestJournal.day}, feelings: ${ctx.latestJournal.emotions.join(', ') || 'unclear'}` : 'No journal entries yet',
+    ].join('\n');
+}
+
+const getCheckin = async (req, res) => {
+    try {
+        const date = (req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)) ? req.query.date : todayStr();
+        const context = await buildDayContext(req.user._id, date);
+
+        const key = cache.generateKey('companion', 'checkin', String(req.user._id), date);
+        const cached = await cache.get(key).catch(() => null);
+        if (cached) return ok(res, { context, opening: cached });
+
+        let opening = '';
+        try {
+            const result = await engine.complete({
+                role: 'summary',
+                system: OPENING_SYSTEM,
+                prompt: describeDay(context),
+                temperature: 0.8,
+                maxOutputTokens: 120,
+            });
+            opening = (result.text || '').trim().slice(0, 400);
+        } catch (e) {
+            console.error('getCheckin opening failed:', e.message);
+        }
+        if (opening) await cache.set(key, opening, 60 * 60 * 12).catch(() => {});
+
+        return ok(res, { context, opening: opening || 'Hey. What are we doing today?' });
+    } catch (e) { console.error('getCheckin error:', e); return fail(res, 500, 'Something went wrong'); }
 };
 
 // ── Journal ──────────────────────────────────────────────────────────────────────
@@ -366,7 +465,7 @@ module.exports = {
     createCapture, listCaptures,
     createTask, listTasks, updateTask, deleteTask,
     createNote, listNotes, updateNote, deleteNote,
-    getToday, updateToday,
+    getToday, updateToday, getCheckin,
     createJournal, listJournal, updateJournal, deleteJournal, reflectJournalEntry,
     getResurface, updateCapture,
     search,
