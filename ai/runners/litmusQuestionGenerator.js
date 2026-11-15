@@ -7,6 +7,7 @@ const engine = require('../adapter');
 const { extractJson } = require('../core/json');
 const { PAGE_MAX_OUTPUT_TOKENS } = require('../core/config');
 const { Litmus } = require('../../models/litmusModel');
+const { revalidateFrontend } = require('../../utils/frontendRevalidate');
 
 const SYSTEM = [
     'You build EVALUATIONS: short question sets that test how well each respondent fits a described need.',
@@ -106,6 +107,8 @@ async function generateQuestions(litmus) {
     } catch (err) {
         console.error('[litmus] generateQuestions error:', err.message);
         await Litmus.updateOne({ _id: litmus._id }, { generation_status: 'failed' }).catch(() => {});
+    } finally {
+        revalidateFrontend('litmus');
     }
 }
 

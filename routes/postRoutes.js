@@ -11,13 +11,17 @@ const {
   postIdParam,
 } = require("../validators/postSchemas");
 
+const { revalidateOnSuccess } = require("../utils/frontendRevalidate");
+
 const router = express.Router();
 
-router.route("/create").post(protect, validate({ body: createPostBody }), createPost);
+const revalidatePosts = revalidateOnSuccess((req) => ["posts", "sitemap", `post:${req.body?._id}`]);
+
+router.route("/create").post(protect, validate({ body: createPostBody }), revalidatePosts, createPost);
 router.route("/all-posts").get(validate({ query: fetchPostsQuery }), fetchPosts);
 router.route("/upvote").post(protect, validate({ body: upVotePostBody }), upVotePost);
-router.route("/update").post(protect, validate({ body: updatePostBody }), updatePost);
-router.route("/delete").post(protect, validate({ body: deletePostBody }), deletePost);
+router.route("/update").post(protect, validate({ body: updatePostBody }), revalidatePosts, updatePost);
+router.route("/delete").post(protect, validate({ body: deletePostBody }), revalidatePosts, deletePost);
 router.route("/categories").get(getCategories);
 router.route("/:id").get(validate({ params: postIdParam }), getPost);
 

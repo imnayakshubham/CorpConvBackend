@@ -1,33 +1,66 @@
-const cron = require("cron")
 const https = require("https")
-const getRedisInstance = require("./redisClient/redisClient")
+const {
+    IDLE_THRESHOLD_MS,
+    KEEPALIVE_HEADER,
+    getLastActiveAt,
+    getRedisLastActiveAt,
+    ensureRedisHeartbeat,
+    markActive,
+} = require("./utils/serviceActivity")
 
-const job = new cron.CronJob('*/14 * * * *', async () => {
+let timer = null
+
+const pingSelf = () => {
     const backendUrl = process.env.BACKEND_URL
-    console.log("Cron Running....")
-
-    https.get(backendUrl, (res) => {
-        if (res.statusCode === 200) {
-            console.log("Server Restarted.....")
-        } else {
-            console.error(`failed to restart server with status code: ${res.statusCode}`)
-        }
-    }).on("error", (error) => {
-        console.error(`Error while Restarting Server : ${error.message}`)
-    })
-
-    try {
-        const redis = getRedisInstance()
-        if (redis) {
-            await redis.ping()
-            console.log("Redis pinged successfully.")
-        }
-    } catch (error) {
-        console.error(`Error while pinging Redis: ${error.message}`)
+    if (!backendUrl) {
+        console.error("Keep-alive ping skipped: BACKEND_URL is not set.")
+        return
     }
-})
 
+    https.get(backendUrl, { headers: { [KEEPALIVE_HEADER]: "1" }, timeout: 10000 }, (res) => {
+        res.resume()
+        if (res.statusCode < 400) {
+            console.log("Keep-alive ping sent.")
+        } else {
+            console.error(`Keep-alive ping failed with status code: ${res.statusCode}`)
+        }
+    })
+        .on("timeout", function () { this.destroy(new Error("timed out")) })
+        .on("error", (error) => {
+            console.error(`Keep-alive ping error: ${error.message}`)
+        })
+}
+
+const scheduleNext = (delayMs) => {
+    timer = setTimeout(tick, Math.max(delayMs, 1000))
+    timer.unref()
+}
+
+const msUntilIdle = () => getLastActiveAt() + IDLE_THRESHOLD_MS - Date.now()
+
+async function tick() {
+    try {
+        await ensureRedisHeartbeat()
+        if (msUntilIdle() > 0) return
+
+        const redisLastActiveAt = await getRedisLastActiveAt()
+        if (redisLastActiveAt) markActive(redisLastActiveAt)
+        if (msUntilIdle() > 0) return
+
+        markActive()
+        pingSelf()
+    } catch (error) {
+        console.error(`Keep-alive check error: ${error.message}`)
+    } finally {
+        scheduleNext(msUntilIdle() > 0 ? msUntilIdle() : IDLE_THRESHOLD_MS)
+    }
+}
+
+const start = () => {
+    if (timer) return
+    scheduleNext(IDLE_THRESHOLD_MS)
+}
 
 module.exports = {
-    job
+    start
 }

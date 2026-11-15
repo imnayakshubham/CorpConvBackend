@@ -22,15 +22,19 @@ const {
     pollSlugParam,
 } = require('../validators/pollSchemas');
 
+const { revalidateOnSuccess } = require('../utils/frontendRevalidate');
+
 const router = express.Router();
+
+const revalidatePolls = revalidateOnSuccess(['polls', 'sitemap']);
 
 // Static routes first to avoid conflict with /:slug
 router.route('/').get(optionalAuth, validate({ query: getPollsQuery }), getPolls);
-router.route('/create').post(protect, writeLimiter, validate({ body: createPollBody }), createPoll);
+router.route('/create').post(protect, writeLimiter, validate({ body: createPollBody }), revalidatePolls, createPoll);
 router.route('/vote/:id').post(optionalAuth, submissionLimiter, validate({ params: pollIdParam, body: castVoteBody }), castVote);
-router.route('/settings/:id').patch(protect, writeLimiter, validate({ params: pollIdParam, body: updatePollSettingsBody }), updatePollSettings);
+router.route('/settings/:id').patch(protect, writeLimiter, validate({ params: pollIdParam, body: updatePollSettingsBody }), revalidatePolls, updatePollSettings);
 router.route('/verify-pin/:id').post(submissionLimiter, validate({ params: pollIdParam, body: verifyPinBody }), verifyPin);
-router.route('/delete/:id').delete(protect, validate({ params: pollIdParam }), deletePoll);
+router.route('/delete/:id').delete(protect, validate({ params: pollIdParam }), revalidatePolls, deletePoll);
 router.route('/analytics/:id').get(protect, validate({ params: pollIdParam }), getPollAnalytics);
 
 // Dynamic slug route last

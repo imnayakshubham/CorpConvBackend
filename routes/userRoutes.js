@@ -40,7 +40,11 @@ const {
 const secondaryEmailRoutes = require('./secondaryEmailRoutes');
 const backupCodeRoutes = require('./backupCodeRoutes');
 
+const { revalidateOnSuccess } = require("../utils/frontendRevalidate");
+
 const router = express.Router();
+
+const revalidateProfile = revalidateOnSuccess((req) => ["users", `user:${String(req.user?._id)}`, `username:${req.user?.username}`]);
 
 router.route("/user").get(protect, validate({ query: searchQuery }), allUsers);
 // Analytics routes (must be before /user/:id to avoid route conflict)
@@ -53,7 +57,7 @@ router.get("/chat-users", protect, getChatUsers);
 router.post("/auth", authLimiter, validate({ body: authUserBody }), authUser);
 router.route("/users").post(validate({ body: fetchUsersBody }), fetchUsers);
 router.route("/logout").post(protect, logout);
-router.route("/update-profile").post(protect, validate({ body: updateUserProfileBody }), updateUserProfile);
+router.route("/update-profile").post(protect, validate({ body: updateUserProfileBody }), revalidateProfile, updateUserProfile);
 
 router.route("/send-follow-request").post(protect, validate({ body: sendFollowRequestBody }), sendFollowRequest);
 router.route("/accept-follow-request").post(protect, validate({ body: acceptRejectFollowBody }), acceptFollowRequest);
@@ -65,8 +69,8 @@ router.route("/sessions/revoke").post(protect, validate({ body: revokeSessionBod
 router.route("/sessions/revoke-all").post(protect, validate({ body: revokeAllSessionsBody }), revokeAllSessions);
 
 // Avatar and QR Code Configuration
-router.route("/update-avatar").post(protect, validate({ body: updateAvatarConfigBody }), updateAvatarConfig);
-router.route("/update-qr-config").post(protect, validate({ body: updateQRConfigBody }), updateQRConfig);
+router.route("/update-avatar").post(protect, validate({ body: updateAvatarConfigBody }), revalidateProfile, updateAvatarConfig);
+router.route("/update-qr-config").post(protect, validate({ body: updateQRConfigBody }), revalidateProfile, updateQRConfig);
 
 // Profile view tracking
 router.route("/track-profile-view/:id").post(optionalAuth, trackingLimiter, validate({ params: userIdParam }), trackProfileView);

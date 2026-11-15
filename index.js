@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
+const compression = require("compression");
 const connectDB = require("./config/db");
 const { globalLimiter } = require("./middleware/rateLimiter");
 const { stripAllHtml } = require("./utils/sanitize");
@@ -52,9 +53,9 @@ const notificationService = require("./utils/notificationService");
 const questionModel = require("./models/questionModel");
 const questionAnswerModel = require("./models/questionAnswerModel");
 const { default: mongoose } = require("mongoose");
-const { job } = require("./restartServerCron");
+const keepAlive = require("./restartServerCron");
+const { trackServiceActivity } = require("./utils/serviceActivity");
 const { job: aiQuotaResetJob } = require("./ai/scripts/resetMonthlyAiQuota");
-const getRedisInstance = require("./redisClient/redisClient");
 const cache = require("./redisClient/cacheHelper");
 const TTL = require("./redisClient/cacheTTL");
 
@@ -86,6 +87,7 @@ const { getAuth } = require("./utils/auth");
 const app = express();
 
 app.set('trust proxy', 1);
+app.use(trackServiceActivity);
 
 
 const allowedOrigins = (process.env.ALLOW_ORIGIN || "").split(",").map(o => o.trim()).filter(o => o.length > 0);
@@ -116,6 +118,17 @@ app.use(helmet({
   referrerPolicy: { policy: 'no-referrer' },
   // noSniff, frameguard, xssFilter remain on (helmet defaults).
 }));
+// Responses carrying secrets stay uncompressed (BREACH mitigation).
+const NEVER_COMPRESS_PATH_PREFIXES = ["/api/auth", "/api/backup-codes", "/api/secondary-email"];
+
+app.use(compression({
+  filter: (req, res) => {
+    if (NEVER_COMPRESS_PATH_PREFIXES.some((prefix) => req.path.startsWith(prefix))) return false;
+    // Hush AI streams (SSE) must reach the client chunk by chunk, so they are never buffered.
+    if (String(res.getHeader("Content-Type") || "").includes("text/event-stream")) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(globalLimiter);
 
 // The Hush AI conversation transcript is legitimately larger than any other payload, so it
@@ -127,7 +140,7 @@ app.use((req, res, next) => (isConversationSave(req) ? conversationJson : genera
 app.use(express.urlencoded({ extended: true, limit: GENERAL_MAX_BODY_BYTES }));
 
 if (process.env.APP_ENV === "PROD") {
-  job.start()
+  keepAlive.start();
   aiQuotaResetJob.start();
 }
 
@@ -219,7 +232,7 @@ async function startServer() {
   });
   initializeSocket(server);
 
-  const redis = getRedisInstance();
+  const redis = cache.getRedis();
   if (redis) {
     redis.ping()
       .then(() => console.log('Redis ping successful'))

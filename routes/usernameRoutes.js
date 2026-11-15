@@ -5,6 +5,8 @@ const validate = require("../middleware/validate");
 const { usernameCheckLimiter, usernameWriteLimiter } = require("../middleware/rateLimiter");
 const { setUsernameBody, checkUsernameQuery } = require("../validators/usernameSchemas");
 
+const { revalidateOnSuccess } = require("../utils/frontendRevalidate");
+
 const router = express.Router();
 
 // GET /api/username/check?username=<name>
@@ -23,6 +25,15 @@ router.patch(
   protect,
   usernameWriteLimiter,
   validate({ body: setUsernameBody }),
+  revalidateOnSuccess((req) => [
+    "users",
+    "sitemap",
+    `user:${String(req.user?._id)}`,
+    `username:${req.user?.username}`,
+    `bento:${req.user?.username}`,
+    `username:${String(req.body?.username || "").toLowerCase()}`,
+    `bento:${String(req.body?.username || "").toLowerCase()}`,
+  ]),
   setUsername
 );
 

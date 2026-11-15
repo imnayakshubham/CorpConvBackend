@@ -14,14 +14,18 @@ const {
   tagsQuery,
 } = require("../validators/surveySchemas");
 
+const { revalidateOnSuccess } = require("../utils/frontendRevalidate");
+
 const router = express.Router();
 
-router.route("/create-survey").post(protect, validate({ body: createSurveyBody }), createSurvey);
+const revalidateSurveys = revalidateOnSuccess((req) => ["surveys", "sitemap", `survey:${req.params?.id}`]);
+
+router.route("/create-survey").post(protect, validate({ body: createSurveyBody }), revalidateSurveys, createSurvey);
 router.route("/survey-list").get(optionalAuth, validate({ query: listSurveysQuery }), listSurveys);
 router.route("/tags").get(optionalAuth, validate({ query: tagsQuery }), getAvailableTags);
-router.route("/:id").delete(protect, validate({ params: surveyIdParam }), archiveSurvey);
-router.route("/unpublish/:id").put(protect, validate({ params: surveyIdParam }), unpublishSurvey);
-router.route("/edit/:id").put(protect, validate({ params: surveyIdParam, body: editSurveyBody }), editSurvey);
+router.route("/:id").delete(protect, validate({ params: surveyIdParam }), revalidateSurveys, archiveSurvey);
+router.route("/unpublish/:id").put(protect, validate({ params: surveyIdParam }), revalidateSurveys, unpublishSurvey);
+router.route("/edit/:id").put(protect, validate({ params: surveyIdParam, body: editSurveyBody }), revalidateSurveys, editSurvey);
 
 // Analytics routes
 router.route("/track-view/:id").post(trackingLimiter, validate({ params: surveyIdParam }), trackSurveyView);
